@@ -11,8 +11,8 @@ import { createAdapter } from '@playroom/adapters';
 import type { Pool } from 'pg';
 import { makePool } from './db.js';
 import { RoomBus } from './bus.js';
-import { runAgentTurn, summonedAdapterId } from './agent.js';
-import { appendMessage, createRoom, eventsAfter, getRoom, lastSeq } from './events.js';
+import { eventsAfter, getRoom, lastSeq } from './events.js';
+import { executeCommand, type CommandDeps } from './commands/index.js';
 
 export interface BuildOptions {
   databaseUrl?: string;
@@ -22,20 +22,6 @@ export interface BuildOptions {
 
 const WS_OPEN = 1; // ws.WebSocket.OPEN
 const HEARTBEAT_MS = 15_000;
-
-// author is a free-text display name for now — there is no auth, principal, or
-// roster yet (that is S1.1). Do not treat it as an identity.
-function slugify(raw: string): string {
-  const s = raw
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return s || genId();
-}
-
-function genId(): string {
-  return `room-${crypto.randomUUID().slice(0, 8)}`;
-}
 
 export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   const app = Fastify();
@@ -47,6 +33,18 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   const db = (): Pool => {
     if (!pool) throw new Error('DATABASE_URL is not configured');
     return pool;
+  };
+
+  // Every room mutation flows through executeCommand (ADR-004). `pool` is a getter
+  // so a missing DATABASE_URL fails exactly as before; `execute` lets a command
+  // re-enter the entry (postMessage → triggerAgentTurn) without a circular import.
+  const deps: CommandDeps = {
+    get pool() {
+      return db();
+    },
+    bus,
+    adapterFactory,
+    execute: (ctx, command) => executeCommand(ctx, command, deps),
   };
 
   app.register(fastifyWebsocket);
@@ -67,10 +65,15 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // POST /rooms { id?, title } → 201 with the room row (idempotent on id).
     fastify.post('/rooms', async (req, reply) => {
       const body = (req.body ?? {}) as { id?: unknown; title?: unknown };
-      const title =
-        typeof body.title === 'string' && body.title.trim() ? body.title.trim() : 'Untitled room';
-      const id = typeof body.id === 'string' && body.id.trim() ? slugify(body.id) : genId();
-      const room = await createRoom(db(), id, title);
+      const room = await executeCommand(
+        { actorId: 'anonymous', mode: 'human' },
+        {
+          kind: 'createRoom',
+          id: typeof body.id === 'string' ? body.id : undefined,
+          title: typeof body.title === 'string' ? body.title : undefined,
+        },
+        deps,
+      );
       reply.code(201);
       return room;
     });
@@ -120,28 +123,14 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
             } catch {
               return; // drop malformed frames — never trust unparsed wire data
             }
-            // §8 ordering law: persist first, fan out only after COMMIT.
-            const event = await appendMessage(
-              db(),
-              roomId,
-              msg.author,
-              msg.client_msg_id,
-              msg.body,
+            // Thin translation: the postMessage command persists, fans out, and
+            // (for a human @claude message) triggers the agent turn — all through
+            // the single entry (ADR-004). The send path stays serialized per socket.
+            await executeCommand(
+              { actorId: msg.author, mode: 'human' },
+              { kind: 'postMessage', roomId, clientMsgId: msg.client_msg_id, body: msg.body },
+              deps,
             );
-            bus.publish(roomId, event);
-
-            // A human @claude message summons an agent; its turn streams as its
-            // own events (ADR-003). Fire-and-forget so the send path stays fast.
-            const summoned = summonedAdapterId(event);
-            if (summoned) {
-              void runAgentTurn({
-                pool: db(),
-                bus,
-                roomId,
-                adapterId: summoned,
-                adapterFactory,
-              }).catch((err) => app.log.error(err));
-            }
           })
           .catch((err) => app.log.error(err));
       });
