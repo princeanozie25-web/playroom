@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -11,6 +11,53 @@ function socketUrl(roomId, after) {
   return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}`;
 }
 
+// Reduce the raw seq-ordered events into render items. Agent turn events collapse
+// into a single bubble keyed by turn_id: deltas append while streaming, completed
+// sets the authoritative text + telemetry. Replaying deltas on resume rebuilds the
+// same text — deduped upstream on seq, so nothing is doubled.
+function buildItems(events) {
+  const turns = new Map();
+  const order = [];
+  for (const ev of events) {
+    if (ev.event_type === 'message') {
+      order.push({
+        kind: 'message',
+        key: `m${ev.seq}`,
+        author: ev.actor_id,
+        body: ev.payload?.body ?? '',
+      });
+    } else if (ev.event_type === 'agent.turn.started') {
+      const turn = {
+        kind: 'agent',
+        key: `t${ev.payload.turn_id}`,
+        adapter_id: ev.payload.adapter_id,
+        text: '',
+        streaming: true,
+      };
+      turns.set(ev.payload.turn_id, turn);
+      order.push(turn);
+    } else if (ev.event_type === 'agent.turn.delta') {
+      const turn = turns.get(ev.payload.turn_id);
+      if (turn) turn.text += ev.payload.text;
+    } else if (ev.event_type === 'agent.turn.completed') {
+      const p = ev.payload;
+      let turn = turns.get(p.turn_id);
+      if (!turn) {
+        turn = { kind: 'agent', key: `t${p.turn_id}`, adapter_id: p.adapter_id, text: '' };
+        turns.set(p.turn_id, turn);
+        order.push(turn);
+      }
+      turn.text = p.text;
+      turn.streaming = false;
+      turn.success = p.success;
+      turn.tokens_in = p.tokens_in;
+      turn.tokens_out = p.tokens_out;
+      turn.cost_usd = p.cost_usd;
+    }
+  }
+  return order;
+}
+
 export default function RoomPage() {
   const params = useParams();
   const roomId = String(params.id ?? '');
@@ -18,6 +65,8 @@ export default function RoomPage() {
   const [status, setStatus] = useState('connecting');
   const [author, setAuthor] = useState('');
   const [body, setBody] = useState('');
+
+  const items = useMemo(() => buildItems(events), [events]);
 
   const wsRef = useRef(null);
   const lastSeqRef = useRef(0); // last seq seen — the resume cursor
@@ -98,11 +147,27 @@ export default function RoomPage() {
         room / {roomId}
       </h1>
       <ul className="messages">
-        {events.map((ev) => (
-          <li key={ev.seq}>
-            <strong>{ev.actor_id}</strong> {ev.payload.body}
-          </li>
-        ))}
+        {items.map((it) =>
+          it.kind === 'message' ? (
+            <li key={it.key}>
+              <strong>{it.author}</strong> {it.body}
+            </li>
+          ) : (
+            <li key={it.key}>
+              <strong>{it.adapter_id}</strong> {it.text}
+              {it.streaming && <span style={{ opacity: 0.5 }}>▍</span>}
+              {!it.streaming && it.success === false && (
+                <span style={{ color: DOT.closed }}> ⚠ error</span>
+              )}
+              {!it.streaming && (it.tokens_in != null || it.cost_usd != null) && (
+                <div style={{ fontSize: 12, opacity: 0.55 }}>
+                  {it.tokens_in != null ? `${it.tokens_in}→${it.tokens_out} tok` : ''}
+                  {it.cost_usd != null ? ` · $${it.cost_usd}` : ''}
+                </div>
+              )}
+            </li>
+          ),
+        )}
       </ul>
       <form onSubmit={onSubmit} style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <input
