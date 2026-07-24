@@ -1,0 +1,9 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# esbuild ships a native binary via a postinstall build script; it backs vitest
+# and tsx (both dev deps). Approve it so `pnpm install` runs the script and exits
+# 0 on CI and fresh clones instead of blocking on it.
+allowBuilds:
+  esbuild: true

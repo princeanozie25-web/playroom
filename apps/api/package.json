@@ -1,0 +1,13 @@
+{
+  "name": "@playroom/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@playroom/shared": "workspace:*",
+    "fastify": "^5.2.0"
+  }
+}

@@ -1,0 +1,6 @@
+# Generated / machine-authored — not hand-formatted.
+node_modules
+dist
+coverage
+.next
+pnpm-lock.yaml

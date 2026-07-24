@@ -1,0 +1,5 @@
+#!/bin/sh
+# Playroom pre-commit hook: no red tree gets committed.
+# Never bypass with --no-verify (see CONTRIBUTING.md).
+set -e
+pnpm verify
