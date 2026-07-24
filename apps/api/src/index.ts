@@ -1,4 +1,7 @@
+import { loadRootEnv } from './env.js';
 import { buildServer } from './server.js';
+
+loadRootEnv();
 
 const port = Number(process.env.PORT ?? 3001);
 const app = buildServer();

@@ -32,3 +32,12 @@ git config core.hooksPath hooks
 ```
 
 Then `pnpm install` and `pnpm verify` must both be green before you write anything.
+
+## Database
+
+The integration tests need Postgres. Copy `.env.example` to `.env` and set
+`DATABASE_URL` / `TEST_DATABASE_URL` (a hosted Postgres, or a local one via
+`infra/docker-compose.yml` once it exists). After Postgres is up, run `pnpm migrate`
+once — it applies `infra/migrations/*.sql` to the dev and `playroom_test` databases.
+Then `pnpm verify` runs the full suite, integration tests included. CI stands up a
+`postgres:16` service and runs `pnpm migrate` before `pnpm verify`.
