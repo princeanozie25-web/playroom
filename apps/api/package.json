@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@types/pg": "^8.11.10",
+    "@types/ws": "^8.5.12",
     "ws": "^8.18.0"
   }
 }

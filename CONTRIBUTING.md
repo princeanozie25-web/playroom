@@ -11,6 +11,12 @@ advice — it is how the repo stays trustworthy from commit one.
   hand-editing, the slice was shaped wrong.
 - **In-hook green commits — never bypass with `--no-verify`.** The pre-commit hook runs
   `pnpm verify`; a red tree does not get committed.
+- **Typecheck coverage is total — `tsc -b` sees every `.ts`/`.tsx`, tests included.** App
+  code, packages, and test suites are all reachable from the root `tsconfig.json`
+  references. A source area the root build can't reach (a new app, a test tree outside a
+  referenced project) is a defect: wire it in so a type error anywhere fails `pnpm verify`,
+  never just `next build` or the editor. Narrow discriminated unions with type predicates,
+  not casts — a test that reaches a member's payload proves the member, it doesn't assert it.
 - **No implementation agent commits outside an authorizing brief.** If it isn't in the
   brief, it isn't in the commit.
 - **Every slice ends with something a camera can see** (roadmap §11.1).
@@ -49,3 +55,12 @@ pinned to `0.33.0`, installed **globally** and developer-local. It is **never** 
 dependency and never appears in any `package.json`. All browser verification is
 localhost-scoped (`--allowed-domains "localhost,127.0.0.1"`); its artifacts
 (`agent-browser.json`, `*.har`) are gitignored and screenshots go outside the repo.
+
+- **Scratch harnesses live outside the repo tree.** One-off measurement or exploration
+  scripts (latency probes, load generators, corpus scratchers) are written to a scratch
+  directory outside the working tree and never committed. If a harness earns a permanent
+  home it graduates into `scripts/` deliberately, reviewed like any other code.
+- **Export derived data before deleting a scratch harness.** When a throwaway harness
+  produces numbers you will cite — a latency table, a measurement an ADR rests on —
+  extract the results into the ADR or a committed artifact first. Once the harness is gone
+  the raw run is gone; a claim must never outlive the evidence for it.

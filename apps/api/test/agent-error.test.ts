@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   Client,
+  expectEvent,
   factoryFor,
   httpCreateRoom,
   startTestServer,
@@ -37,7 +38,7 @@ describe('agent error handling', () => {
     c.send('@claude boom', 'err-1', 'carol');
     await c.waitForType('agent.turn.completed');
 
-    const completed = c.ofType('agent.turn.completed')[0];
+    const completed = expectEvent(c.ofType('agent.turn.completed')[0], 'agent.turn.completed');
     expect(completed.payload.success).toBe(false);
     expect(completed.payload.error_class).toBeTruthy();
 

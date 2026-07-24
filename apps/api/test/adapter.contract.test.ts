@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   Client,
+  expectEvent,
   factoryFor,
   httpCreateRoom,
   scriptedAdapter,
@@ -40,7 +41,10 @@ describe('agent turn contract', () => {
     c.send('@claude hi', 'm1', 'alice');
     await c.waitForType('agent.turn.completed');
 
-    const agent = c.events.filter((e) => e.event_type.startsWith('agent.turn'));
+    const agent = c.events.filter(
+      (e): e is Extract<typeof e, { event_type: `agent.turn.${string}` }> =>
+        e.event_type.startsWith('agent.turn'),
+    );
     const kinds = agent.map((e) => e.event_type);
     expect(kinds[0]).toBe('agent.turn.started');
     expect(kinds.at(-1)).toBe('agent.turn.completed');
@@ -49,11 +53,12 @@ describe('agent turn contract', () => {
     const seqs = agent.map((e) => e.seq);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
 
-    const completed = c.ofType('agent.turn.completed')[0];
+    const completed = expectEvent(c.ofType('agent.turn.completed')[0], 'agent.turn.completed');
     expect(completed.payload.text).toBe('Hello.');
     expect(completed.payload.success).toBe(true);
     // every agent event shares the started turn's id
-    const turnId = c.ofType('agent.turn.started')[0].payload.turn_id;
+    const turnId = expectEvent(c.ofType('agent.turn.started')[0], 'agent.turn.started').payload
+      .turn_id;
     expect(agent.every((e) => e.payload.turn_id === turnId)).toBe(true);
 
     c.close();

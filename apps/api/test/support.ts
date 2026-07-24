@@ -1,7 +1,12 @@
-import type { AddressInfo } from 'node:net';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { ServerEvent, ServerHello, type ServerEvent as ServerEventT } from '@playroom/shared';
+import {
+  ServerEvent,
+  ServerHello,
+  type AgentAdapter,
+  type AgentTurnChunk,
+  type ServerEvent as ServerEventT,
+} from '@playroom/shared';
 import { loadRootEnv } from '../src/env.js';
 import { buildServer } from '../src/server.js';
 import { makePool } from '../src/db.js';
@@ -30,16 +35,20 @@ export interface TestServer {
 
 export async function startTestServer(
   opts: {
-    adapterFactory?: (id: string) => unknown;
+    adapterFactory?: (id: string) => AgentAdapter;
   } = {},
 ): Promise<TestServer> {
   const app = buildServer({
     databaseUrl: testDbUrl(),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    adapterFactory: opts.adapterFactory as any,
+    adapterFactory: opts.adapterFactory,
   });
   await app.listen({ port: 0, host: '127.0.0.1' });
-  const addr = app.server.address() as AddressInfo;
+  // Narrow, don't cast: a port-0 TCP listen returns an AddressInfo object, never
+  // a string (that's for pipes/UDS) and never null (we just listened).
+  const addr = app.server.address();
+  if (addr === null || typeof addr === 'string') {
+    throw new Error('expected an AddressInfo from a TCP listen');
+  }
   return {
     httpBase: `http://127.0.0.1:${addr.port}`,
     wsBase: `ws://127.0.0.1:${addr.port}`,
@@ -51,9 +60,9 @@ export async function startTestServer(
 // provider call ever happens in the test suite.
 export function scriptedAdapter(
   id: string,
-  chunks: unknown[],
+  chunks: AgentTurnChunk[],
   opts: { delayMs?: number } = {},
-): unknown {
+): AgentAdapter {
   return {
     id,
     async *stream() {
@@ -65,18 +74,18 @@ export function scriptedAdapter(
   };
 }
 
-// A fake adapter whose stream throws — exercises the error path.
-export function throwingAdapter(id: string, message = 'boom'): unknown {
+// A fake adapter whose stream throws — exercises the error path. `async *` alone
+// makes this a generator, so it needs no yield; the first pull throws.
+export function throwingAdapter(id: string, message = 'boom'): AgentAdapter {
   return {
     id,
-    async *stream() {
+    async *stream(): AsyncGenerator<AgentTurnChunk> {
       throw new Error(message);
-      yield; // unreachable; makes this a generator
     },
   };
 }
 
-export function factoryFor(adapter: unknown): (id: string) => unknown {
+export function factoryFor(adapter: AgentAdapter): (id: string) => AgentAdapter {
   return () => adapter;
 }
 
@@ -134,7 +143,14 @@ export class Client {
   }
 
   bodies(): string[] {
-    return this.events.map((e) => e.payload.body);
+    // Only message events carry a body; narrow to them (never read `body` off an
+    // agent-turn payload). Every caller drives a message-only stream, so this is
+    // the same array the old union-wide map produced — just type-checked.
+    return this.events
+      .filter(
+        (e): e is Extract<ServerEventT, { event_type: 'message' }> => e.event_type === 'message',
+      )
+      .map((e) => e.payload.body);
   }
 
   async waitForEvents(count: number, timeoutMs = 15000): Promise<void> {
@@ -180,4 +196,25 @@ export class Client {
   close(): void {
     this.ws.close();
   }
+}
+
+// Shared narrowing helper for the ServerEvent discriminated union. A type
+// predicate — not a cast — does the narrowing, so member payload fields are
+// type-checked rather than asserted away. Throws if the row is the wrong
+// variant: a test asking for the wrong event_type is a test bug, not a soft miss.
+function isEventType<T extends ServerEventT['event_type']>(
+  row: ServerEventT,
+  eventType: T,
+): row is Extract<ServerEventT, { event_type: T }> {
+  return row.event_type === eventType;
+}
+
+export function expectEvent<T extends ServerEventT['event_type']>(
+  row: ServerEventT,
+  eventType: T,
+): Extract<ServerEventT, { event_type: T }> {
+  if (!isEventType(row, eventType)) {
+    throw new Error(`expected event_type ${eventType}, got ${row.event_type}`);
+  }
+  return row;
 }

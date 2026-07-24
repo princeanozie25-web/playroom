@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   Client,
+  expectEvent,
   factoryFor,
   httpCreateRoom,
   scriptedAdapter,
@@ -52,7 +53,7 @@ describe('one in-flight turn per room', () => {
     // The rejected second summon posted one in-thread system notice.
     const notices = c.events.filter((e) => e.event_type === 'message' && e.actor_id === 'system');
     expect(notices.length).toBe(1);
-    expect(notices[0].payload.body).toMatch(/already replying/);
+    expect(expectEvent(notices[0], 'message').payload.body).toMatch(/already replying/);
 
     c.close();
   });
