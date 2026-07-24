@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/shared" },
     { "path": "./packages/adapters" },
-    { "path": "./apps/api" }
+    { "path": "./apps/api" },
+    { "path": "./apps/web/tsconfig.tsbuild.json" }
   ]
 }

@@ -1,33 +1,59 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react';
 import { useParams } from 'next/navigation';
+import type { ClientSend, ServerEvent, ServerHello } from '@playroom/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-const DOT = { open: '#3fb950', connecting: '#d29922', closed: '#f85149' };
 
-function socketUrl(roomId, after) {
+type Status = 'connecting' | 'open' | 'closed';
+const DOT: Record<Status, string> = { open: '#3fb950', connecting: '#d29922', closed: '#f85149' };
+
+function socketUrl(roomId: string, after: number): string {
   const base = API_URL.replace(/^http/, 'ws');
   return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}`;
 }
 
+type MessageItem = { kind: 'message'; key: string; author: string; body: string };
+type AgentItem = {
+  kind: 'agent';
+  key: string;
+  adapter_id: string;
+  text: string;
+  streaming: boolean;
+  success?: boolean;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  cost_usd?: number | null;
+};
+type Item = MessageItem | AgentItem;
+
 // Reduce the raw seq-ordered events into render items. Agent turn events collapse
 // into a single bubble keyed by turn_id: deltas append while streaming, completed
-// sets the authoritative text + telemetry. Replaying deltas on resume rebuilds the
-// same text — deduped upstream on seq, so nothing is doubled.
-function buildItems(events) {
-  const turns = new Map();
-  const order = [];
+// sets the authoritative text + telemetry. Narrowing on event_type gives each
+// branch its exact payload — no casts. Replaying deltas on resume rebuilds the same
+// text (deduped upstream on seq, so nothing is doubled).
+function buildItems(events: ServerEvent[]): Item[] {
+  const turns = new Map<string, AgentItem>();
+  const order: Item[] = [];
   for (const ev of events) {
     if (ev.event_type === 'message') {
       order.push({
         kind: 'message',
         key: `m${ev.seq}`,
         author: ev.actor_id,
-        body: ev.payload?.body ?? '',
+        body: ev.payload.body,
       });
     } else if (ev.event_type === 'agent.turn.started') {
-      const turn = {
+      const turn: AgentItem = {
         kind: 'agent',
         key: `t${ev.payload.turn_id}`,
         adapter_id: ev.payload.adapter_id,
@@ -43,7 +69,13 @@ function buildItems(events) {
       const p = ev.payload;
       let turn = turns.get(p.turn_id);
       if (!turn) {
-        turn = { kind: 'agent', key: `t${p.turn_id}`, adapter_id: p.adapter_id, text: '' };
+        turn = {
+          kind: 'agent',
+          key: `t${p.turn_id}`,
+          adapter_id: p.adapter_id,
+          text: '',
+          streaming: false,
+        };
         turns.set(p.turn_id, turn);
         order.push(turn);
       }
@@ -61,32 +93,35 @@ function buildItems(events) {
 export default function RoomPage() {
   const params = useParams();
   const roomId = String(params.id ?? '');
-  const [events, setEvents] = useState([]);
-  const [status, setStatus] = useState('connecting');
-  const [author, setAuthor] = useState('');
-  const [body, setBody] = useState('');
+  const [events, setEvents] = useState<ServerEvent[]>([]);
+  const [status, setStatus] = useState<Status>('connecting');
+  const [author, setAuthor] = useState<string>('');
+  const [body, setBody] = useState<string>('');
 
-  const items = useMemo(() => buildItems(events), [events]);
+  const items = useMemo<Item[]>(() => buildItems(events), [events]);
 
-  const wsRef = useRef(null);
-  const lastSeqRef = useRef(0); // last seq seen — the resume cursor
-  const seenRef = useRef(new Set());
-  const backoffRef = useRef(500);
-  const timerRef = useRef(null);
-  const stoppedRef = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const lastSeqRef = useRef<number>(0); // last seq seen — the resume cursor
+  const seenRef = useRef<Set<number>>(new Set());
+  const backoffRef = useRef<number>(500);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stoppedRef = useRef<boolean>(false);
 
-  const connect = useCallback(() => {
+  const connect = useCallback((): void => {
     if (!roomId) return;
     setStatus('connecting');
     const ws = new WebSocket(socketUrl(roomId, lastSeqRef.current));
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = (): void => {
       setStatus('open');
       backoffRef.current = 500; // reset backoff after a good connection
     };
-    ws.onmessage = (e) => {
-      let msg;
+    ws.onmessage = (e: MessageEvent): void => {
+      // Wire boundary: JSON.parse returns `any`; assigning it to the union is not a
+      // cast. The server sends validated frames (there is no zod at runtime in the
+      // web app — a dep constraint). We then narrow on the discriminant below.
+      let msg: ServerEvent | ServerHello;
       try {
         msg = JSON.parse(e.data);
       } catch {
@@ -101,14 +136,14 @@ export default function RoomPage() {
       }
       setEvents((prev) => [...prev, msg].sort((a, b) => a.seq - b.seq));
     };
-    ws.onclose = () => {
+    ws.onclose = (): void => {
       setStatus('closed');
       if (stoppedRef.current) return;
       const delay = backoffRef.current;
       backoffRef.current = Math.min(delay * 2, 5000); // 0.5s → 5s cap
       timerRef.current = setTimeout(connect, delay);
     };
-    ws.onerror = () => ws.close();
+    ws.onerror = (): void => ws.close();
   }, [roomId]);
 
   useEffect(() => {
@@ -124,19 +159,18 @@ export default function RoomPage() {
     };
   }, [roomId, connect]);
 
-  const onSubmit = (e) => {
+  const onSubmit = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     const text = body.trim();
     const ws = wsRef.current;
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(
-      JSON.stringify({
-        type: 'send',
-        client_msg_id: crypto.randomUUID(),
-        author: author.trim() || 'anon',
-        body: text,
-      }),
-    );
+    const payload: ClientSend = {
+      type: 'send',
+      client_msg_id: crypto.randomUUID(),
+      author: author.trim() || 'anon',
+      body: text,
+    };
+    ws.send(JSON.stringify(payload));
     setBody('');
   };
 
@@ -173,13 +207,13 @@ export default function RoomPage() {
         <input
           placeholder="you"
           value={author}
-          onChange={(e) => setAuthor(e.target.value)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setAuthor(e.target.value)}
           style={{ width: 100 }}
         />
         <input
           placeholder="message"
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setBody(e.target.value)}
           style={{ flex: 1 }}
         />
         <button type="submit">send</button>

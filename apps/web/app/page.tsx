@@ -1,15 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function Landing() {
   const router = useRouter();
-  const [title, setTitle] = useState('');
-  const [slug, setSlug] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [title, setTitle] = useState<string>('');
+  const [slug, setSlug] = useState<string>('');
+  const [busy, setBusy] = useState<boolean>(false);
 
-  const onSubmit = async (e) => {
+  const onSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setBusy(true);
     try {
@@ -19,7 +19,10 @@ export default function Landing() {
         body: JSON.stringify({ id: slug.trim() || undefined, title: title.trim() || undefined }),
       });
       if (!res.ok) throw new Error(`create failed: ${res.status}`);
-      const room = await res.json();
+      // POST /rooms returns the RoomRow shape; the client needs only `id`. RoomRow
+      // is not exported from @playroom/shared (see FINDING in the closeout), so it
+      // is typed locally here — an any→typed assignment, not a cast.
+      const room: { id: string } = await res.json();
       router.push(`/r/${room.id}`);
     } catch (err) {
       alert(String(err));
