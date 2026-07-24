@@ -1,6 +1,12 @@
 import type { ServerEvent } from '@playroom/shared';
 import type { RoomRow } from '../events.js';
-import { type Command, type CommandContext, type CommandDeps, CommandError } from './context.js';
+import {
+  type Command,
+  type CommandContext,
+  type CommandDeps,
+  type TurnSpans,
+  CommandError,
+} from './context.js';
 import { createRoomCommand } from './createRoom.js';
 import { postMessageCommand } from './postMessage.js';
 import { triggerAgentTurnCommand } from './triggerAgentTurn.js';
@@ -24,7 +30,7 @@ export function executeCommand(
 ): Promise<ServerEvent>;
 export function executeCommand(
   ctx: CommandContext,
-  command: { kind: 'triggerAgentTurn'; roomId: string; adapterId: string },
+  command: { kind: 'triggerAgentTurn'; roomId: string; adapterId: string; spans?: TurnSpans },
   deps: CommandDeps,
 ): Promise<void>;
 export function executeCommand(

@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
@@ -44,19 +45,24 @@ export function summonedAdapterId(event: ServerEvent): string | null {
 // One in-flight agent turn per room (§22b).
 const inFlight = new Set<string>();
 
+// End time of the previous turn in THIS process — lets each turn record the gap
+// since the last one, so cold-start/autosuspend effects are visible (S0.3c).
+let lastTurnEndedAt: number | undefined;
+
 export interface AgentTurnDeps {
   pool: Pool;
   bus: RoomBus;
   roomId: string;
   adapterId: string;
   adapterFactory: (id: string) => AgentAdapter;
+  spans?: { t0: number; t1: number }; // S0.3c: command-entry + message-committed boundaries
 }
 
 // Run an agent turn as a sequence of persisted events: started → deltas →
 // completed. Persist-before-fanout holds for every one (ADR-003). A failure is
 // written as completed{success:false} with an error_class — never a silent hang.
 export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
-  const { pool, bus, roomId, adapterId, adapterFactory } = deps;
+  const { pool, bus, roomId, adapterId, adapterFactory, spans } = deps;
   const publish = (ev: ServerEvent): void => bus.publish(roomId, ev);
 
   // §22b: reject a second concurrent turn with an in-thread notice.
@@ -73,6 +79,19 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     return;
   }
   inFlight.add(roomId);
+
+  // S0.3c latency spans — performance.now() at boundaries only; no write is moved.
+  const enteredAt = performance.now();
+  const msSincePrev =
+    lastTurnEndedAt !== undefined ? Math.round(enteredAt - lastTurnEndedAt) : null;
+  const t0 = spans?.t0 ?? enteredAt; // executeCommand entry
+  const t1 = spans?.t1 ?? enteredAt; // triggering message committed
+  let tStreamInvoked: number | null = null;
+  let tFirstChunk: number | null = null;
+  let tFirstDeltaCommitted: number | null = null;
+  let tFirstFanout: number | null = null;
+  const span = (a: number | null, b: number | null): number | null =>
+    a != null && b != null ? Math.round(a - b) : null;
 
   const { text: sys, hash: promptHash } = systemPrompt();
   const cfg = getAdapterConfig(adapterId);
@@ -93,18 +112,22 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     const messages: AgentMessage[] = await recentMessages(pool, roomId, CONTEXT_MESSAGES);
     const adapter = adapterFactory(adapterId); // may throw (e.g. missing key) → caught below
 
+    tStreamInvoked = performance.now(); // span boundary: stream() about to be invoked
     for await (const chunk of adapter.stream(messages, {
       systemPrompt: sys,
       maxOutputTokens: cfg.max_output_tokens,
     })) {
       if (chunk.kind === 'text_delta') {
+        if (tFirstChunk === null) tFirstChunk = performance.now(); // span: first chunk from the SDK
         assembled += chunk.text;
-        publish(
-          await appendAgentEvent(pool, roomId, adapterId, 'agent.turn.delta', {
-            turn_id: turnId,
-            text: chunk.text,
-          }),
-        );
+        // Same persist-before-fanout sequence, only split to time it (S0.3c).
+        const delta = await appendAgentEvent(pool, roomId, adapterId, 'agent.turn.delta', {
+          turn_id: turnId,
+          text: chunk.text,
+        });
+        if (tFirstDeltaCommitted === null) tFirstDeltaCommitted = performance.now(); // span: first delta committed
+        publish(delta);
+        if (tFirstFanout === null) tFirstFanout = performance.now(); // span: first delta frame written
       } else if (chunk.kind === 'done') {
         tokensIn = chunk.tokens_in;
         tokensOut = chunk.tokens_out;
@@ -113,13 +136,22 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
       }
     }
 
+    const timings: Record<string, number | null> = {
+      t_command: span(t1, t0),
+      t_assemble: span(tStreamInvoked, t1),
+      t_provider_ttft: span(tFirstChunk, tStreamInvoked),
+      t_persist_first: span(tFirstDeltaCommitted, tFirstChunk),
+      t_fanout: span(tFirstFanout, tFirstDeltaCommitted),
+      ttfd_total: span(tFirstFanout, t0),
+      ms_since_prev_turn_in_process: msSincePrev,
+    };
     const cost =
       tokensIn != null && tokensOut != null
         ? Number(costUsd(cfg, tokensIn, tokensOut).toFixed(5))
         : null;
     const latencyMs = Date.now() - startedAt;
     console.log(
-      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms`,
+      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms ttft=${timings.t_provider_ttft}ms ttfd=${timings.ttfd_total}ms`,
     );
 
     publish(
@@ -147,6 +179,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
           prompt_hash: promptHash,
           success: true,
           error_class: null,
+          timings,
         },
       ),
     );
@@ -178,10 +211,12 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
           prompt_hash: promptHash,
           success: false,
           error_class: errorClass,
+          timings: null,
         },
       ),
     );
   } finally {
+    lastTurnEndedAt = performance.now();
     inFlight.delete(roomId);
   }
 }

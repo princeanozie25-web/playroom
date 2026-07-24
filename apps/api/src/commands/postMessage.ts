@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import type { ServerEvent } from '@playroom/shared';
 import { appendMessage } from '../events.js';
 import { summonedAdapterId } from '../agent.js';
@@ -11,6 +12,7 @@ export async function postMessageCommand(
   ctx: CommandContext,
   input: { roomId: string; clientMsgId: string; body: string },
 ): Promise<ServerEvent> {
+  const t0 = performance.now(); // S0.3c span boundary: command entry
   // §8 ordering law: persist first, fan out only after COMMIT.
   const event = await appendMessage(
     deps.pool,
@@ -19,6 +21,7 @@ export async function postMessageCommand(
     input.clientMsgId,
     input.body,
   );
+  const t1 = performance.now(); // S0.3c span boundary: triggering message committed
   deps.bus.publish(input.roomId, event);
 
   const summoned = summonedAdapterId(event);
@@ -26,7 +29,7 @@ export async function postMessageCommand(
     void deps
       .execute(
         { actorId: summoned, mode: 'hosted' },
-        { kind: 'triggerAgentTurn', roomId: input.roomId, adapterId: summoned },
+        { kind: 'triggerAgentTurn', roomId: input.roomId, adapterId: summoned, spans: { t0, t1 } },
       )
       .catch(() => {}); // runAgentTurn writes its own error event; this guards the fire-and-forget
   }

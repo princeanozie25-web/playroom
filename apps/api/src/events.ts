@@ -133,6 +133,7 @@ export interface AgentTelemetry {
   prompt_hash: string | null;
   success: boolean;
   error_class: string | null;
+  timings: Record<string, number | null> | null; // §7 first-token spans (S0.3c), observation-only
 }
 
 // Append an agent turn event (started/delta/completed). Telemetry columns are set
@@ -154,12 +155,13 @@ export async function appendAgentEvent(
     prompt_hash: null,
     success: true,
     error_class: null,
+    timings: null,
   };
   const { rows } = await pool.query<EventRow>(
     `INSERT INTO events
        (room_id, actor_id, event_type, payload,
-        adapter_id, tokens_in, tokens_out, cost_usd, latency_ms, prompt_hash, success, error_class)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        adapter_id, tokens_in, tokens_out, cost_usd, latency_ms, prompt_hash, success, error_class, timings)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING ${EVENT_COLS}`,
     [
       roomId,
@@ -174,6 +176,7 @@ export async function appendAgentEvent(
       t.prompt_hash,
       t.success,
       t.error_class,
+      t.timings ? JSON.stringify(t.timings) : null,
     ],
   );
   return rowToServerEvent(rows[0]);

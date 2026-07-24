@@ -11,11 +11,18 @@ export interface CommandContext {
   mode: 'human' | 'hosted' | 'system' | 'connected' | 'bridged';
 }
 
+// Two latency-span boundaries captured before the turn starts (S0.3c). Optional,
+// observation-only — carried into the turn so t_command/t_assemble land in `timings`.
+export interface TurnSpans {
+  t0: number; // executeCommand entry (performance.now())
+  t1: number; // triggering message row committed
+}
+
 // A room-mutating command. Reads (getRoom, replay) do not pass through the entry.
 export type Command =
   | { kind: 'createRoom'; id?: string; title?: string }
   | { kind: 'postMessage'; roomId: string; clientMsgId: string; body: string }
-  | { kind: 'triggerAgentTurn'; roomId: string; adapterId: string };
+  | { kind: 'triggerAgentTurn'; roomId: string; adapterId: string; spans?: TurnSpans };
 
 // Dependencies the command handlers need. `execute` lets a handler re-enter the
 // single entry (e.g. postMessage triggering an agent turn) so the trigger decision
