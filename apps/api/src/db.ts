@@ -1,8 +1,9 @@
 import { Pool, type PoolConfig } from 'pg';
 
 // Build a pg pool config from a connection URL. Hosted Postgres (Neon) requires
-// TLS; local/CI Postgres does not offer it. We strip libpq-only query params
-// (sslmode, channel_binding) that node-postgres ignores and decide TLS by host.
+// TLS and its certificate is verified strictly (rejectUnauthorized: true — R1);
+// local/CI Postgres offers no TLS. We strip libpq-only query params (sslmode,
+// channel_binding) that node-postgres ignores and decide TLS by host.
 export function pgConfig(databaseUrl: string): PoolConfig {
   const u = new URL(databaseUrl);
   const host = u.hostname;
@@ -11,7 +12,7 @@ export function pgConfig(databaseUrl: string): PoolConfig {
   return {
     connectionString: u.toString(),
     connectionTimeoutMillis: 20000,
-    ...(isLocal ? {} : { ssl: { rejectUnauthorized: false } }),
+    ...(isLocal ? {} : { ssl: { rejectUnauthorized: true } }),
   };
 }
 

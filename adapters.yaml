@@ -1,0 +1,15 @@
+# The ONLY place a provider is named (roadmap §6). Room and API code reference
+# adapters by `id` only — never by provider. Prices are USD per 1,000 tokens.
+#
+# Model + prices resolved 2026-07-24 from Anthropic's docs:
+#   https://platform.claude.com/docs/en/docs/about-claude/pricing
+#   Claude Haiku 4.5 — base input $1/MTok, output $5/MTok (→ /1k below).
+# Haiku 4.5 is chosen for a concise, low-latency room agent (§7 first-token budget).
+adapters:
+  - id: claude-main
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    enabled: true
+    max_output_tokens: 1024
+    cost_per_1k_in: 0.001
+    cost_per_1k_out: 0.005
