@@ -2,8 +2,9 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
-# esbuild ships a native binary via a postinstall build script; it backs vitest
-# and tsx (both dev deps). Approve it so `pnpm install` runs the script and exits
-# 0 on CI and fresh clones instead of blocking on it.
+# Native build scripts approved so `pnpm install` runs them and exits 0 on CI and
+# fresh clones instead of blocking: esbuild backs vitest + tsx; sharp is Next.js's
+# optional image-optimisation binary.
 allowBuilds:
   esbuild: true
+  sharp: true
