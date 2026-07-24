@@ -19,13 +19,20 @@ const flag = (name: string) => process.argv.includes(`--${name}`);
 const opt = (name: string) =>
   process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 
-// Hosted Postgres (Neon) requires TLS. Strip libpq-only query params (sslmode,
-// channel_binding) that node-postgres does not use, and set ssl explicitly.
+// Hosted Postgres (Neon) requires TLS; local/CI Postgres offers none. Strip
+// libpq-only query params (sslmode, channel_binding) that node-postgres ignores,
+// and apply ssl only to non-local hosts (Phase 3 R1 tightens the non-local mode).
 function connFor(url: string) {
   const u = new URL(url);
   const database = u.pathname.replace(/^\//, '');
+  const host = u.hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
   u.search = '';
-  return { connectionString: u.toString(), database, ssl: { rejectUnauthorized: false } };
+  return {
+    connectionString: u.toString(),
+    database,
+    ssl: isLocal ? undefined : { rejectUnauthorized: false },
+  };
 }
 
 async function migrate(url: string): Promise<void> {
