@@ -17,6 +17,12 @@ advice — it is how the repo stays trustworthy from commit one.
 - **Providers are named only inside `packages/adapters/`** (roadmap §2, §6). No provider
   name appears in a room, the fabric, or shared code.
 
+## Provider names: source vs. config
+
+Provider-name rule (§6) applies to source code: the room, fabric, and data model
+never branch on a provider. Deployment config (.env keys, adapters.yaml) is
+exempt and is consumed only by packages/adapters/.
+
 ## Setup
 
 Enable the checked-in git hooks once per clone:
