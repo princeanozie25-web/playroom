@@ -13,15 +13,56 @@ export const ClientSend = z.object({
 export type ClientSend = z.infer<typeof ClientSend>;
 
 // Server → client: a persisted event, replayed on resume and tailed live.
-export const ServerEvent = z.object({
+// Fields common to every event; the discriminator is `event_type`.
+const eventBase = {
   type: z.literal('event'),
   seq: z.number(),
   room_id: z.string(),
   ts: z.string(),
   actor_id: z.string(),
+};
+
+// A human (or system) chat message.
+export const MessageEvent = z.object({
+  ...eventBase,
   event_type: z.literal('message'),
   payload: z.object({ body: z.string() }),
 });
+
+// An agent turn is streamed as: started → many delta → completed. All three
+// share a `turn_id` so the client groups deltas into one bubble and resume
+// reassembles the same text. Deltas are prunable; completed carries the whole.
+export const AgentTurnStarted = z.object({
+  ...eventBase,
+  event_type: z.literal('agent.turn.started'),
+  payload: z.object({ turn_id: z.string(), adapter_id: z.string() }),
+});
+export const AgentTurnDelta = z.object({
+  ...eventBase,
+  event_type: z.literal('agent.turn.delta'),
+  payload: z.object({ turn_id: z.string(), text: z.string() }),
+});
+export const AgentTurnCompleted = z.object({
+  ...eventBase,
+  event_type: z.literal('agent.turn.completed'),
+  payload: z.object({
+    turn_id: z.string(),
+    adapter_id: z.string(),
+    text: z.string(),
+    success: z.boolean(),
+    tokens_in: z.number().nullable(),
+    tokens_out: z.number().nullable(),
+    cost_usd: z.number().nullable(),
+    error_class: z.string().nullable(),
+  }),
+});
+
+export const ServerEvent = z.discriminatedUnion('event_type', [
+  MessageEvent,
+  AgentTurnStarted,
+  AgentTurnDelta,
+  AgentTurnCompleted,
+]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 
 // Server → client: the first frame, carrying the room's high-water sequence.

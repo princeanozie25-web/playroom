@@ -1,0 +1,187 @@
+import { randomUUID, createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { Pool } from 'pg';
+import type { AgentAdapter, AgentMessage, ServerEvent } from '@playroom/shared';
+import { costUsd, getAdapterConfig } from '@playroom/adapters';
+import type { RoomBus } from './bus.js';
+import { appendAgentEvent, appendMessage, recentMessages } from './events.js';
+
+const SUMMON_PREFIX = '@claude';
+const CONTEXT_MESSAGES = 30; // PM7 hard cap — last 30 room messages, nothing more
+
+// The system prompt and its SHA-256, read once from prompts/room-agent.v1.md.
+let promptCache: { text: string; hash: string } | undefined;
+function systemPrompt(): { text: string; hash: string } {
+  if (!promptCache) {
+    const path = fileURLToPath(new URL('../../../prompts/room-agent.v1.md', import.meta.url));
+    const text = readFileSync(path, 'utf8');
+    promptCache = { text, hash: createHash('sha256').update(text).digest('hex') };
+  }
+  return promptCache;
+}
+
+// An actor is an agent iff its id is a known adapter id. Their messages never
+// summon — that is the structural bar against agent-to-agent loops (§22a).
+function isAgentActor(actorId: string): boolean {
+  try {
+    getAdapterConfig(actorId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Crude, temporary summon rule (§22): a human message body starting with @claude
+// summons claude-main. S0.5 replaces this with the real summon rule.
+export function summonedAdapterId(event: ServerEvent): string | null {
+  if (event.event_type !== 'message') return null;
+  if (event.actor_id === 'system') return null;
+  if (isAgentActor(event.actor_id)) return null; // never agent-to-agent (§22a)
+  return event.payload.body.trim().toLowerCase().startsWith(SUMMON_PREFIX) ? 'claude-main' : null;
+}
+
+// One in-flight agent turn per room (§22b).
+const inFlight = new Set<string>();
+
+export interface AgentTurnDeps {
+  pool: Pool;
+  bus: RoomBus;
+  roomId: string;
+  adapterId: string;
+  adapterFactory: (id: string) => AgentAdapter;
+}
+
+// Run an agent turn as a sequence of persisted events: started → deltas →
+// completed. Persist-before-fanout holds for every one (ADR-003). A failure is
+// written as completed{success:false} with an error_class — never a silent hang.
+export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
+  const { pool, bus, roomId, adapterId, adapterFactory } = deps;
+  const publish = (ev: ServerEvent): void => bus.publish(roomId, ev);
+
+  // §22b: reject a second concurrent turn with an in-thread notice.
+  if (inFlight.has(roomId)) {
+    publish(
+      await appendMessage(
+        pool,
+        roomId,
+        'system',
+        `sys-${randomUUID()}`,
+        `${adapterId} is already replying in this room.`,
+      ),
+    );
+    return;
+  }
+  inFlight.add(roomId);
+
+  const { text: sys, hash: promptHash } = systemPrompt();
+  const cfg = getAdapterConfig(adapterId);
+  const turnId = randomUUID();
+  const startedAt = Date.now();
+  let assembled = '';
+  let tokensIn: number | null = null;
+  let tokensOut: number | null = null;
+
+  try {
+    publish(
+      await appendAgentEvent(pool, roomId, adapterId, 'agent.turn.started', {
+        turn_id: turnId,
+        adapter_id: adapterId,
+      }),
+    );
+
+    const messages: AgentMessage[] = await recentMessages(pool, roomId, CONTEXT_MESSAGES);
+    const adapter = adapterFactory(adapterId); // may throw (e.g. missing key) → caught below
+
+    for await (const chunk of adapter.stream(messages, {
+      systemPrompt: sys,
+      maxOutputTokens: cfg.max_output_tokens,
+    })) {
+      if (chunk.kind === 'text_delta') {
+        assembled += chunk.text;
+        publish(
+          await appendAgentEvent(pool, roomId, adapterId, 'agent.turn.delta', {
+            turn_id: turnId,
+            text: chunk.text,
+          }),
+        );
+      } else if (chunk.kind === 'done') {
+        tokensIn = chunk.tokens_in;
+        tokensOut = chunk.tokens_out;
+      } else {
+        throw new Error(`${chunk.error_class}: ${chunk.message}`);
+      }
+    }
+
+    const cost =
+      tokensIn != null && tokensOut != null
+        ? Number(costUsd(cfg, tokensIn, tokensOut).toFixed(5))
+        : null;
+    const latencyMs = Date.now() - startedAt;
+    console.log(
+      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms`,
+    );
+
+    publish(
+      await appendAgentEvent(
+        pool,
+        roomId,
+        adapterId,
+        'agent.turn.completed',
+        {
+          turn_id: turnId,
+          adapter_id: adapterId,
+          text: assembled,
+          success: true,
+          tokens_in: tokensIn,
+          tokens_out: tokensOut,
+          cost_usd: cost,
+          error_class: null,
+        },
+        {
+          adapter_id: adapterId,
+          tokens_in: tokensIn,
+          tokens_out: tokensOut,
+          cost_usd: cost,
+          latency_ms: latencyMs,
+          prompt_hash: promptHash,
+          success: true,
+          error_class: null,
+        },
+      ),
+    );
+  } catch (err) {
+    const errorClass = err instanceof Error ? err.name : 'Error';
+    const latencyMs = Date.now() - startedAt;
+    publish(
+      await appendAgentEvent(
+        pool,
+        roomId,
+        adapterId,
+        'agent.turn.completed',
+        {
+          turn_id: turnId,
+          adapter_id: adapterId,
+          text: assembled || `(${adapterId} could not respond)`,
+          success: false,
+          tokens_in: tokensIn,
+          tokens_out: tokensOut,
+          cost_usd: null,
+          error_class: errorClass,
+        },
+        {
+          adapter_id: adapterId,
+          tokens_in: tokensIn,
+          tokens_out: tokensOut,
+          cost_usd: null,
+          latency_ms: latencyMs,
+          prompt_hash: promptHash,
+          success: false,
+          error_class: errorClass,
+        },
+      ),
+    );
+  } finally {
+    inFlight.delete(roomId);
+  }
+}

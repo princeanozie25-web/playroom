@@ -28,8 +28,16 @@ export interface TestServer {
   close: () => Promise<void>;
 }
 
-export async function startTestServer(): Promise<TestServer> {
-  const app = buildServer({ databaseUrl: testDbUrl() });
+export async function startTestServer(
+  opts: {
+    adapterFactory?: (id: string) => unknown;
+  } = {},
+): Promise<TestServer> {
+  const app = buildServer({
+    databaseUrl: testDbUrl(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    adapterFactory: opts.adapterFactory as any,
+  });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const addr = app.server.address() as AddressInfo;
   return {
@@ -37,6 +45,39 @@ export async function startTestServer(): Promise<TestServer> {
     wsBase: `ws://127.0.0.1:${addr.port}`,
     close: () => app.close(),
   };
+}
+
+// A fake AgentAdapter that yields a scripted list of AgentTurnChunks — no live
+// provider call ever happens in the test suite.
+export function scriptedAdapter(
+  id: string,
+  chunks: unknown[],
+  opts: { delayMs?: number } = {},
+): unknown {
+  return {
+    id,
+    async *stream() {
+      for (const chunk of chunks) {
+        if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
+        yield chunk;
+      }
+    },
+  };
+}
+
+// A fake adapter whose stream throws — exercises the error path.
+export function throwingAdapter(id: string, message = 'boom'): unknown {
+  return {
+    id,
+    async *stream() {
+      throw new Error(message);
+      yield; // unreachable; makes this a generator
+    },
+  };
+}
+
+export function factoryFor(adapter: unknown): (id: string) => unknown {
+  return () => adapter;
 }
 
 export async function httpCreateRoom(httpBase: string, id: string): Promise<Response> {
@@ -101,6 +142,26 @@ export class Client {
     while (this.events.length < count) {
       if (Date.now() - start > timeoutMs) {
         throw new Error(`timed out waiting for ${count} events (have ${this.events.length})`);
+      }
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, 50);
+        this.waiters.push(() => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    }
+  }
+
+  ofType(eventType: string): ServerEventT[] {
+    return this.events.filter((e) => e.event_type === eventType);
+  }
+
+  async waitForType(eventType: string, timeoutMs = 15000): Promise<void> {
+    const start = Date.now();
+    while (this.ofType(eventType).length === 0) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(`timed out waiting for event_type ${eventType}`);
       }
       await new Promise<void>((resolve) => {
         const t = setTimeout(resolve, 50);

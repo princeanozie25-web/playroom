@@ -1,13 +1,23 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
-import { PLAYROOM_VERSION, ClientSend, ServerHello, type ServerEvent } from '@playroom/shared';
+import {
+  PLAYROOM_VERSION,
+  ClientSend,
+  ServerHello,
+  type AgentAdapter,
+  type ServerEvent,
+} from '@playroom/shared';
+import { createAdapter } from '@playroom/adapters';
 import type { Pool } from 'pg';
 import { makePool } from './db.js';
 import { RoomBus } from './bus.js';
+import { runAgentTurn, summonedAdapterId } from './agent.js';
 import { appendMessage, createRoom, eventsAfter, getRoom, lastSeq } from './events.js';
 
 export interface BuildOptions {
   databaseUrl?: string;
+  // Injectable so tests drive turns with a fake adapter — no live provider calls.
+  adapterFactory?: (id: string) => AgentAdapter;
 }
 
 const WS_OPEN = 1; // ws.WebSocket.OPEN
@@ -32,6 +42,7 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   const databaseUrl = opts.databaseUrl ?? process.env.DATABASE_URL;
   const pool: Pool | null = databaseUrl ? makePool(databaseUrl) : null;
   const bus = new RoomBus();
+  const adapterFactory = opts.adapterFactory ?? createAdapter;
 
   const db = (): Pool => {
     if (!pool) throw new Error('DATABASE_URL is not configured');
@@ -118,6 +129,19 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
               msg.body,
             );
             bus.publish(roomId, event);
+
+            // A human @claude message summons an agent; its turn streams as its
+            // own events (ADR-003). Fire-and-forget so the send path stays fast.
+            const summoned = summonedAdapterId(event);
+            if (summoned) {
+              void runAgentTurn({
+                pool: db(),
+                bus,
+                roomId,
+                adapterId: summoned,
+                adapterFactory,
+              }).catch((err) => app.log.error(err));
+            }
           })
           .catch((err) => app.log.error(err));
       });

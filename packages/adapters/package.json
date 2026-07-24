@@ -11,6 +11,7 @@
     }
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.113.0",
     "@playroom/shared": "workspace:*",
     "yaml": "^2.6.0",
     "zod": "^3.23.0"
