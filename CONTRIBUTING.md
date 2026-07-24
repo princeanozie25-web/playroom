@@ -41,3 +41,11 @@ The integration tests need Postgres. Copy `.env.example` to `.env` and set
 once — it applies `infra/migrations/*.sql` to the dev and `playroom_test` databases.
 Then `pnpm verify` runs the full suite, integration tests included. CI stands up a
 `postgres:16` service and runs `pnpm migrate` before `pnpm verify`.
+
+## Local verification tooling
+
+Browser verification uses [`agent-browser`](https://github.com/vercel-labs/agent-browser),
+pinned to `0.33.0`, installed **globally** and developer-local. It is **never** a repo
+dependency and never appears in any `package.json`. All browser verification is
+localhost-scoped (`--allowed-domains "localhost,127.0.0.1"`); its artifacts
+(`agent-browser.json`, `*.har`) are gitignored and screenshots go outside the repo.

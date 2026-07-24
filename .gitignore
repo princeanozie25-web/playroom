@@ -19,3 +19,7 @@ __pycache__/
 
 # Logs
 *.log
+
+# Local verification tooling (agent-browser) — never a repo dependency
+agent-browser.json
+*.har
