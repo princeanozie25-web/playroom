@@ -81,5 +81,14 @@ This is operational, not architectural.
 
 ## Status
 
-**Proposed.** No latency remedy has been implemented. The owner accepts, rejects, or
-amends this before any latency work begins.
+**Accepted (scoped)** by the owner, 2026-07-24. No latency remedy was implemented.
+
+- **First-token P50 < 900ms** stands.
+- **First-token P95 < 1.8s** — accepted **at the current context depth** (30-message
+  window, no summarisation).
+
+**Open — revisit condition.** The ttfd↔`tokens_in` correlation was not measured, and the
+run's per-turn data was deleted, so the P95 tail is not yet attributed between provider
+variance and context length. **S1.6 (rolling summary) gains an exit criterion:**
+re-measure ttfd P50/P95 and report the correlation against `tokens_in`. If summarisation
+moves P95 materially, this budget is revised again — downward.
