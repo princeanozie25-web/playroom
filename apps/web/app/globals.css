@@ -412,6 +412,18 @@ body {
   color: var(--ink-3);
   cursor: not-allowed;
 }
+/* A disabled control must LOOK disabled wherever the card is mounted. The :disabled
+   qualifier is not decoration — it outranks any ambient `<container> button` rule
+   (e.g. .home button on the fixture route) that would otherwise paint these as live
+   primary buttons. Approve/deny are inert until S2.2, and a button that reads as
+   actionable while doing nothing is the fake governance this surface must not ship. */
+.decision-actions button:disabled {
+  background: var(--paper-2);
+  color: var(--ink-3);
+  border-color: var(--line);
+  opacity: 1;
+  cursor: not-allowed;
+}
 .decision-pending {
   font-size: var(--t-xs);
   color: var(--ink-3);
