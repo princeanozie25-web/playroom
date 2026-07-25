@@ -25,3 +25,9 @@ __pycache__/
 # Local verification tooling (agent-browser) — never a repo dependency
 agent-browser.json
 *.har
+
+# Demo capture output (scripts/demo-capture.ts). Videos belong in
+# $PLAYROOM_CAPTURE_HOME, outside this tree; these rules exist so a stray run
+# inside the repo cannot be committed.
+videos/
+*.webm
