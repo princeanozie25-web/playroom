@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# Binary assets — never line-ending normalised. The roadmap PDF is the operating
+# contract; silent CRLF rewriting would corrupt it.
+*.pdf binary
