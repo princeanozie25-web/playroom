@@ -5,8 +5,14 @@
 // screenshot path — the mechanism that defeated S0.2/S0.3/T1. Playwright is
 // **developer-local tooling and never a repo dependency**: install it in a directory
 // outside this tree (`npm i playwright && npx playwright install chromium`), point
-// PLAYROOM_CAPTURE_HOME at that directory, start the stack with `pnpm dev`, then run
-// `pnpm tsx scripts/demo-capture.ts all`. Videos land in $PLAYROOM_CAPTURE_HOME/videos,
+// PLAYROOM_CAPTURE_HOME at that directory, then run `pnpm tsx scripts/demo-capture.ts all`.
+//
+// FILM A PRODUCTION BUILD, NOT THE DEV SERVER (closes A4-F6 — the Next.js dev badge
+// sat in the corner of every A4 clip):
+//   pnpm --filter @playroom/web build && pnpm --filter @playroom/web start   # port 3000
+//   pnpm --filter @playroom/api dev                                          # port 3001
+// The script refuses to record if it detects the dev overlay, rather than producing a
+// clip with a badge in it. Videos land in $PLAYROOM_CAPTURE_HOME/videos,
 // outside the repo; `videos/` and `*.webm` are gitignored so a stray run cannot be
 // committed. Every beat asserts — a take that cannot observe the socket drop, the
 // replay, or the tokens+cost footer fails loudly instead of recording nothing.
@@ -34,9 +40,13 @@ const TYPE_DELAY = 55;
 // cleanup is one `DELETE ... WHERE room_id LIKE 'a4-%'`.
 const RUN = Date.now().toString(36);
 
-const PROMPT_SHORT = '@claude explain what this room does in three short sentences';
+// A4-F7: the short prompt answers in ~1.4s, which is a blink on camera — the
+// token-by-token fill is the content of the S0.3 clip, so it has to last long enough
+// to read. The long prompt is the default as of S-UI; the short one stays available
+// as `clipBShort` because it is the prompt the P0 brief names.
 const PROMPT_LONG =
   '@claude walk me through, step by step, what happens between me pressing send on this message and your first token appearing on my screen — name each layer it passes through and what could go wrong at each one';
+const PROMPT_SHORT = '@claude explain what this room does in three short sentences';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 const log = (...a: unknown[]): void =>
@@ -99,22 +109,24 @@ async function createRoom(id: string, title: string): Promise<RoomRow> {
 // values are therefore `any` by necessity, not by shortcut. Note that `scripts/` is not
 // currently reachable from the root tsconfig, so `tsc -b` does not check this file at
 // all — see the A4 report; wiring scripts/ in is its own change.
-const dot = (page: any): any => page.locator('span.dot');
-const items = (page: any): any => page.locator('ul.messages li');
+const connPill = (page: any): any => page.locator('.conn');
+const items = (page: any): any => page.locator('ul.transcript li');
 const bodyInput = (page: any): any => page.locator('input[placeholder="message"]');
 const authorInput = (page: any): any => page.locator('input[placeholder="you"]');
 const sendBtn = (page: any): any => page.locator('button[type="submit"]');
 
-// The status dot's title attribute IS the socket state: connecting | open | closed.
-async function waitForSocket(page: any, state: string, timeout = 20_000): Promise<number> {
+// S-UI replaced the bare status dot with a labelled connection state. The pill's
+// class carries it: conn-connected | conn-reconnecting | conn-refused. Reading the
+// class rather than the text avoids depending on CSS text-transform.
+async function waitForConn(page: any, state: string, timeout = 20_000): Promise<number> {
   const started = Date.now();
   while (Date.now() - started < timeout) {
-    if ((await dot(page).getAttribute('title')) === state) return Date.now() - started;
+    const cls: string = (await connPill(page).getAttribute('class')) ?? '';
+    if (cls.split(/\s+/).includes(`conn-${state}`)) return Date.now() - started;
     await sleep(120);
   }
-  throw new BeatError(
-    `socket never reached "${state}" within ${timeout}ms (still "${await dot(page).getAttribute('title')}")`,
-  );
+  const cls: string = (await connPill(page).getAttribute('class')) ?? '(none)';
+  throw new BeatError(`connection never reached "${state}" within ${timeout}ms (class "${cls}")`);
 }
 
 async function waitForItemCount(page: any, n: number, timeout = 25_000): Promise<number> {
@@ -184,8 +196,8 @@ async function clipA(browser: any, take: number, out: string): Promise<unknown> 
   const beats: Record<string, unknown> = {};
 
   try {
-    await waitForSocket(A.page, 'open');
-    await waitForSocket(B.page, 'open');
+    await waitForConn(A.page, 'connected');
+    await waitForConn(B.page, 'connected');
     await authorInput(A.page).fill('prince');
     await authorInput(B.page).fill('watcher');
     await sleep(SETTLE);
@@ -206,7 +218,7 @@ async function clipA(browser: any, take: number, out: string): Promise<unknown> 
     must(wire.live !== null, 'B never established a routed socket');
     wire.dark = true;
     await wire.live.close();
-    beats.bWentDark = await waitForSocket(B.page, 'closed');
+    beats.bWentDark = await waitForConn(B.page, 'reconnecting');
     log(`  B severed — dot went red in ${beats.bWentDark}ms`);
     await sleep(SETTLE);
 
@@ -223,7 +235,7 @@ async function clipA(browser: any, take: number, out: string): Promise<unknown> 
     must(wire.refused > 0, 'no reconnect attempt was refused — B may not have been dark');
     wire.dark = false;
     beats.bReconnectsRefusedWhileDark = wire.refused;
-    beats.bReconnected = await waitForSocket(B.page, 'open', 30_000);
+    beats.bReconnected = await waitForConn(B.page, 'connected', 30_000);
     beats.bReplayed = await waitForItemCount(B.page, 5, 30_000);
     log(`  B reconnected in ${beats.bReconnected}ms, replayed to 5 in ${beats.bReplayed}ms`);
 
@@ -254,7 +266,7 @@ async function clipB(
   browser: any,
   take: number,
   out: string,
-  prompt: string = PROMPT_SHORT,
+  prompt: string = PROMPT_LONG,
   label = 'clipB',
 ): Promise<unknown> {
   const dir = resolve(out, `${label}-take${take}`);
@@ -276,7 +288,7 @@ async function clipB(
 
   try {
     await page.goto(`${WEB}/r/${roomId}`, { waitUntil: 'domcontentloaded' });
-    await waitForSocket(page, 'open');
+    await waitForConn(page, 'connected');
     await authorInput(page).fill('prince');
     await sleep(SETTLE);
 
@@ -285,7 +297,7 @@ async function clipB(
     await waitForItemCount(page, 2, 30_000);
 
     // The ▍ caret renders only while streaming is true.
-    const caret = page.locator('ul.messages li span', { hasText: '▍' });
+    const caret = page.locator('.caret');
     let sawCaret = false;
     for (let i = 0; i < 100 && !sawCaret; i++) {
       sawCaret = (await caret.count()) > 0;
@@ -295,7 +307,7 @@ async function clipB(
 
     // The telemetry footer renders only on !streaming with tokens/cost present, so it
     // is the honest end-of-turn marker.
-    const footer = page.locator('ul.messages li div', { hasText: 'tok' });
+    const footer = page.locator('.meter');
     const started = Date.now();
     while (Date.now() - started < 90_000) {
       if ((await footer.count()) > 0 && (await caret.count()) === 0) break;
@@ -327,8 +339,24 @@ async function main(): Promise<void> {
   mkdirSync(out, { recursive: true });
 
   const health = (await fetch(`${API}/health`).then((r) => r.json())) as { ok?: boolean };
-  must(health.ok === true, `API not healthy: ${JSON.stringify(health)} — is \`pnpm dev\` running?`);
+  must(health.ok === true, `API not healthy: ${JSON.stringify(health)} — is the api running?`);
   log(`API healthy at ${API}`);
+
+  // A4-F6: every A4 clip carried the Next.js dev badge because they were filmed
+  // against `next dev`. Refuse to record rather than produce another one. The badge
+  // is injected by the dev overlay, whose script Next only serves in development.
+  const html = await fetch(WEB).then((r) => r.text());
+  const isDev =
+    /__next_devtools|nextjs-portal|__nextDevClientId|\/_next\/static\/chunks\/react-refresh/.test(
+      html,
+    );
+  must(
+    !isDev,
+    'the web app is running in DEVELOPMENT mode — clips would carry the Next.js dev badge (A4-F6).\n' +
+      '  Build and serve production instead:\n' +
+      '    pnpm --filter @playroom/web build && pnpm --filter @playroom/web start',
+  );
+  log(`web is a production build at ${WEB}`);
 
   const browser = await loadChromium(home).launch();
   log(`chromium ${browser.version()}`);
@@ -351,8 +379,8 @@ async function main(): Promise<void> {
       const r =
         clip === 'clipA'
           ? await clipA(browser, take, out)
-          : clip === 'clipBLong'
-            ? await clipB(browser, take, out, PROMPT_LONG, 'clipBLong')
+          : clip === 'clipBShort'
+            ? await clipB(browser, take, out, PROMPT_SHORT, 'clipBShort')
             : await clipB(browser, take, out);
       results.push({ clip, take, status: 'ok', ...(r as object) });
       log(`✓ ${clip} take${take}`);

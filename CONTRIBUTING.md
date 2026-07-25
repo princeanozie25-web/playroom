@@ -23,6 +23,26 @@ advice — it is how the repo stays trustworthy from commit one.
 - **Providers are named only inside `packages/adapters/`** (roadmap §2, §6). No provider
   name appears in a room, the fabric, or shared code.
 
+## Closed unions vs. open strings
+
+Both are house style; which one is correct depends on who controls the values.
+
+- **Closed union** (`z.enum`, discriminated union) for anything you **dispatch on and
+  control both ends of**: `event_type` at the point a reducer switches on it,
+  `permit_decision`, `screen_verdict`. If an unknown value would be a bug, close it.
+- **Open string with a visible fallback** for anything that **will grow**: the `code`
+  on `ServerErrorFrame`, `reason_code` on a decision, and any future taxonomy a later
+  slice extends. Render the unknown value rather than dropping it.
+
+The reason is A4-F1's failure mode, one layer up. A closed enum makes an older client
+**fail to parse** a value added later, and a frame that fails to parse is a frame that
+gets **dropped** — which is exactly the silent refusal the fabric exists to prevent.
+An open string with a fallback degrades to "something happened that I do not have a
+label for", which is honest and visible.
+
+This is a convention, not a one-off exemption for one field. Do not "tidy" an open
+`code` into an enum to match house style — house style is this paragraph.
+
 ## Provider names: source vs. config
 
 Provider-name rule (§6) applies to source code: the room, fabric, and data model

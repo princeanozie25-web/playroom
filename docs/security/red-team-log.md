@@ -16,9 +16,10 @@ Severity is about the trust boundary, not user annoyance:
 - **medium** — a failure is detectable but not surfaced to the party who needs it.
 - **low** — hardening; no observable trust consequence yet.
 
-| id     | date        | severity | discovered by                     | principle violated                                                                                  | disposition | commit    |
-| ------ | ----------- | -------- | --------------------------------- | --------------------------------------------------------------------------------------------------- | ----------- | --------- |
-| RT-001 | 25 Jul 2026 | high     | found during A4 automated capture | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one | fixed       | `161aa16` |
+| id     | date        | severity | discovered by                     | principle violated                                                                                  | disposition             | commit    |
+| ------ | ----------- | -------- | --------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------- | --------- |
+| RT-001 | 25 Jul 2026 | high     | found during A4 automated capture | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one | fixed                   | `161aa16` |
+| RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001      | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to     | accepted until **S1.1** | —         |
 
 ## RT-001 — a refused write was indistinguishable from an accepted one
 
@@ -56,3 +57,23 @@ defence: a room deleted mid-session still fails there, now loudly.
 Surfaced to the member in the following commit: the indicator leaves its connected
 state, the unsent text is restored to the input rather than cleared, and the refusal
 renders in the room without a console open.
+
+## RT-002 — `POST /rooms` accepts anyone
+
+`POST /rooms` requires no authentication. Any caller who can reach the api can create
+a room, and the created room records no creator — there is no `created_by` column
+because there is no principal to put in it.
+
+**Accepted, not fixed, until S1.1** (Room MVP, Sep 2026), which lands principals,
+roster and invites. Fixing it earlier means inventing an identity model in the wrong
+slice and then replacing it, and §1's "roster is invite-only" cannot be enforced by a
+route guard when nothing yet knows who is asking.
+
+What makes the acceptance reasonable rather than convenient: the api is not
+internet-exposed, a created room grants no access to any other room, and rooms hold
+no principal-scoped context yet (per-principal stores are S1.5). What would make it
+unreasonable, and should re-open this entry immediately: exposing the api beyond
+localhost, or any pilot traffic, whichever comes first.
+
+Logged as accepted rather than left out. A red-team log that only records fixes
+flatters the thing it is supposed to audit.

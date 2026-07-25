@@ -12,11 +12,13 @@ import {
 import {
   WS_CLOSE_ROOM_NOT_FOUND,
   type ClientSend,
+  type DecisionEvent,
   type ServerErrorFrame,
   type ServerEvent,
   type ServerHello,
 } from '@playroom/shared';
 import { MemberChip } from '../../MemberChip';
+import { DecisionCard } from '../../DecisionCard';
 import type { RosterMember } from '../../roster';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -42,7 +44,10 @@ type AgentItem = {
   tokens_out?: number | null;
   cost_usd?: number | null;
 };
-type Item = MessageItem | AgentItem;
+// A decision item exists only because a `decision` row arrived in the log. There is
+// no constructor for one anywhere else in the room.
+type DecisionItem = { kind: 'decision'; key: string; event: DecisionEvent };
+type Item = MessageItem | AgentItem | DecisionItem;
 
 function buildItems(events: ServerEvent[]): Item[] {
   const turns = new Map<string, AgentItem>();
@@ -55,6 +60,8 @@ function buildItems(events: ServerEvent[]): Item[] {
         author: ev.actor_id,
         body: ev.payload.body,
       });
+    } else if (ev.event_type === 'decision') {
+      order.push({ kind: 'decision', key: `d${ev.seq}`, event: ev });
     } else if (ev.event_type === 'agent.turn.started') {
       const turn: AgentItem = {
         kind: 'agent',
@@ -260,6 +267,10 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
                 <span className="turn-author">{it.author}</span>
               </div>
               <div className="msg-body">{it.body}</div>
+            </li>
+          ) : it.kind === 'decision' ? (
+            <li key={it.key}>
+              <DecisionCard event={it.event} roster={roster} />
             </li>
           ) : (
             <li key={it.key}>

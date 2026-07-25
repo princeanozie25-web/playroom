@@ -57,13 +57,34 @@ export const AgentTurnCompleted = z.object({
   }),
 });
 
+// A cross-boundary action the fabric stopped, awaiting a co-signature (§4.3 CO_SIGN,
+// §12.1 DECISION). Nothing emits this yet — S2.2 builds the co-sign flow and S2.1 the
+// engine that decides. It lives in the contract now so the DECISION card has exactly
+// one possible input: a `decision` row in the event log. There is deliberately no
+// other way to make that card appear, because a demo surface able to display a block
+// the fabric did not produce would make the product a lie.
+export const DecisionEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('decision'),
+  payload: z.object({
+    decision_id: z.string(),
+    action: z.string(), // the attempted action, e.g. "pr.merge"
+    attempted_by: z.string(), // member id that attempted it
+    reason: z.string(), // human-readable: why it was stopped
+    reason_code: z.string(), // open string — see the code convention note above
+    required_signer: z.string(), // the principal who must co-sign
+  }),
+});
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   MessageEvent,
   AgentTurnStarted,
   AgentTurnDelta,
   AgentTurnCompleted,
+  DecisionEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
+export type DecisionEvent = z.infer<typeof DecisionEvent>;
 
 // Server → client: the first frame, carrying the room's high-water sequence.
 export const ServerHello = z.object({
