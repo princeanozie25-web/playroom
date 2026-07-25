@@ -71,3 +71,29 @@ export const ServerHello = z.object({
   last_seq: z.number(),
 });
 export type ServerHello = z.infer<typeof ServerHello>;
+
+// Server → client: an explicit refusal. Deny-by-default is only half a guarantee
+// if a refused action is indistinguishable from an accepted one, so every refusal
+// the client could otherwise mistake for success travels as one of these (A4-F1).
+//
+// `code` is an open string, deliberately, and this is the one place the repo does
+// not close a union. A closed enum would make an older client fail to parse a code
+// added later — and a frame that fails to parse is a frame that gets dropped, which
+// is precisely the silent-failure class this schema exists to end. Unknown code =
+// still rendered as a refusal. Known codes are listed below.
+export const ServerErrorFrame = z.object({
+  type: z.literal('error'),
+  code: z.string().min(1),
+  message: z.string().min(1),
+  room_id: z.string().optional(), // snake_case, matching every other wire field
+});
+export type ServerErrorFrame = z.infer<typeof ServerErrorFrame>;
+
+// Known `code` values. Add here as new refusals appear; never remove one.
+export const ERROR_ROOM_NOT_FOUND = 'room_not_found';
+
+// Application WebSocket close codes (4000-4999 is the application-reserved range).
+// The frame carries the human-readable reason; the close code is what a client can
+// branch on without string matching — in particular, to stop reconnecting to a room
+// that does not exist rather than looping on it.
+export const WS_CLOSE_ROOM_NOT_FOUND = 4404;

@@ -36,11 +36,15 @@ export interface TestServer {
 export async function startTestServer(
   opts: {
     adapterFactory?: (id: string) => AgentAdapter;
+    // Capture the server's log output so a test can assert what was — and was not —
+    // emitted (A4-F1: an unobserved logger is the same as no logger).
+    loggerStream?: NodeJS.WritableStream;
   } = {},
 ): Promise<TestServer> {
   const app = buildServer({
     databaseUrl: testDbUrl(),
     adapterFactory: opts.adapterFactory,
+    loggerStream: opts.loggerStream,
   });
   await app.listen({ port: 0, host: '127.0.0.1' });
   // Narrow, don't cast: a port-0 TCP listen returns an AddressInfo object, never
