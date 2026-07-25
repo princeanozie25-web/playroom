@@ -10,12 +10,18 @@ import {
   type FormEvent,
 } from 'react';
 import { useParams } from 'next/navigation';
-import type { ClientSend, ServerEvent, ServerHello } from '@playroom/shared';
+import type { ClientSend, ServerEvent, ServerErrorFrame, ServerHello } from '@playroom/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 type Status = 'connecting' | 'open' | 'closed';
 const DOT: Record<Status, string> = { open: '#3fb950', connecting: '#d29922', closed: '#f85149' };
+
+// Mirrors WS_CLOSE_ROOM_NOT_FOUND in @playroom/shared. It cannot be imported as a
+// value here: @playroom/shared is a devDependency of this app (types only at
+// runtime), so a value import would not survive the build. Duplicated deliberately
+// and logged as finding F1-N1 rather than quietly changing the app's dependencies.
+const WS_CLOSE_ROOM_NOT_FOUND = 4404;
 
 function socketUrl(roomId: string, after: number): string {
   const base = API_URL.replace(/^http/, 'ws');
@@ -97,6 +103,9 @@ export default function RoomPage() {
   const [status, setStatus] = useState<Status>('connecting');
   const [author, setAuthor] = useState<string>('');
   const [body, setBody] = useState<string>('');
+  // A refusal from the server (A4-F1). Held in state because a member must be able
+  // to see that something did not happen without opening a console.
+  const [refusal, setRefusal] = useState<ServerErrorFrame | null>(null);
 
   const items = useMemo<Item[]>(() => buildItems(events), [events]);
 
@@ -104,6 +113,7 @@ export default function RoomPage() {
   const lastSeqRef = useRef<number>(0); // last seq seen — the resume cursor
   const seenRef = useRef<Set<number>>(new Set());
   const backoffRef = useRef<number>(500);
+  const pendingRef = useRef<string>(''); // last body sent, restored if it is refused
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef<boolean>(false);
 
@@ -121,10 +131,22 @@ export default function RoomPage() {
       // Wire boundary: JSON.parse returns `any`; assigning it to the union is not a
       // cast. The server sends validated frames (there is no zod at runtime in the
       // web app — a dep constraint). We then narrow on the discriminant below.
-      let msg: ServerEvent | ServerHello;
+      let msg: ServerEvent | ServerHello | ServerErrorFrame;
       try {
         msg = JSON.parse(e.data);
       } catch {
+        return;
+      }
+      // An explicit refusal. Surface it and stop: the server has already closed the
+      // socket, and retrying a room that does not exist would just loop.
+      if (msg.type === 'error') {
+        stoppedRef.current = true;
+        setRefusal(msg);
+        setStatus('closed');
+        // Put the text back. It was cleared optimistically on send, and leaving the
+        // box empty after a refusal is the whole bug: it reads as "sent". Only
+        // restore if the member has not started typing something else.
+        setBody((current) => (current.trim() ? current : pendingRef.current));
         return;
       }
       if (msg.type !== 'event') return;
@@ -136,8 +158,11 @@ export default function RoomPage() {
       }
       setEvents((prev) => [...prev, msg].sort((a, b) => a.seq - b.seq));
     };
-    ws.onclose = (): void => {
+    ws.onclose = (e: CloseEvent): void => {
       setStatus('closed');
+      // A refused room is permanent, not transient: reconnecting would loop until
+      // the tab is closed. The close code says so without string-matching a reason.
+      if (e.code === WS_CLOSE_ROOM_NOT_FOUND) stoppedRef.current = true;
       if (stoppedRef.current) return;
       const delay = backoffRef.current;
       backoffRef.current = Math.min(delay * 2, 5000); // 0.5s → 5s cap
@@ -170,6 +195,7 @@ export default function RoomPage() {
       author: author.trim() || 'anon',
       body: text,
     };
+    pendingRef.current = text;
     ws.send(JSON.stringify(payload));
     setBody('');
   };
@@ -180,6 +206,17 @@ export default function RoomPage() {
         <span className="dot" style={{ background: DOT[status] }} title={status} />
         room / {roomId}
       </h1>
+      {refusal && (
+        // Deliberately plain — S-UI owns appearance. The rule being enforced here is
+        // only that a member never sees success for something that did not happen.
+        <p role="alert" style={{ color: DOT.closed, fontWeight: 600 }}>
+          {refusal.message} <span style={{ opacity: 0.7 }}>({refusal.code})</span>
+          <br />
+          <span style={{ fontWeight: 400, opacity: 0.7 }}>
+            Nothing you type here will be delivered. Your message was not sent.
+          </span>
+        </p>
+      )}
       <ul className="messages">
         {items.map((it) =>
           it.kind === 'message' ? (
