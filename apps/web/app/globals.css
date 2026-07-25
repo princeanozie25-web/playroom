@@ -1,18 +1,459 @@
+/* S-UI tokens. Deliberately small: a type scale, a spacing scale, and enough
+   palette to stop a clip looking like an unstyled form. Light mode only — a theme
+   switcher is not a demo requirement. Anchored on the deck's indigo and a near-black
+   ink so the film matches the deck it sits in. */
+
+:root {
+  /* palette */
+  --indigo: #4338ca;
+  --indigo-soft: #eef2ff;
+  --indigo-line: #c7d2fe;
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #94a3b8;
+  --paper: #ffffff;
+  --paper-2: #f8fafc;
+  --line: #e2e8f0;
+
+  /* state — connected / reconnecting / refused */
+  --ok: #15803d;
+  --ok-soft: #dcfce7;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --bad: #b91c1c;
+  --bad-soft: #fee2e2;
+
+  /* type scale */
+  --t-xs: 11px;
+  --t-sm: 13px;
+  --t-md: 15px;
+  --t-lg: 19px;
+  --t-xl: 24px;
+
+  /* spacing scale */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+
+  --radius: 8px;
+  --radius-pill: 999px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
 body {
-  font-family: system-ui, sans-serif;
-  max-width: 640px;
-  margin: 24px auto;
-  padding: 0 16px;
+  height: 100%;
 }
-.dot {
+
+body {
+  margin: 0;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-size: var(--t-md);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper-2);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── room shell ────────────────────────────────────────────────────────────
+   Three rows: header, transcript, composer. The TRANSCRIPT scrolls, not the
+   page — a page that scrolls drags the composer out of frame mid-take. */
+
+.room {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100dvh;
+  max-width: 860px;
+  margin: 0 auto;
+  background: var(--paper);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+
+.room-header {
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.room-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin: 0;
+  font-size: var(--t-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.room-title .room-id {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+/* ── connection state: a labelled state, not a bare dot ─────────────────── */
+
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.conn .dot {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  margin-right: 8px;
+  background: currentColor;
 }
-.messages {
-  list-style: none;
+.conn-connected {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.conn-reconnecting {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.conn-reconnecting .dot {
+  animation: pulse 1s ease-in-out infinite;
+}
+.conn-refused {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* ── roster strip ──────────────────────────────────────────────────────── */
+
+.roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+/* ── member chip ───────────────────────────────────────────────────────── */
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  font-size: var(--t-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+/* Humans and agents differ without reading the name: agents carry the indigo
+   rule and a filled marker, humans are quiet and outlined. */
+.chip-agent {
+  border-color: var(--indigo-line);
+  background: var(--indigo-soft);
+}
+.chip-name {
+  font-weight: 650;
+  color: var(--ink);
+}
+.chip-agent .chip-name {
+  color: var(--indigo);
+}
+.chip-meta {
+  color: var(--ink-2);
+}
+.chip-mandate {
+  padding: 0 var(--s-2);
+  border-radius: var(--radius-pill);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+.chip-marker {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  align-self: center;
+}
+.chip-agent .chip-marker {
+  background: var(--indigo);
+}
+.chip-human .chip-marker {
+  border: 1.5px solid var(--ink-3);
+}
+.chip-inline {
   padding: 0;
-  min-height: 160px;
+  border: 0;
+  background: none;
+}
+
+/* ── transcript ────────────────────────────────────────────────────────── */
+
+.transcript {
+  overflow-y: auto;
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  list-style: none;
+  margin: 0;
+}
+
+.turn-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+.turn-author {
+  font-weight: 650;
+  font-size: var(--t-sm);
+}
+.turn-author-agent {
+  color: var(--indigo);
+}
+
+/* Agent output: whitespace preserved, markdown UNPARSED. See the comment in the
+   room component — this is an injection-surface decision, not a style choice. */
+.turn-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-body {
+  overflow-wrap: anywhere;
+}
+
+.caret {
+  display: inline-block;
+  width: 7px;
+  background: var(--indigo);
+  color: transparent;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.working {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--indigo);
+  font-weight: 600;
+}
+
+.meter {
+  margin-top: var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-error {
+  color: var(--bad);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+/* ── refusal banner (F1) ───────────────────────────────────────────────── */
+
+.refusal {
+  margin: var(--s-3) var(--s-5) 0;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius);
+  background: var(--bad-soft);
+  color: var(--bad);
+  font-size: var(--t-sm);
+}
+.refusal strong {
+  display: block;
+  font-size: var(--t-md);
+}
+.refusal .code {
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+/* ── composer ──────────────────────────────────────────────────────────── */
+
+.composer {
+  display: flex;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-5);
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+.composer input {
+  font: inherit;
+  font-size: var(--t-sm);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+}
+.composer input:focus {
+  outline: 2px solid var(--indigo);
+  outline-offset: -1px;
+}
+.composer .who {
+  width: 120px;
+}
+.composer .what {
+  flex: 1;
+}
+.composer button {
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  padding: var(--s-2) var(--s-4);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--indigo);
+  color: #fff;
+  cursor: pointer;
+}
+.composer button:disabled {
+  background: var(--ink-3);
+  cursor: not-allowed;
+}
+
+/* ── decision card ─────────────────────────────────────────────────────── */
+
+.decision {
+  border: 1px solid var(--indigo-line);
+  border-left: 3px solid var(--indigo);
+  border-radius: var(--radius);
+  background: var(--paper);
+  padding: var(--s-4);
+  max-width: 560px;
+}
+.decision-kicker {
+  font-size: var(--t-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--indigo);
+}
+.decision-action {
+  margin: var(--s-2) 0 var(--s-3);
+  font-size: var(--t-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.decision-action code {
+  font-size: var(--t-md);
+  background: var(--indigo-soft);
+  border-radius: var(--radius);
+  padding: 0 var(--s-2);
+}
+.decision-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-2) var(--s-4);
+  font-size: var(--t-sm);
+  margin-bottom: var(--s-4);
+}
+.decision-rows dt {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 2px;
+}
+.decision-rows dd {
+  margin: 0;
+  color: var(--ink);
+}
+.decision-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.decision-actions button {
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.decision-pending {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+/* ── home ──────────────────────────────────────────────────────────────── */
+
+.home {
+  max-width: 560px;
+  margin: 12vh auto;
+  padding: 0 var(--s-5);
+}
+.home h1 {
+  font-size: var(--t-xl);
+  letter-spacing: -0.02em;
+  margin-bottom: var(--s-2);
+}
+.home p {
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+}
+.home form {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+}
+.home input {
+  font: inherit;
+  font-size: var(--t-sm);
+  flex: 1;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.home button {
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  padding: var(--s-2) var(--s-4);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--indigo);
+  color: #fff;
+  cursor: pointer;
 }

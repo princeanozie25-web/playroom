@@ -31,7 +31,7 @@ export default function Landing() {
   };
 
   return (
-    <main>
+    <main className="home">
       <h1>Playroom</h1>
       <p>Create a room, then open it in two browsers.</p>
       <form onSubmit={onSubmit} style={{ display: 'flex', gap: 8 }}>

@@ -10,43 +10,25 @@ import {
   type FormEvent,
 } from 'react';
 import { useParams } from 'next/navigation';
-import type { ClientSend, ServerEvent, ServerErrorFrame, ServerHello } from '@playroom/shared';
+import {
+  WS_CLOSE_ROOM_NOT_FOUND,
+  type ClientSend,
+  type ServerErrorFrame,
+  type ServerEvent,
+  type ServerHello,
+} from '@playroom/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+// Socket lifecycle, as the client sees it.
 type Status = 'connecting' | 'open' | 'closed';
-const DOT: Record<Status, string> = { open: '#3fb950', connecting: '#d29922', closed: '#f85149' };
 
-// Mirrors WS_CLOSE_ROOM_NOT_FOUND in @playroom/shared. It cannot be imported as a
-// value here: @playroom/shared is a devDependency of this app (types only at
-// runtime), so a value import would not survive the build. Duplicated deliberately
-// and logged as finding F1-N1 rather than quietly changing the app's dependencies.
-const WS_CLOSE_ROOM_NOT_FOUND = 4404;
+// What a member sees. Three labelled states, not a bare coloured dot: F1 made
+// refusal a real outcome, so it has to be legible at a glance rather than inferred
+// from a colour. `reconnecting` covers both the first connect and a backoff retry —
+// from the member's side those are the same situation.
+type Conn = 'connected' | 'reconnecting' | 'refused';
 
-function socketUrl(roomId: string, after: number): string {
-  const base = API_URL.replace(/^http/, 'ws');
-  return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}`;
-}
-
-type MessageItem = { kind: 'message'; key: string; author: string; body: string };
-type AgentItem = {
-  kind: 'agent';
-  key: string;
-  adapter_id: string;
-  text: string;
-  streaming: boolean;
-  success?: boolean;
-  tokens_in?: number | null;
-  tokens_out?: number | null;
-  cost_usd?: number | null;
-};
-type Item = MessageItem | AgentItem;
-
-// Reduce the raw seq-ordered events into render items. Agent turn events collapse
-// into a single bubble keyed by turn_id: deltas append while streaming, completed
-// sets the authoritative text + telemetry. Narrowing on event_type gives each
-// branch its exact payload — no casts. Replaying deltas on resume rebuilds the same
-// text (deduped upstream on seq, so nothing is doubled).
 function buildItems(events: ServerEvent[]): Item[] {
   const turns = new Map<string, AgentItem>();
   const order: Item[] = [];
@@ -96,6 +78,25 @@ function buildItems(events: ServerEvent[]): Item[] {
   return order;
 }
 
+type MessageItem = { kind: 'message'; key: string; author: string; body: string };
+type AgentItem = {
+  kind: 'agent';
+  key: string;
+  adapter_id: string;
+  text: string;
+  streaming: boolean;
+  success?: boolean;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  cost_usd?: number | null;
+};
+type Item = MessageItem | AgentItem;
+
+function socketUrl(roomId: string, after: number): string {
+  const base = API_URL.replace(/^http/, 'ws');
+  return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}`;
+}
+
 export default function RoomPage() {
   const params = useParams();
   const roomId = String(params.id ?? '');
@@ -103,19 +104,19 @@ export default function RoomPage() {
   const [status, setStatus] = useState<Status>('connecting');
   const [author, setAuthor] = useState<string>('');
   const [body, setBody] = useState<string>('');
-  // A refusal from the server (A4-F1). Held in state because a member must be able
-  // to see that something did not happen without opening a console.
   const [refusal, setRefusal] = useState<ServerErrorFrame | null>(null);
 
   const items = useMemo<Item[]>(() => buildItems(events), [events]);
+  const conn: Conn = refusal ? 'refused' : status === 'open' ? 'connected' : 'reconnecting';
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastSeqRef = useRef<number>(0); // last seq seen — the resume cursor
   const seenRef = useRef<Set<number>>(new Set());
   const backoffRef = useRef<number>(500);
-  const pendingRef = useRef<string>(''); // last body sent, restored if it is refused
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef<boolean>(false);
+  const pendingRef = useRef<string>(''); // last body sent, restored if it is refused
+  const tailRef = useRef<HTMLDivElement | null>(null);
 
   const connect = useCallback((): void => {
     if (!roomId) return;
@@ -184,6 +185,12 @@ export default function RoomPage() {
     };
   }, [roomId, connect]);
 
+  // Keep the newest turn in frame. The transcript scrolls, not the page, so this
+  // never drags the composer out of shot mid-take.
+  useEffect(() => {
+    tailRef.current?.scrollIntoView({ block: 'end' });
+  }, [items]);
+
   const onSubmit = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     const text = body.trim();
@@ -201,37 +208,57 @@ export default function RoomPage() {
   };
 
   return (
-    <main>
-      <h1>
-        <span className="dot" style={{ background: DOT[status] }} title={status} />
-        room / {roomId}
-      </h1>
-      {refusal && (
-        // Deliberately plain — S-UI owns appearance. The rule being enforced here is
-        // only that a member never sees success for something that did not happen.
-        <p role="alert" style={{ color: DOT.closed, fontWeight: 600 }}>
-          {refusal.message} <span style={{ opacity: 0.7 }}>({refusal.code})</span>
-          <br />
-          <span style={{ fontWeight: 400, opacity: 0.7 }}>
-            Nothing you type here will be delivered. Your message was not sent.
+    <main className="room">
+      <header className="room-header">
+        <h1 className="room-title">
+          <span>
+            room <span className="room-id">/ {roomId}</span>
           </span>
+          <span className={`conn conn-${conn}`}>
+            <span className="dot" />
+            {conn}
+          </span>
+        </h1>
+      </header>
+
+      {refusal && (
+        <p role="alert" className="refusal">
+          <strong>{refusal.message}</strong>
+          <span className="code">{refusal.code}</span> — nothing you type here will be delivered.
+          Your message was not sent.
         </p>
       )}
-      <ul className="messages">
+
+      <ul className="transcript">
         {items.map((it) =>
           it.kind === 'message' ? (
             <li key={it.key}>
-              <strong>{it.author}</strong> {it.body}
+              <div className="turn-head">
+                <span className="turn-author">{it.author}</span>
+              </div>
+              <div className="msg-body">{it.body}</div>
             </li>
           ) : (
             <li key={it.key}>
-              <strong>{it.adapter_id}</strong> {it.text}
-              {it.streaming && <span style={{ opacity: 0.5 }}>▍</span>}
+              <div className="turn-head">
+                <span className="turn-author turn-author-agent">{it.adapter_id}</span>
+                {it.streaming && <span className="working">working…</span>}
+              </div>
+              {/* Agent output is rendered as TEXT with whitespace preserved and
+                  markdown left unparsed (.turn-body sets white-space: pre-wrap).
+                  This is deliberate and closes A4-F8 in the direction §13 requires:
+                  rendering model output as markup is an injection surface, while
+                  preserving newlines is not. Do NOT "improve" this into a markdown
+                  renderer — that needs a sanitisation story and an ADR first. */}
+              <div className="turn-body">
+                {it.text}
+                {it.streaming && <span className="caret">▌</span>}
+              </div>
               {!it.streaming && it.success === false && (
-                <span style={{ color: DOT.closed }}> ⚠ error</span>
+                <div className="turn-error">⚠ the turn failed</div>
               )}
               {!it.streaming && (it.tokens_in != null || it.cost_usd != null) && (
-                <div style={{ fontSize: 12, opacity: 0.55 }}>
+                <div className="meter">
                   {it.tokens_in != null ? `${it.tokens_in}→${it.tokens_out} tok` : ''}
                   {it.cost_usd != null ? ` · $${it.cost_usd}` : ''}
                 </div>
@@ -239,21 +266,25 @@ export default function RoomPage() {
             </li>
           ),
         )}
+        <div ref={tailRef} />
       </ul>
-      <form onSubmit={onSubmit} style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+
+      <form className="composer" onSubmit={onSubmit}>
         <input
+          className="who"
           placeholder="you"
           value={author}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setAuthor(e.target.value)}
-          style={{ width: 100 }}
         />
         <input
+          className="what"
           placeholder="message"
           value={body}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setBody(e.target.value)}
-          style={{ flex: 1 }}
         />
-        <button type="submit">send</button>
+        <button type="submit" disabled={conn === 'refused'}>
+          send
+        </button>
       </form>
     </main>
   );
