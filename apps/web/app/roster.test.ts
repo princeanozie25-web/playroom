@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { loadPrincipals, loadRoster } from './roster';
 import { ACCENT_COUNT, mandateSummary, principalAccent } from './mandate';
 
 // THE DERIVATIONS THAT PUT WORDS AND COLOUR ON SCREEN.
@@ -8,6 +7,11 @@ import { ACCENT_COUNT, mandateSummary, principalAccent } from './mandate';
 // never a hand-written caption. `mandateSummary` is now the thing standing between those two,
 // so it is the thing that has to be tested — a compact summary is exactly where a plausible
 // but wrong phrase would survive unnoticed.
+//
+// The block that asserted "config names every principal the roster refers to" is GONE from
+// here: after S1.1a that is a property of the `members`/`principals` tables and of the API
+// that serves them, and asserting it in a unit test would mean either a live server or a
+// mock of one. It moved to apps/api/test/members.test.ts, against the real records.
 
 describe('mandateSummary — derived, never written', () => {
   it('marks protected actions so "may ask" cannot read as "may do"', () => {
@@ -60,24 +64,5 @@ describe('principal accents', () => {
 
   it('survives four principals without two looking alike', () => {
     expect(ACCENT_COUNT).toBeGreaterThanOrEqual(4);
-  });
-});
-
-describe('config as it actually stands', () => {
-  it('names every principal the roster refers to, so no identifier can reach the screen', () => {
-    const known = new Set(loadPrincipals().map((p) => p.id));
-    for (const m of loadRoster()) {
-      expect(known, `${m.id} refers to ${m.principal}, which config does not name`).toContain(
-        m.principal,
-      );
-      expect(m.principal_name).toBeTruthy();
-      expect(m.accent).not.toBeNull();
-    }
-  });
-
-  it('gives the two current members different accents', () => {
-    const roster = loadRoster();
-    expect(roster.length).toBeGreaterThanOrEqual(2);
-    expect(new Set(roster.map((m) => m.accent)).size).toBe(roster.length);
   });
 });

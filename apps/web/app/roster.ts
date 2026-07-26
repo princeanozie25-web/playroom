@@ -1,19 +1,22 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { parse } from 'yaml';
-import { loadMandates } from '@playroom/fabric';
 import { principalAccent } from './mandate';
 
-// SERVER ONLY. This module reads the filesystem; it must never be imported from a
-// component marked 'use client'. The roster is resolved on the server and handed to
-// the room as props — no YAML parser and no config file ever reaches the browser.
+// THE ROSTER, FETCHED FROM THE API — no filesystem, no YAML parser, no fabric.
 //
-// Until S1.1 lands a real membership model, adapters.yaml doubles as the roster and also
-// carries the principals block. Projected out of it: `id`, `display_name`, `principal`, and
-// each principal's `display_name`. `provider` and `model` are deliberately NOT projected, so
-// the §6 rule — the room, fabric and data model never contain a provider name — survives the
-// web app reading this file at all. (`mandate_label` was projected once and is gone: M-3
-// deleted it because it described authority without being it.)
+// This module used to read adapters.yaml and mandates/ off the disk with `node:fs`, and
+// carried a comment saying SERVER ONLY that was the entire enforcement. UI2-N2 recorded how
+// well that held: a single VALUE import of a pure helper into a client component pulled
+// `node:fs` and `node:crypto` into the browser bundle and broke `next build`, while
+// `pnpm typecheck` stayed green throughout. The previous `import type` had held by accident,
+// being erased at compile time.
+//
+// S1.1a closes it properly rather than more carefully. Members are records now, the API owns
+// them, and this file makes an HTTP call — SO THERE IS NO FILESYSTEM READ LEFT IN THIS PATH
+// TO LEAK. `yaml` and `@playroom/fabric` leave this workspace's dependencies entirely, which
+// is a stronger statement than a comment: the modules that could leak are not reachable.
+//
+// It stays server-side because the room page is a server component — the browser still never
+// makes this call — but that is now a property of where it is used rather than a rule someone
+// has to remember.
 
 export interface RosterMember {
   id: string;
@@ -23,69 +26,21 @@ export interface RosterMember {
    * The member's granted action scope, READ FROM THEIR MANDATE — not from config.
    *
    * This replaced `mandate_label`, a caption in adapters.yaml that described authority
-   * without being it. The chip now renders the mandate's own scope, so the text a
-   * viewer reads and the array the evaluator checks are the same data. A member with
-   * no mandate gets `null` and renders NO mandate text — never "unrestricted".
+   * without being it. The chip renders the mandate's own scope, so the text a viewer reads
+   * and the array the evaluator checks are the same data. A member with no mandate gets
+   * `null` and renders NO mandate text — never "unrestricted".
    */
   scope: string[] | null;
   /**
-   * Actions the mandate lists as protected. Shown so the chip cannot imply that a
-   * granted action is freely exercisable: `pr.merge` in scope means the member may
-   * ASK, and being protected means a human must sign. Reading the scope alone would
-   * make those two look identical.
+   * Actions the mandate lists as protected. Shown so the chip cannot imply that a granted
+   * action is freely exercisable: `pr.merge` in scope means the member may ASK, and being
+   * protected means a human must sign. Reading the scope alone would make those identical.
    */
   protected_actions: string[] | null;
-  /**
-   * The principal's DISPLAY NAME, or null if config does not name them.
-   *
-   * Null renders no affiliation at all. It never falls back to the identifier: putting
-   * `principal:jerry` on screen is the same category error as `mandate_label` was, and the
-   * same rule applies as for a missing mandate — no data, no claim.
-   */
+  /** The principal's display name. Never the identifier — see MemberChip. */
   principal_name: string | null;
-  /**
-   * Which accent this member inherits from its principal, or null if unaffiliated.
-   *
-   * This is what answers "whose authority does this agent carry" without a sentence. An
-   * agent shares its principal's colour, so the question is answered by looking rather
-   * than reading — and it keeps working in a room with four principals, where a clause per
-   * member would not fit.
-   */
+  /** Which accent this member inherits from its principal. */
   accent: number | null;
-}
-
-interface RawEntry {
-  id?: unknown;
-  enabled?: unknown;
-  display_name?: unknown;
-  principal?: unknown;
-}
-
-interface RawPrincipal {
-  id?: unknown;
-  display_name?: unknown;
-}
-
-function str(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null;
-}
-
-// adapters.yaml lives at the repo root. `next dev` and `next start` both run with
-// cwd = apps/web, but the candidates cover a run from the repo root too.
-function yamlPath(): string {
-  const candidates = [
-    resolve(process.cwd(), '../../adapters.yaml'),
-    resolve(process.cwd(), 'adapters.yaml'),
-  ];
-  for (const c of candidates) {
-    try {
-      readFileSync(c);
-      return c;
-    } catch {
-      // try the next candidate
-    }
-  }
-  throw new Error(`adapters.yaml not found (looked in: ${candidates.join(', ')})`);
 }
 
 export interface Principal {
@@ -94,68 +49,78 @@ export interface Principal {
   accent: number;
 }
 
-/**
- * The principals config declares, in declared order — THE ORDER IS THE ACCENT ASSIGNMENT.
- *
- * An entry missing either field is skipped rather than defaulted, so a typo produces a
- * member with no affiliation shown rather than one affiliated to nothing in particular. A
- * duplicate id is ignored: the first declaration wins, so a second copy cannot silently
- * re-colour a principal already on screen.
- *
- * Exported because the DECISION card needs it too — `required_signer` is a principal id and
- * must render as a name there for the same reason it does on a chip.
- */
-export function loadPrincipals(): Principal[] {
-  const parsed: unknown = parse(readFileSync(yamlPath(), 'utf8'));
-  const obj =
-    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  const raw = Array.isArray(obj['principals']) ? (obj['principals'] as RawPrincipal[]) : [];
-  const out: Principal[] = [];
-  const seen = new Set<string>();
-  for (const rp of raw) {
-    const id = str(rp.id);
-    const display_name = str(rp.display_name);
-    if (!id || !display_name || seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, display_name, accent: principalAccent(out.length) });
-  }
-  return out;
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+interface ApiMember {
+  id: string;
+  kind: 'human' | 'agent';
+  display_name: string;
+  principal_id: string;
+  principal_name: string;
+  principal_ordinal: number;
+  adapter_id: string | null;
+  scope: string[] | null;
+  protected_actions: string[] | null;
 }
 
 /**
- * Agent members the roster declares. An entry missing any roster field is SKIPPED,
- * not defaulted: a chip invented from a missing field would be the UI asserting a
- * mandate the config never stated, which is the one thing this surface may not do.
+ * Fetch the member records.
+ *
+ * `no-store`: the roster is small, read once per room render, and a cached copy would show a
+ * member who has been removed. Correctness over a request that costs a millisecond on the
+ * same host.
+ *
+ * A FAILURE HERE IS NOT SWALLOWED. If the API is unreachable the room fails to render, which
+ * is the honest outcome: a room drawn with an empty roster would show agent turns with no
+ * chip, no affiliation and no mandate — a room that looks ungoverned because a fetch failed.
+ * That is RT-001's shape at the page level, and silence is exactly what it must not be.
  */
-export function loadRoster(): RosterMember[] {
-  // Mandates are the authority; adapters.yaml only says who is in the room. A member
-  // with no mandate is still a member — they simply have no granted scope to show.
-  const mandates = loadMandates();
-  const parsed: unknown = parse(readFileSync(yamlPath(), 'utf8'));
-  const obj =
-    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  const entries = Array.isArray(obj['adapters']) ? (obj['adapters'] as RawEntry[]) : [];
+async function fetchMembers(): Promise<ApiMember[]> {
+  const res = await fetch(`${API_URL}/members`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`GET /members failed: ${res.status}`);
+  const body: unknown = await res.json();
+  if (typeof body !== 'object' || body === null || !Array.isArray((body as never)['members'])) {
+    throw new Error('GET /members returned no members array');
+  }
+  return (body as { members: ApiMember[] }).members;
+}
 
-  const principals = new Map(loadPrincipals().map((p) => [p.id, p]));
-
-  const members: RosterMember[] = [];
-  for (const e of entries) {
-    if (e.enabled === false) continue; // a disabled adapter is not in the room
-    const id = str(e.id);
-    const display_name = str(e.display_name);
-    const principal = str(e.principal);
-    if (!id || !display_name || !principal) continue;
-    const m = mandates.get(id)?.mandate;
-    const p = principals.get(principal);
-    members.push({
-      id,
-      display_name,
-      principal,
-      principal_name: p?.display_name ?? null,
-      accent: p?.accent ?? null,
-      scope: m?.scope ?? null,
-      protected_actions: m?.protected_actions ?? null,
+/**
+ * The principals present in the room, in accent order.
+ *
+ * Derived from the members rather than fetched separately: a principal with no member is not
+ * in the room, and would be a colour assigned to nobody.
+ */
+export async function loadPrincipals(): Promise<Principal[]> {
+  const seen = new Map<string, Principal>();
+  for (const m of await fetchMembers()) {
+    if (seen.has(m.principal_id)) continue;
+    seen.set(m.principal_id, {
+      id: m.principal_id,
+      display_name: m.principal_name,
+      accent: principalAccent(m.principal_ordinal),
     });
   }
-  return members;
+  return [...seen.values()].sort((a, b) => a.accent - b.accent);
+}
+
+/**
+ * Agent members, as the roster strip renders them.
+ *
+ * Humans are excluded for the same reason they always were: an agent chip carries a mandate
+ * and a human member has none to show. S1.1b, which adds human members, decides how they
+ * appear — this slice must not change the strip.
+ */
+export async function loadRoster(): Promise<RosterMember[]> {
+  return (await fetchMembers())
+    .filter((m) => m.kind === 'agent')
+    .map((m) => ({
+      id: m.id,
+      display_name: m.display_name,
+      principal: m.principal_id,
+      principal_name: m.principal_name,
+      accent: principalAccent(m.principal_ordinal),
+      scope: m.scope,
+      protected_actions: m.protected_actions,
+    }));
 }

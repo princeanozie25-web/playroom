@@ -18,8 +18,6 @@ const CFG: AdapterConfig = {
   max_output_tokens: 256,
   cost_per_1k_in: 0.001,
   cost_per_1k_out: 0.005,
-  display_name: 'Conformance',
-  principal: 'principal:test',
 };
 
 // This provider's streamed events, in its own shape. The adapter's translation loop

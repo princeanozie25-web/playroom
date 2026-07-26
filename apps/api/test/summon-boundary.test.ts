@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { ServerEvent } from '@playroom/shared';
-import { summonRuling, type SummonRule } from '../src/agent.js';
+import { setMemberTokens, summonRuling, type SummonRule } from '../src/agent.js';
 
 // THE ACTIVATION BOUNDARY (S0.5b).
 //
@@ -12,6 +12,20 @@ import { summonRuling, type SummonRule } from '../src/agent.js';
 // These are pure-function cases against `summonRuling`. The paths that need a database
 // and a socket — replay, concurrent frames, refusal notices, one-turn-per-summon — live
 // in summon-provenance.test.ts, because they are properties of the log, not of the rule.
+
+// THE ROSTER THESE CASES RESOLVE AGAINST, stated rather than inherited.
+//
+// Until S1.1a the token table read adapters.yaml on first use, so every case here depended
+// silently on a config file — and a roster change would have moved these results without
+// touching this file. The roster is member records now and the server installs it at boot,
+// so the fixture is declared here: `@claude` and `@claude-main` mean claude-main, `@sol`
+// means sol, and the prefix pair those cases rely on is visible in the fixture itself.
+beforeAll(() => {
+  setMemberTokens([
+    { id: 'claude-main', display_name: 'Claude', kind: 'agent' },
+    { id: 'sol', display_name: 'Sol', kind: 'agent' },
+  ]);
+});
 
 const msg = (body: string, actor = 'prince'): ServerEvent => ({
   type: 'event',

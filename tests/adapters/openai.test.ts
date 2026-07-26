@@ -18,8 +18,6 @@ const CFG: AdapterConfig = {
   max_output_tokens: 256,
   cost_per_1k_in: 0.0004,
   cost_per_1k_out: 0.0016,
-  display_name: 'Conformance2',
-  principal: 'principal:test',
 };
 
 // This provider's chunk shape — deltas carry text, and usage arrives on a final chunk

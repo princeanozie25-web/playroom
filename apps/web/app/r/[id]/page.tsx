@@ -8,5 +8,8 @@ import { Room } from './Room';
 // where roster metadata should join the payload properly).
 export default async function RoomRoute({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <Room roomId={id} roster={loadRoster()} principals={loadPrincipals()} />;
+  // Both awaited: the roster is records now, fetched from the API rather than read off the
+  // disk. A server component is the right place for that — the browser never makes the call.
+  const [roster, principals] = await Promise.all([loadRoster(), loadPrincipals()]);
+  return <Room roomId={id} roster={roster} principals={principals} />;
 }

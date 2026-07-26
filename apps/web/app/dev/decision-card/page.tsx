@@ -39,7 +39,7 @@ const FIXTURE = DecisionEvent.parse({
   },
 });
 
-export default function DecisionCardFixture() {
+export default async function DecisionCardFixture() {
   if (process.env.NODE_ENV === 'production') notFound();
 
   return (
@@ -51,7 +51,11 @@ export default function DecisionCardFixture() {
         decides, S2.2 signs). Never film this page.
       </p>
       <div style={{ marginTop: 24 }}>
-        <DecisionCard event={FIXTURE} roster={loadRoster()} principals={loadPrincipals()} />
+        <DecisionCard
+          event={FIXTURE}
+          roster={await loadRoster()}
+          principals={await loadPrincipals()}
+        />
       </div>
     </main>
   );

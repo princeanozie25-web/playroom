@@ -5,16 +5,19 @@
 #   https://platform.claude.com/docs/en/docs/about-claude/pricing
 #   Claude Haiku 4.5 — base input $1/MTok, output $5/MTok (→ /1k below).
 # Haiku 4.5 is chosen for a concise, low-latency room agent (§7 first-token budget).
-# ROSTER FIELDS. Until S1.1 lands a real membership model, this file is also the
-# roster: display_name and principal are what the room renders in a member chip. They
-# are read by the web app's SERVER layer, which projects only these two fields plus
-# `id` — `provider` and `model` never leave this file, so §6 holds.
-# packages/adapters ignores them (its zod schema strips unknown keys).
+# ADAPTER CONFIGURATION ONLY, as of S1.1a.
 #
-# `mandate_label` WAS here and is GONE (M-3). It was descriptive text that looked like
-# authority, and the chip now derives its text from the member's actual granted scope
-# in mandates/ — the authority itself rather than a caption of it. A field whose value
-# nothing enforces is a lie-shaped hole; deleting it beats commenting it.
+# `display_name` and `principal` used to live here, and a `principals:` block with them.
+# They were roster facts in an adapter config file, which was correct while the roster WAS
+# configuration. They are records now — `principals` and `members`, migration 007 — and the
+# web tier reads them from the API rather than from this file.
+#
+# `mandate_label` was here too and went in M-3: descriptive text that looked like authority
+# while nothing enforced it. A field whose value nothing enforces is a lie-shaped hole.
+#
+# WHAT REMAINS IS WHAT RUNS AN ADAPTER: which provider, which model, whether it is enabled,
+# its output cap and its prices. This is still the only file in the repository that names a
+# provider (§6), and nothing outside packages/adapters/ reads it.
 adapters:
   - id: claude-main
     provider: anthropic
@@ -23,8 +26,6 @@ adapters:
     max_output_tokens: 1024
     cost_per_1k_in: 0.001
     cost_per_1k_out: 0.005
-    display_name: Claude
-    principal: principal:prince
   - id: sol
     provider: openai
     model: gpt-4o-mini
@@ -33,25 +34,3 @@ adapters:
     # USD per 1,000 tokens. Config, not constants — a price change is not a release.
     cost_per_1k_in: 0.00015
     cost_per_1k_out: 0.0006
-    display_name: Sol
-    principal: principal:jerry
-
-# PRINCIPALS — the people whose authority members carry.
-#
-# Read by the web app's SERVER layer only, exactly like the roster fields above. Two things
-# come from here and nothing else does:
-#
-#   display_name  `principal:jerry` is an INTERNAL IDENTIFIER and must never reach the
-#                 screen — the same category error `mandate_label` was, in the other
-#                 direction. The room says "Jerry".
-#   accent        NOT set here. It is the entry's INDEX in this list, so a principal cannot
-#                 be given a colour another already has, and adding one cannot silently
-#                 recolour an existing member. Order is therefore meaningful; keep it.
-#
-# These are config names, not user-chosen ones. A principal picking their own display name
-# needs an account, which is S1.1 — logged there rather than built as a settings screen.
-principals:
-  - id: principal:prince
-    display_name: Prince
-  - id: principal:jerry
-    display_name: Jerry

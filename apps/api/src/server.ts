@@ -17,6 +17,8 @@ import { RoomBus } from './bus.js';
 import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
+import { listMembers } from './members.js';
+import { setMemberTokens } from './agent.js';
 
 export interface BuildOptions {
   databaseUrl?: string;
@@ -147,6 +149,17 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     if (pool) await pool.end();
   });
 
+  // THE SUMMON TOKEN TABLE, loaded from records before the server accepts anything.
+  //
+  // AWAITED, unlike the warm-up below. A server that is up but cannot resolve `@claude`
+  // would accept messages and summon nobody — silence that looks like a working room, which
+  // is the failure shape this codebase keeps refusing. Failing to start is the honest
+  // outcome, and `listMembers` throws here if a mandate names a member that does not exist.
+  app.addHook('onReady', async () => {
+    if (!pool) return;
+    setMemberTokens(await listMembers(pool));
+  });
+
   // Warm THIS server's own pool and adapter factory. Not a separate pool built at the
   // entry point: connection state is per-object and per-process, so warming a second pool
   // would wake the Neon compute (shared) and leave this server's connections cold
@@ -171,6 +184,16 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       service: 'playroom-api',
       version: PLAYROOM_VERSION,
     }));
+
+    // GET /members → the roster, from records.
+    //
+    // The web tier calls this instead of reading adapters.yaml and mandates/ off the disk.
+    // That is UI2-N2 closed properly: the server-only fence in the web app stops being a
+    // comment and a lucky type-only import, because there is no filesystem read left in that
+    // path to leak `node:fs` into a browser bundle.
+    //
+    // Read-only, no principal-scoped data, and it names no provider (§6).
+    fastify.get('/members', async () => ({ members: await listMembers(db()) }));
 
     // POST /internal/warmup → pay the cold connection costs now, and report what it cost.
     //

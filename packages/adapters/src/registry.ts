@@ -14,10 +14,10 @@ export const AdapterConfig = z
     max_output_tokens: z.number().int().positive(),
     cost_per_1k_in: z.number().nonnegative(),
     cost_per_1k_out: z.number().nonnegative(),
-    // Roster fields. Read by the web server layer for the member chip and by the
-    // summon rule below; `provider` and `model` never leave this package.
-    display_name: z.string().min(1),
-    principal: z.string().min(1),
+    // NO ROSTER FIELDS. `display_name` and `principal` lived here until S1.1a; they are
+    // member records now (migration 007). `.strict()` below means a leftover copy in a
+    // deployed adapters.yaml is a loud boot failure rather than a second, drifting source
+    // of a member's name — which is the failure this move exists to end.
   })
   .strict(); // was z.object(): unknown keys were STRIPPED, so `cost_per_1k_ni: 0.001`
 // parsed clean and priced the adapter at zero. A typo in an authority-or-money field

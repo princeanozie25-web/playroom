@@ -37,24 +37,58 @@ export function isAgentActor(actorId: string): boolean {
 /**
  * Summon tokens, derived FROM THE ROSTER — never hardcoded.
  *
- * This file used to contain a hardcoded summon prefix and a literal member id, which
- * meant enabling a second member required editing app code. That
- * is the §6 anti-lock-in rule failing in the one place it is easiest to miss: the
- * interface was clean, the adapter boundary was clean, and the SELECTOR was hardcoded.
- * Bible §21.2's binary exit — "same prompt routes through either member via roster
- * config, no app-code change" — is only true because of this function.
+ * This file used to contain a hardcoded summon prefix and a literal member id, which meant
+ * enabling a second member required editing app code. That is the §6 anti-lock-in rule
+ * failing in the one place it is easiest to miss: the interface was clean, the adapter
+ * boundary was clean, and the SELECTOR was hardcoded. Bible §21.2's binary exit — "same
+ * prompt routes through either member via roster config, no app-code change" — is only true
+ * because of this function.
  *
- * A member is addressable by `@<display_name>` or `@<id>`, lowercased. Built once per
- * process, same lifetime as the registry cache.
+ * A member is addressable by `@<display_name>` or `@<id>`, lowercased.
+ *
+ * THE SOURCE MOVED IN S1.1a, THE RULE DID NOT. Display names used to come from
+ * adapters.yaml; they are member records now, so the table is SET by the server at boot
+ * (`setMemberTokens`) rather than read from a file on first use. Not one guard in
+ * `summonRuling` changed, and its signature did not either — this function is the boundary's
+ * input, not the boundary.
+ *
+ * IT REFUSES TO GUESS. If the table has not been loaded, `tokenTable()` throws rather than
+ * returning empty. An empty table resolves no tags, which means a room that accepts every
+ * message and summons nobody — a working-looking room that is silently dead. That is the
+ * RT-001 shape, and it is exactly what an unset cache would produce.
  */
 let summonTokens: Map<string, string> | undefined;
+
+/** The subset of a member record this needs. Keeps the boundary off the database. */
+export interface SummonableMember {
+  id: string;
+  display_name: string;
+  kind: 'human' | 'agent';
+}
+
+/**
+ * Install the roster the summon rule resolves tags against. Called once at server ready.
+ *
+ * Only AGENT members become addressable: a summon starts an agent turn, and a `@`-tag naming
+ * a human would resolve to a member with no adapter to run. Humans are addressed by typing
+ * their name like anyone would — S1.1b, which adds human members, does not make them
+ * summonable by doing so.
+ */
+export function setMemberTokens(members: SummonableMember[]): void {
+  const table = new Map<string, string>();
+  for (const m of members) {
+    if (m.kind !== 'agent') continue;
+    table.set(`@${m.display_name.toLowerCase()}`, m.id);
+    table.set(`@${m.id.toLowerCase()}`, m.id);
+  }
+  summonTokens = table;
+}
+
 function tokenTable(): Map<string, string> {
   if (!summonTokens) {
-    summonTokens = new Map();
-    for (const a of listAdapters()) {
-      summonTokens.set(`@${a.display_name.toLowerCase()}`, a.id);
-      summonTokens.set(`@${a.id.toLowerCase()}`, a.id);
-    }
+    throw new Error(
+      'summon token table not loaded — call setMemberTokens() before handling messages',
+    );
   }
   return summonTokens;
 }
