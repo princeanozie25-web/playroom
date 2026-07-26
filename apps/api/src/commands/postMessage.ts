@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { ServerEvent } from '@playroom/shared';
 import { appendMessage, appendSummon } from '../events.js';
-import { summonedAdapterIds } from '../agent.js';
+import { summonRuling } from '../agent.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // Persist a message, fan it out, and — if it summons a member — record the summon and
@@ -13,10 +13,10 @@ import type { CommandContext, CommandDeps } from './context.js';
 // whose summon does not exist is an orphan, and `appendAgentEvent` will not compile
 // without a reference to one.
 //
-// Human-rooted only in S0.5a. `summonedAdapterId` refuses agents and `system` outright,
-// so anything reaching the summon below is a member-authored message — the root is the
-// author, the depth is 0, and there is no chain to inherit. S0.5b adds agent-initiated
-// summons, which inherit a chain and are capped.
+// Human-rooted only. `summonRuling` is the activation boundary: it refuses generated
+// text, non-room content, system output and agent-authored messages BY NAME, so anything
+// reaching the summon below is a member-authored message — the root is the author, the
+// depth is 0, and there is no chain to inherit.
 export async function postMessageCommand(
   deps: CommandDeps,
   ctx: CommandContext,
@@ -34,7 +34,7 @@ export async function postMessageCommand(
   const t1 = performance.now(); // S0.3c span boundary: triggering message committed
   deps.bus.publish(input.roomId, event);
 
-  for (const summoned of summonedAdapterIds(event)) {
+  for (const summoned of summonRuling(event).members) {
     // A REPLAYED FRAME MUST NOT MAKE AN AGENT SPEAK TWICE. Message idempotency does not
     // give this for free, which is what the property test caught: `appendMessage` is
     // idempotent on (room_id, client_msg_id), so a duplicate send commits no second
