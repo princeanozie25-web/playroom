@@ -1,22 +1,17 @@
-import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { ServerEvent } from '@playroom/shared';
-import { appendMessage, appendSummon } from '../events.js';
+import { appendMessage } from '../events.js';
 import { summonRuling } from '../agent.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
-// Persist a message, fan it out, and — if it summons a member — record the summon and
-// trigger the turn, each as its own command through the same entry (ADR-004).
+// Persist a message, fan it out, and dispatch a summon for each member it named — each
+// as its own command through the same entry (ADR-004).
 //
-// EVERY AGENT TURN TRACES TO A HUMAN SUMMON. The summon row is written HERE, before the
-// turn is triggered, because it is the thing that makes the turn legitimate: a turn
-// whose summon does not exist is an orphan, and `appendAgentEvent` will not compile
-// without a reference to one.
-//
-// Human-rooted only. `summonRuling` is the activation boundary: it refuses generated
-// text, non-room content, system output and agent-authored messages BY NAME, so anything
-// reaching the summon below is a member-authored message — the root is the author, the
-// depth is 0, and there is no chain to inherit.
+// THIS FUNCTION NO LONGER BUILDS A SUMMON. It decides WHO was named — `summonRuling` is
+// the activation boundary, refusing generated text, non-room content, system output and
+// agent-authored messages by name — and `summonCommand` decides whether a summon may
+// exist and what it records. One construction site, so depth, root and the null branch
+// are read in one place instead of maintained by convention at each caller.
 export async function postMessageCommand(
   deps: CommandDeps,
   ctx: CommandContext,
@@ -34,44 +29,18 @@ export async function postMessageCommand(
   const t1 = performance.now(); // S0.3c span boundary: triggering message committed
   deps.bus.publish(input.roomId, event);
 
-  for (const summoned of summonRuling(event).members) {
-    // A REPLAYED FRAME MUST NOT MAKE AN AGENT SPEAK TWICE. Message idempotency does not
-    // give this for free, which is what the property test caught: `appendMessage` is
-    // idempotent on (room_id, client_msg_id), so a duplicate send commits no second
-    // message — but it returns the already-committed row, and the code below then read
-    // its seq and summoned against it again. Two turns, one ask, and the zero query
-    // never noticed because both turns were genuinely human-rooted.
-    //
-    // The refusal now lives in migration 005: (room_id, cause_seq, member) is unique
-    // among summon rows, so the second insert loses and `appendSummon` returns null.
-    // The turn is triggered ONLY on a summon this call actually wrote.
-    const summonId = `sum_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
-    const summon = await appendSummon(deps.pool, input.roomId, {
-      summon_id: summonId,
-      member: summoned,
-      requested_by: ctx.actorId,
-      // Human-rooted: the author IS the root. Recorded, not derived — S1.1 is what
-      // makes a member resolvable, and this log has to be checkable before then.
-      root_actor: ctx.actorId,
-      root_is_human: true,
-      depth: 0,
-      cause_seq: event.seq,
-    });
-    if (!summon) continue; // already summoned by this cause; the turn is already running or done
-    deps.bus.publish(input.roomId, summon);
+  const ruling = summonRuling(event);
 
-    void deps
-      .execute(
-        { actorId: summoned, mode: 'hosted' },
-        {
-          kind: 'triggerAgentTurn',
-          roomId: input.roomId,
-          adapterId: summoned,
-          summonId,
-          spans: { t0, t1 },
-        },
-      )
-      .catch(() => {}); // runAgentTurn writes its own error event; this guards the fire-and-forget
+  // Serial, not Promise.all: two summons of two members are two independent turns, but
+  // they share one connection pool and the second gains nothing from racing the first.
+  for (const member of ruling.members) {
+    await deps.execute(ctx, {
+      kind: 'summon',
+      roomId: input.roomId,
+      member,
+      causeSeq: event.seq,
+      spans: { t0, t1 },
+    });
   }
 
   return event;

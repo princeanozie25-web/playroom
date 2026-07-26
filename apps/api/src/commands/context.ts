@@ -22,6 +22,11 @@ export interface TurnSpans {
 export type Command =
   | { kind: 'createRoom'; id?: string; title?: string }
   | { kind: 'postMessage'; roomId: string; clientMsgId: string; body: string }
+  // Ask a member to take a turn. The ONLY way a summon comes into existence — see
+  // commands/summon.ts, which owns depth and the root it records. `member` is an adapter
+  // id the boundary already resolved, never a raw `@token`, and there is no depth field
+  // because the constructor can only produce a human root.
+  | { kind: 'summon'; roomId: string; member: string; causeSeq: number; spans?: TurnSpans }
   | {
       kind: 'triggerAgentTurn';
       roomId: string;

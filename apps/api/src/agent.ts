@@ -25,7 +25,7 @@ function systemPrompt(): { text: string; hash: string } {
 // activation boundary (§22a) — see `summonRuling`. Note what it rests on: `actor_id`
 // arrives unauthenticated from the wire, so this refuses an HONEST claim to be an
 // agent and nothing more. That is why it is not the only barrier.
-function isAgentActor(actorId: string): boolean {
+export function isAgentActor(actorId: string): boolean {
   try {
     getAdapterConfig(actorId);
     return true;
