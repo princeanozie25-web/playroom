@@ -25,3 +25,13 @@ adapters:
     cost_per_1k_out: 0.005
     display_name: Claude
     principal: principal:prince
+  - id: sol
+    provider: openai
+    model: gpt-4o-mini
+    enabled: true
+    max_output_tokens: 1024
+    # USD per 1,000 tokens. Config, not constants — a price change is not a release.
+    cost_per_1k_in: 0.00015
+    cost_per_1k_out: 0.0006
+    display_name: Sol
+    principal: principal:jerry
