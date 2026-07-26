@@ -270,6 +270,65 @@ body {
   border: 1.5px solid var(--ink-3);
 }
 
+/* ── mandate on demand ──────────────────────────────────────────────────────
+   The compact summary is the disclosure trigger. The panel overlays rather than
+   pushing the roster around, so opening one does not move the transcript under it
+   mid-take. */
+.mandate {
+  display: inline-block;
+  position: relative;
+}
+.mandate > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.mandate > summary::-webkit-details-marker {
+  display: none;
+}
+.mandate[open] > summary {
+  border-color: var(--accent-line, var(--line));
+  color: var(--accent, var(--ink));
+}
+.mandate-detail {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + var(--s-2));
+  left: 0;
+  min-width: 240px;
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
+  white-space: normal;
+}
+.mandate-detail-head {
+  font-weight: 650;
+  color: var(--ink);
+  margin-bottom: var(--s-2);
+}
+.mandate-scope {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.mandate-scope li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.mandate-scope code {
+  font-size: var(--t-xs);
+  color: var(--ink);
+}
+.mandate-gated {
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
 /* ── inline member name, in the transcript ──────────────────────────────────
    NOT a chip. A turn shows who is speaking in their principal's colour with their
    shape, and nothing else: no affiliation clause, no mandate, no "human" label.
@@ -329,21 +388,27 @@ body {
   color: var(--indigo);
 }
 
+/* THE MESSAGE IS THE LARGEST THING ON SCREEN, which it previously was not: the byline
+   chip and its mandate text competed with the words. Body copy is one step up the type
+   scale from the byline, and everything around it is one step down. */
 /* Agent output: whitespace preserved, markdown UNPARSED. See the comment in the
    room component — this is an injection-surface decision, not a style choice. */
-.turn-body {
-  white-space: pre-wrap;
+.turn-body,
+.msg-body {
+  font-size: var(--t-md);
+  line-height: 1.55;
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
-
-.msg-body {
-  overflow-wrap: anywhere;
+.turn-body {
+  white-space: pre-wrap;
 }
 
 .caret {
   display: inline-block;
   width: 7px;
-  background: var(--indigo);
+  /* The caret takes the speaking member's accent, inherited from the row. */
+  background: var(--accent, var(--indigo));
   color: transparent;
   animation: blink 1s step-end infinite;
 }
@@ -358,7 +423,7 @@ body {
   align-items: center;
   gap: var(--s-2);
   font-size: var(--t-xs);
-  color: var(--indigo);
+  color: var(--accent, var(--indigo));
   font-weight: 600;
 }
 

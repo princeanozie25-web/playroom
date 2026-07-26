@@ -56,14 +56,36 @@ export function MemberChip({ member, name }: { member?: RosterMember; name: stri
       {/* Affiliation, as a NAME. `principal:jerry` is an internal identifier and never
           reaches the screen; null renders nothing rather than falling back to the id. */}
       {member?.principal_name && <span className="chip-meta">for {member.principal_name}</span>}
-      {summary && (
-        <span
-          className="chip-mandate"
-          title="granted scope, from this member's mandate"
-          {...pr(HOOK.mandateSummary)}
-        >
-          {summary}
-        </span>
+      {summary && member && (
+        /* AVAILABLE, NOT SHOUTED. The compact summary is always visible because beat 1
+           reads it; the full namespaced scope is one click away rather than permanently on
+           screen. `details` rather than a tooltip: it works on tap, it is keyboard
+           reachable, and it needs no dependency. */
+        <details className="mandate">
+          <summary className="chip-mandate" {...pr(HOOK.mandateSummary)}>
+            {summary}
+          </summary>
+          <div className="mandate-detail" {...pr(HOOK.mandateDetail)}>
+            <div className="mandate-detail-head">
+              {member.display_name}
+              {member.principal_name ? ` acts for ${member.principal_name}` : ''}
+            </div>
+            <ul className="mandate-scope">
+              {member.scope?.map((action) => {
+                const gated = member.protected_actions?.includes(action) ?? false;
+                return (
+                  <li key={action}>
+                    <code>{action}</code>
+                    {gated && <span className="mandate-gated">needs a human signature</span>}
+                  </li>
+                );
+              })}
+            </ul>
+            {/* Everything here is a field of the mandate document. There is no summary
+                sentence, no total, and no "and more" — a disclosure that added a word the
+                mandate does not contain would be the same failure as mandate_label. */}
+          </div>
+        </details>
       )}
     </span>
   );

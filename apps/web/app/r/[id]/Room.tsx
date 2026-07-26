@@ -281,7 +281,16 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
               <DecisionCard event={it.event} roster={roster} />
             </li>
           ) : (
-            <li key={it.key} {...pr(HOOK.turn)} data-pr-member={it.adapter_id}>
+            /* `data-accent` on the ROW, so the caret and the working indicator inherit the
+               speaking member's colour — custom properties cascade, a class would not. */
+            <li
+              key={it.key}
+              {...pr(HOOK.turn)}
+              data-pr-member={it.adapter_id}
+              {...(byId.get(it.adapter_id)?.accent != null
+                ? { 'data-accent': byId.get(it.adapter_id)?.accent }
+                : {})}
+            >
               <div className="turn-head">
                 <MemberName member={byId.get(it.adapter_id)} name={it.adapter_id} />
                 {it.streaming && <span className="working">working…</span>}

@@ -28,8 +28,10 @@ export const HOOK = {
   roster: 'roster',
   /** One roster entry. Carries `data-pr-member`. */
   rosterMember: 'roster-member',
-  /** The compact mandate summary inside a roster entry. */
+  /** The compact mandate summary inside a roster entry. Also the disclosure trigger. */
   mandateSummary: 'mandate-summary',
+  /** The full mandate detail, revealed on demand from a roster entry. */
+  mandateDetail: 'mandate-detail',
   /** The transcript list. */
   transcript: 'transcript',
   /** A human message row. */
