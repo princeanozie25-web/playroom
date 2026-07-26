@@ -1,0 +1,12 @@
+{
+  "mandate_id": "mnd_claude_main_review",
+  "principal": "principal:prince",
+  "member": "claude-main",
+  "scope": ["room.post", "pr.review", "pr.comment"],
+  "protected_actions": ["pr.merge", "deploy"],
+  "co_sign": { "actions": ["pr.merge", "deploy"], "by": "principal" },
+  "limits": { "interrupts_per_day": 6, "postage_per_day": 200 },
+  "counterparties": "roster_only",
+  "policy_version": "playroom-policy/1.0",
+  "expires": "2026-11-30T00:00:00Z"
+}

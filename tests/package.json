@@ -1,0 +1,10 @@
+{
+  "name": "@playroom/tests",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@playroom/fabric": "workspace:*",
+    "@playroom/shared": "workspace:*"
+  }
+}

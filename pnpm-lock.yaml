@@ -98,11 +98,26 @@ importers:
         specifier: ^3.23.0
         version: 3.25.76
 
+  packages/fabric:
+    dependencies:
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+
   packages/shared:
     dependencies:
       zod:
         specifier: ^3.23.0
         version: 3.25.76
+
+  tests:
+    devDependencies:
+      '@playroom/fabric':
+        specifier: workspace:*
+        version: link:../packages/fabric
+      '@playroom/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
 
 packages:
 
