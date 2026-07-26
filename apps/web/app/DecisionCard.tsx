@@ -22,7 +22,7 @@ import type { RosterMember } from './roster';
 // still renders as an explicit refusal rather than being dropped — the A4-F1 lesson
 // applied to a lookup table.
 const REASONS: Record<string, string> = {
-  PROTECTED_ACTION: 'this action is protected and is never granted by a mandate',
+  PROTECTED_ACTION: 'this action is protected — the mandate grants it, but a human must sign',
   OUT_OF_SCOPE: 'this action is not in the scope the mandate grants',
   MANDATE_EXPIRED: "the member's mandate has expired",
   NO_MANDATE: 'this member has no mandate, so has no authority',
