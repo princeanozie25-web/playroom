@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
+import { loadMandates } from '@playroom/fabric';
 
 // SERVER ONLY. This module reads the filesystem; it must never be imported from a
 // component marked 'use client'. The roster is resolved on the server and handed to
@@ -17,19 +18,21 @@ export interface RosterMember {
   display_name: string;
   principal: string;
   /**
-   * DESCRIPTIVE TEXT, NOT AUTHORITY.
+   * The member's granted action scope, READ FROM THEIR MANDATE — not from config.
    *
-   * This is what the roster *says* a member is for. It is not consulted by
-   * anything, it gates nothing, and no code branches on it. It cannot deny an
-   * action and it cannot grant one — the mandate engine that will do that
-   * does not exist yet (S2.1).
-   *
-   * When S2.1 lands, this field is replaced by the effective mandate hash and the
-   * human-readable label is DERIVED from the mandate — not the other way round.
-   * Anything that starts reading this string to make a decision has inverted the
-   * dependency and reintroduced the exact failure the fabric exists to prevent.
+   * This replaced `mandate_label`, a caption in adapters.yaml that described authority
+   * without being it. The chip now renders the mandate's own scope, so the text a
+   * viewer reads and the array the evaluator checks are the same data. A member with
+   * no mandate gets `null` and renders NO mandate text — never "unrestricted".
    */
-  mandate_label: string;
+  scope: string[] | null;
+  /**
+   * Actions the mandate lists as protected. Shown so the chip cannot imply that a
+   * granted action is freely exercisable: `pr.merge` in scope means the member may
+   * ASK, and being protected means a human must sign. Reading the scope alone would
+   * make those two look identical.
+   */
+  protected_actions: string[] | null;
 }
 
 interface RawEntry {
@@ -37,7 +40,6 @@ interface RawEntry {
   enabled?: unknown;
   display_name?: unknown;
   principal?: unknown;
-  mandate_label?: unknown;
 }
 
 function str(v: unknown): string | null {
@@ -68,6 +70,9 @@ function yamlPath(): string {
  * mandate the config never stated, which is the one thing this surface may not do.
  */
 export function loadRoster(): RosterMember[] {
+  // Mandates are the authority; adapters.yaml only says who is in the room. A member
+  // with no mandate is still a member — they simply have no granted scope to show.
+  const mandates = loadMandates();
   const parsed: unknown = parse(readFileSync(yamlPath(), 'utf8'));
   const entries =
     typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as never)['adapters'])
@@ -80,9 +85,15 @@ export function loadRoster(): RosterMember[] {
     const id = str(e.id);
     const display_name = str(e.display_name);
     const principal = str(e.principal);
-    const mandate_label = str(e.mandate_label);
-    if (!id || !display_name || !principal || !mandate_label) continue;
-    members.push({ id, display_name, principal, mandate_label });
+    if (!id || !display_name || !principal) continue;
+    const m = mandates.get(id)?.mandate;
+    members.push({
+      id,
+      display_name,
+      principal,
+      scope: m?.scope ?? null,
+      protected_actions: m?.protected_actions ?? null,
+    });
   }
   return members;
 }

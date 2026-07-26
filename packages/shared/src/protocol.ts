@@ -12,6 +12,33 @@ export const ClientSend = z.object({
 });
 export type ClientSend = z.infer<typeof ClientSend>;
 
+// Client → server: a request to perform a governed action on behalf of a member.
+//
+// This is the transport for the action surface the command layer already dispatches on
+// — not a new product surface. It is the same shape a host sidecar sends (Bible §3.2:
+// "Buzz calls the sidecar before protected actions"), with the Playroom client standing
+// in as the caller until hosts exist.
+//
+// A chat message is NOT one of these. Room content is not a governed action: mandates
+// bind members to the principals who grant them (Bible §9.1), and a human typing in
+// their own room acts as a principal, not under a mandate.
+//
+// `subject` is UNAUTHENTICATED in v0 — any caller may name any member. S1.2 stamps
+// identity at the gateway and drops unstamped messages; until then this frame proves
+// the evaluator, not the identity. Recorded as a finding rather than left implicit.
+export const ClientRequestAction = z.object({
+  type: z.literal('request_action'),
+  client_msg_id: z.string().min(1),
+  subject: z.string().min(1), // the member the action is attributed to
+  action: z.string().min(1), // action type, matched against mandate scope
+  resource: z.string().min(1), // what it is against
+});
+export type ClientRequestAction = z.infer<typeof ClientRequestAction>;
+
+/** Every frame a client may send. Parsed as a union; an unknown `type` is dropped. */
+export const ClientFrame = z.discriminatedUnion('type', [ClientSend, ClientRequestAction]);
+export type ClientFrame = z.infer<typeof ClientFrame>;
+
 // Server → client: a persisted event, replayed on resume and tailed live.
 // Fields common to every event; the discriminator is `event_type`.
 const eventBase = {
@@ -63,16 +90,31 @@ export const AgentTurnCompleted = z.object({
 // one possible input: a `decision` row in the event log. There is deliberately no
 // other way to make that card appear, because a demo surface able to display a block
 // the fabric did not produce would make the product a lie.
+// Bible §9.3's decision contract, minus `signature` (mandates are unsigned in v0 —
+// omit, never stub) and minus the replay fields `nonce` / `expires_at` / `request_id`
+// (S2.1 owns replay protection and the decisions table they live in). `room_id` is
+// already on the event envelope, so it is not duplicated into the payload.
+//
+// This REPLACED an earlier shape invented in S-UI (`attempted_by`, a human-readable
+// `reason`) which predated the Bible landing in the repository. The canonical contract
+// wins and the card yields to it: `subject` is the member, and the human sentence is
+// derived from `reason_code` in the UI, because the code is data and the sentence is
+// presentation.
 export const DecisionEvent = z.object({
   ...eventBase,
   event_type: z.literal('decision'),
   payload: z.object({
     decision_id: z.string(),
-    action: z.string(), // the attempted action, e.g. "pr.merge"
-    attempted_by: z.string(), // member id that attempted it
-    reason: z.string(), // human-readable: why it was stopped
-    reason_code: z.string(), // open string — see the code convention note above
-    required_signer: z.string(), // the principal who must co-sign
+    subject: z.string(), // the member the decision is about
+    principal: z.string(), // who that member speaks for
+    action: z.string(), // e.g. "pr.merge"
+    resource: z.string(), // e.g. "repo:playroom/playroom#pr-41"
+    arguments_hash: z.string(), // sha256 over the canonical arguments
+    decision: z.string(), // ALLOW | CO_SIGN | BLOCK — open per the code convention
+    reason_code: z.string(), // e.g. PROTECTED_ACTION — open string, see above
+    required_signer: z.string().nullable(), // null unless a human must sign
+    effective_mandate_hash: z.string().nullable(),
+    policy_version: z.string().nullable(),
   }),
 });
 

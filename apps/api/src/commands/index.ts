@@ -10,6 +10,7 @@ import {
 import { createRoomCommand } from './createRoom.js';
 import { postMessageCommand } from './postMessage.js';
 import { triggerAgentTurnCommand } from './triggerAgentTurn.js';
+import { requestActionCommand } from './requestAction.js';
 
 export * from './context.js';
 
@@ -35,6 +36,18 @@ export function executeCommand(
 ): Promise<void>;
 export function executeCommand(
   ctx: CommandContext,
+  command: {
+    kind: 'requestAction';
+    roomId: string;
+    clientMsgId: string;
+    subject: string;
+    action: string;
+    resource: string;
+  },
+  deps: CommandDeps,
+): Promise<void>;
+export function executeCommand(
+  ctx: CommandContext,
   command: Command,
   deps: CommandDeps,
 ): Promise<unknown>;
@@ -54,5 +67,7 @@ export function executeCommand(
       return postMessageCommand(deps, ctx, command);
     case 'triggerAgentTurn':
       return triggerAgentTurnCommand(deps, ctx, command);
+    case 'requestAction':
+      return requestActionCommand(deps, ctx, command);
   }
 }

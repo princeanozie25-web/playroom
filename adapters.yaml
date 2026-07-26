@@ -5,14 +5,16 @@
 #   https://platform.claude.com/docs/en/docs/about-claude/pricing
 #   Claude Haiku 4.5 — base input $1/MTok, output $5/MTok (→ /1k below).
 # Haiku 4.5 is chosen for a concise, low-latency room agent (§7 first-token budget).
-# ROSTER FIELDS (S-UI). Until S1.1 lands a real membership model, this file is also
-# the roster: display_name, principal and mandate_label are what the room renders in
-# a member chip. They are read by the web app's SERVER layer, which projects only
-# these three fields plus `id` — `provider` and `model` never leave this file, so §6
-# holds. packages/adapters ignores them (its zod schema strips unknown keys).
+# ROSTER FIELDS. Until S1.1 lands a real membership model, this file is also the
+# roster: display_name and principal are what the room renders in a member chip. They
+# are read by the web app's SERVER layer, which projects only these two fields plus
+# `id` — `provider` and `model` never leave this file, so §6 holds.
+# packages/adapters ignores them (its zod schema strips unknown keys).
 #
-# mandate_label is DESCRIPTIVE TEXT, NOT AUTHORITY. Nothing consults it and it
-# enforces nothing. See the note in apps/web/app/roster.ts.
+# `mandate_label` WAS here and is GONE (M-3). It was descriptive text that looked like
+# authority, and the chip now derives its text from the member's actual granted scope
+# in mandates/ — the authority itself rather than a caption of it. A field whose value
+# nothing enforces is a lie-shaped hole; deleting it beats commenting it.
 adapters:
   - id: claude-main
     provider: anthropic
@@ -22,5 +24,4 @@ adapters:
     cost_per_1k_in: 0.001
     cost_per_1k_out: 0.005
     display_name: Claude
-    principal: prince
-    mandate_label: summon-only
+    principal: principal:prince

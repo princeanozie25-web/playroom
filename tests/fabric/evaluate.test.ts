@@ -330,10 +330,13 @@ describe('the shipped mandates load', () => {
     const claude = loadMandates().get('claude-main');
     const merge = evaluate({ type: 'pr.merge', resource: 'r' }, 'claude-main', claude, NOW);
     const review = evaluate({ type: 'pr.review', resource: 'r' }, 'claude-main', claude, NOW);
-    // pr.merge is protected AND absent from scope, so the shipped posture is a BLOCK:
-    // the strongest possible answer, and the one the deck's sentence describes.
-    expect(merge.decision).toBe('BLOCK');
-    expect(merge.reason_code).toBe('OUT_OF_SCOPE');
+    // The SHIPPED posture: pr.merge is granted but protected, so it reaches CO_SIGN and
+    // names a human — deck beat 5. (The other posture, merge absent from scope entirely,
+    // yields BLOCK and is covered by table cases 11 and 16. Both are proven; only one
+    // can be what the demo room actually shows.)
+    expect(merge.decision).toBe('CO_SIGN');
+    expect(merge.reason_code).toBe('PROTECTED_ACTION');
+    expect(merge.required_signer).toBe('principal:prince');
     expect(review.decision).toBe('ALLOW');
   });
 });

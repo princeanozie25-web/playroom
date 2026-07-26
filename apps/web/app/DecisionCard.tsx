@@ -17,13 +17,24 @@ import type { RosterMember } from './roster';
 // must not be: acting on a decision is the co-sign flow, and pretending to sign one
 // would be exactly the fake governance this slice forbids.
 
+// reason_code is DATA; this sentence is PRESENTATION. The code arrives as an open
+// string (CONTRIBUTING: open strings for taxonomies that grow), so an unknown code
+// still renders as an explicit refusal rather than being dropped — the A4-F1 lesson
+// applied to a lookup table.
+const REASONS: Record<string, string> = {
+  PROTECTED_ACTION: 'this action is protected and is never granted by a mandate',
+  OUT_OF_SCOPE: 'this action is not in the scope the mandate grants',
+  MANDATE_EXPIRED: "the member's mandate has expired",
+  NO_MANDATE: 'this member has no mandate, so has no authority',
+};
+
 export function DecisionCard({ event, roster }: { event: DecisionEvent; roster: RosterMember[] }) {
   const p = event.payload;
-  const attempted = roster.find((m) => m.id === p.attempted_by);
+  const attempted = roster.find((m) => m.id === p.subject);
 
   return (
     <section className="decision" aria-label="decision required">
-      <div className="decision-kicker">Decision · blocked pending co-signature</div>
+      <div className="decision-kicker">Decision · {p.decision}</div>
       <div className="decision-action">
         <code>{p.action}</code>
       </div>
@@ -31,16 +42,28 @@ export function DecisionCard({ event, roster }: { event: DecisionEvent; roster: 
       <dl className="decision-rows">
         <dt>Attempted by</dt>
         <dd>
-          <MemberChip member={attempted} name={p.attempted_by} inline />
+          <MemberChip member={attempted} name={p.subject} inline />
         </dd>
 
         <dt>Stopped because</dt>
         <dd>
-          {p.reason} <span className="decision-pending">({p.reason_code})</span>
+          {REASONS[p.reason_code] ?? 'refused'}{' '}
+          <span className="decision-pending">({p.reason_code})</span>
         </dd>
 
-        <dt>Requires</dt>
-        <dd>a co-signature from {p.required_signer}</dd>
+        {p.required_signer && (
+          <>
+            <dt>Requires</dt>
+            <dd>a co-signature from {p.required_signer}</dd>
+          </>
+        )}
+
+        <dt>Under mandate</dt>
+        <dd className="decision-pending">
+          {p.effective_mandate_hash
+            ? p.effective_mandate_hash.slice(0, 23) + '\u2026'
+            : 'no mandate'}
+        </dd>
       </dl>
 
       <div className="decision-actions">

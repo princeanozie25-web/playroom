@@ -11,7 +11,7 @@ const nextConfig = {
   // a close code defined in two places will drift, and a runtime import from a
   // devDependency breaks on a pruned production install). It ships raw TypeScript
   // from src/, so Next must compile it rather than treat it as a built package.
-  transpilePackages: ['@playroom/shared'],
+  transpilePackages: ['@playroom/shared', '@playroom/fabric'],
 
   webpack(config) {
     // The package uses NodeNext specifiers — `export * from './protocol.js'` pointing

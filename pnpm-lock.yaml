@@ -38,6 +38,9 @@ importers:
       '@playroom/adapters':
         specifier: workspace:*
         version: link:../../packages/adapters
+      '@playroom/fabric':
+        specifier: workspace:*
+        version: link:../../packages/fabric
       '@playroom/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -60,6 +63,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@playroom/fabric':
+        specifier: workspace:*
+        version: link:../../packages/fabric
       '@playroom/shared':
         specifier: workspace:*
         version: link:../../packages/shared

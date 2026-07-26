@@ -25,11 +25,17 @@ const FIXTURE = DecisionEvent.parse({
   event_type: 'decision',
   payload: {
     decision_id: 'dec_fixture',
+    subject: 'claude-main',
+    principal: 'principal:prince',
     action: 'pr.merge',
-    attempted_by: 'claude-main',
-    reason: 'merging is a protected action and is never granted by a mandate',
-    reason_code: 'protected_action',
-    required_signer: 'prince',
+    resource: 'repo:playroom/playroom#pr-41',
+    arguments_hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+    decision: 'CO_SIGN',
+    reason_code: 'PROTECTED_ACTION',
+    required_signer: 'principal:prince',
+    effective_mandate_hash:
+      'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+    policy_version: 'playroom-policy/1.0',
   },
 });
 

@@ -1,7 +1,12 @@
 import type { RosterMember } from './roster';
 
-// The member chip. Renders `Claude · speaks for prince · summon-only` from the three
-// roster fields and nothing else.
+// The member chip. Renders `Claude · speaks for prince · pr.review, pr.comment` — the
+// name, the principal, and the member's ACTUAL GRANTED SCOPE read from their mandate.
+//
+// The scope is the authority, not a caption of it: the array a viewer reads here is the
+// array the evaluator checks. `mandate_label` used to sit in adapters.yaml describing
+// authority that nothing enforced; M-3 deleted it rather than leave a lie-shaped hole.
+// A member with no mandate renders NO mandate text — never "unrestricted".
 //
 // It NEVER invents a field. An agent with no roster entry renders as a bare name
 // with no principal and no mandate — a chip that filled those in with a placeholder
@@ -36,8 +41,15 @@ export function MemberChip({
       {member ? (
         <>
           <span className="chip-meta">speaks for {member.principal}</span>
-          {/* Descriptive text, not authority — see RosterMember.mandate_label. */}
-          <span className="chip-mandate">{member.mandate_label}</span>
+          {/* Derived from the mandate's scope. Absent mandate renders nothing at all. */}
+          {member.scope && member.scope.length > 0 && (
+            <span className="chip-mandate" title="granted scope, from this member's mandate">
+              {member.scope
+                .filter((a) => a !== 'room.post')
+                .map((a) => (member.protected_actions?.includes(a) ? `${a} (co-sign)` : a))
+                .join(', ') || 'post only'}
+            </span>
+          )}
         </>
       ) : (
         <span className="chip-meta">human</span>

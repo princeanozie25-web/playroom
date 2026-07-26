@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import fastifyWebsocket from '@fastify/websocket';
 import {
   PLAYROOM_VERSION,
-  ClientSend,
+  ClientFrame,
   ServerHello,
   ServerErrorFrame,
   ERROR_ROOM_NOT_FOUND,
@@ -25,6 +25,9 @@ export interface BuildOptions {
   // that nobody has ever observed is indistinguishable from no logging at all —
   // which is how A4-F1 stayed invisible.
   loggerStream?: NodeJS.WritableStream;
+  // Raise the level for a test that must observe an info-level record — notably the
+  // Bible §9.2 audit line for an ALLOW, which is mandatory but not a warning.
+  logLevel?: string;
 }
 
 const WS_OPEN = 1; // ws.WebSocket.OPEN
@@ -38,7 +41,7 @@ const HEARTBEAT_MS = 15_000;
 function loggerOptions(opts: BuildOptions): FastifyServerOptions['logger'] {
   const isTest = process.env.NODE_ENV === 'test';
   return {
-    level: process.env.LOG_LEVEL ?? (isTest ? 'warn' : 'info'),
+    level: opts.logLevel ?? process.env.LOG_LEVEL ?? (isTest ? 'warn' : 'info'),
     // Never let a credential reach the log. Paths cover the shapes that actually
     // carry secrets here: request headers, and any object field whose name looks
     // like a key, token, password or connection string.
@@ -110,6 +113,9 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       return db();
     },
     bus,
+    // One logger for the whole process (F1). The command layer logs through the same
+    // destination the server does, so an evaluation is observable wherever requests are.
+    log: app.log,
     adapterFactory,
     execute: (ctx, command) => executeCommand(ctx, command, deps),
   };
@@ -220,15 +226,30 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           .then(async () => {
             // Refused socket (or one that failed to open): never attempt the write.
             if (!(await accepted)) return;
-            let msg: ClientSend;
+            let msg: ClientFrame;
             try {
-              msg = ClientSend.parse(JSON.parse(raw.toString()));
+              msg = ClientFrame.parse(JSON.parse(raw.toString()));
             } catch {
               return; // drop malformed frames — never trust unparsed wire data
             }
-            // Thin translation: the postMessage command persists, fans out, and
-            // (for a human @claude message) triggers the agent turn — all through
-            // the single entry (ADR-004). The send path stays serialized per socket.
+            // Thin translation. Both frames go through the single entry (ADR-004):
+            // `send` persists room content, `request_action` traverses the mandate
+            // evaluator. Neither bypasses executeCommand.
+            if (msg.type === 'request_action') {
+              await executeCommand(
+                { actorId: msg.subject, mode: 'hosted' },
+                {
+                  kind: 'requestAction',
+                  roomId,
+                  clientMsgId: msg.client_msg_id,
+                  subject: msg.subject,
+                  action: msg.action,
+                  resource: msg.resource,
+                },
+                deps,
+              );
+              return;
+            }
             await executeCommand(
               { actorId: msg.author, mode: 'human' },
               { kind: 'postMessage', roomId, clientMsgId: msg.client_msg_id, body: msg.body },

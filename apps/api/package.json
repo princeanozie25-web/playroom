@@ -9,6 +9,7 @@
   "dependencies": {
     "@fastify/websocket": "^11.0.0",
     "@playroom/adapters": "workspace:*",
+    "@playroom/fabric": "workspace:*",
     "@playroom/shared": "workspace:*",
     "fastify": "^5.2.0",
     "pg": "^8.13.0"

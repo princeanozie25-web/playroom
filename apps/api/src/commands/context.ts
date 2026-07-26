@@ -22,14 +22,33 @@ export interface TurnSpans {
 export type Command =
   | { kind: 'createRoom'; id?: string; title?: string }
   | { kind: 'postMessage'; roomId: string; clientMsgId: string; body: string }
-  | { kind: 'triggerAgentTurn'; roomId: string; adapterId: string; spans?: TurnSpans };
+  | { kind: 'triggerAgentTurn'; roomId: string; adapterId: string; spans?: TurnSpans }
+  // A governed action request. Traverses the mandate evaluator; nothing executes.
+  | {
+      kind: 'requestAction';
+      roomId: string;
+      clientMsgId: string;
+      subject: string;
+      action: string;
+      resource: string;
+    };
 
 // Dependencies the command handlers need. `execute` lets a handler re-enter the
 // single entry (e.g. postMessage triggering an agent turn) so the trigger decision
 // still passes through executeCommand — without a circular import between modules.
+// The subset of the Fastify logger the command layer needs. Passed in rather than
+// imported so a handler cannot log to a different destination than the server does —
+// A4-F1 was an unobserved logger, and one logger is easier to observe than two.
+export interface CommandLogger {
+  info: (obj: object, msg: string) => void;
+  warn: (obj: object, msg: string) => void;
+  error: (obj: object, msg: string) => void;
+}
+
 export interface CommandDeps {
   pool: Pool;
   bus: RoomBus;
+  log: CommandLogger;
   adapterFactory: (id: string) => AgentAdapter;
   execute: (ctx: CommandContext, command: Command) => Promise<unknown>;
 }

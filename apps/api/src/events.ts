@@ -123,6 +123,43 @@ export async function appendMessage(
   return rowToServerEvent(existing.rows[0]);
 }
 
+// The decision payload, as the fabric produced it. Structurally this can only be
+// built from a Verdict (see commands/requestAction.ts) — there is no other constructor
+// and no default, so a decision row cannot exist without an evaluation behind it.
+export interface DecisionPayload {
+  decision_id: string;
+  subject: string;
+  principal: string;
+  action: string;
+  resource: string;
+  arguments_hash: string;
+  decision: string;
+  reason_code: string;
+  required_signer: string | null;
+  effective_mandate_hash: string | null;
+  policy_version: string | null;
+}
+
+// Append a decision event. No migration was needed: `payload` is JSONB and
+// `event_type` is TEXT, so Bible §9.3's shape lands in the existing log unchanged.
+// (Bible §19 also specifies a dedicated `decisions` table — that is S2.1's signed
+// authority record, with nonce and consumed_at for replay. This is the room's event
+// log, which is what the card reads.)
+export async function appendDecision(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: DecisionPayload,
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, event_type, payload)
+     VALUES ($1, $2, 'decision', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
 // §17 telemetry written on an agent.turn.completed row.
 export interface AgentTelemetry {
   adapter_id: string;

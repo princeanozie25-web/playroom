@@ -9,5 +9,15 @@
   },
   "include": ["src/**/*", "test/**/*"],
   "exclude": ["node_modules", "dist", "dist-test"],
-  "references": [{ "path": "../../packages/shared" }, { "path": "../../packages/adapters" }]
+  "references": [
+    {
+      "path": "../../packages/shared"
+    },
+    {
+      "path": "../../packages/adapters"
+    },
+    {
+      "path": "../../packages/fabric"
+    }
+  ]
 }
