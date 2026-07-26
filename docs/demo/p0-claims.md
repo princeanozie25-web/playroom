@@ -12,8 +12,17 @@ the DECISION card has exactly one possible input, `appendAgentEvent` will not co
 without a summon, the co-sign buttons are inert by construction. A caption can undo all of
 it in ninety seconds, and no test will catch that.
 
-Recorded take: **take 6**, 56.5s, one continuous take, production build. See
+Recorded take: **take 10**, 52.2s, one continuous take, production build. See
 [p0-take-log.md](p0-take-log.md) for provenance and per-beat assertions.
+
+**The surface changed after the first cut; the claims did not.** Take 6 was shot on the
+pre-S-UI2 room, take 10 on the redesigned one. S-UI2 was appearance work — identity became
+colour and shape, the roster became the dense surface, the decision card became sentences —
+and **it changed no capability whatsoever**. Every entry in the what-it-does-not-prove
+column below is unchanged from the take 6 version of this document, and one entry got
+LONGER rather than shorter. A claims sheet that quietly shrinks after a redesign is the
+exact failure it exists to prevent, so the diff is stated plainly: one finding closed
+(S06-N3, by rewording), nothing else moved.
 
 ---
 
@@ -21,10 +30,10 @@ Recorded take: **take 6**, 56.5s, one continuous take, production build. See
 
 ### Beat 1 — the room opens
 
-|                      |                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **What it proves**   | Two agent members coexist in one room under **different principals**, and their granted authority differs and is visible. The scope text on each chip is read from that member's mandate file — it is the same array the evaluator checks, not a caption of it. Claude carries `pr.merge (co-sign)`; Sol does not carry `pr.merge` at all.                                                                        |
-| **What it does NOT** | **Identity is not authenticated.** The roster asserts that Claude speaks for `principal:prince` and Sol for `principal:jerry`; **nothing verifies either claim.** There is no principal table, no membership model, no signature — `adapters.yaml` says so and the UI renders what it says. S1.1 lands membership, S1.2 stamps identity. Until then the chips are an assertion of intent, not proof of authority. |
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | Two agent members coexist in one room under **different principals**, and their granted authority differs and is visible. The scope text on each chip is read from that member's mandate file — it is the same array the evaluator checks, not a caption of it. Claude reads `review + comment, merge (co-sign)`; Sol reads `review + comment only` and does not carry merge at all. Each also wears its principal's accent, so the affiliation is answered by looking rather than reading.                                                          |
+| **What it does NOT** | **Identity is not authenticated.** The roster asserts that Claude acts for Prince and Sol for Jerry — and since S-UI2 those are display names read from the same config, which makes the assertion _read_ more like a fact while remaining exactly as unverified. **Nothing verifies either claim.** There is no principal table, no membership model, no signature — `adapters.yaml` says so and the UI renders what it says. S1.1 lands membership, S1.2 stamps identity. Until then the chips are an assertion of intent, not proof of authority. |
 
 Also not shown, and worth knowing before anyone captions it: **no provider name appears
 anywhere on screen, by design** (Roadmap §6 — the room, the fabric and the data model never
@@ -56,10 +65,10 @@ the screen as the evidence.
 
 ### Beat 5 — a `pr.merge` request, and the DECISION card
 
-|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **What it proves**   | A real server-side evaluation against a real mandate document, producing a real `decision` row in the event log, rendered by a card whose **only possible input is that row**. `PROTECTED_ACTION` is the reason code the evaluator returned; `principal:prince` is the signer the mandate names; `sha256:1af314ca8427474e…` is the hash of the mandate that was actually in force. **Nothing merges** — no side effect was attempted and no integration exists to attempt one against. |
-| **What it does NOT** | Five things, each of which a caption could get wrong. They are listed separately below because this is the beat that carries the whole film.                                                                                                                                                                                                                                                                                                                                           |
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **What it proves**   | A real server-side evaluation against a real mandate document, producing a real `decision` row in the event log, rendered by a card whose **only possible input is that row**. `PROTECTED_ACTION` is the reason code the evaluator returned; Prince is the signer the mandate names (rendered from config — the identifier itself no longer reaches the screen); `sha256:1af314ca8427474e…` is the hash of the mandate that was actually in force. **Nothing merges** — no side effect was attempted and no integration exists to attempt one against. |
+| **What it does NOT** | Five things, each of which a caption could get wrong. They are listed separately below because this is the beat that carries the whole film.                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ---
 
@@ -72,10 +81,18 @@ describes. **Agents cannot initiate structured actions at all:** `AgentTurnChunk
 Claude could have requested a merge. The evaluation is real and server-side. **The agency is
 not.**
 
-The on-screen label makes this worse and must be actively counteracted: the card reads
-**"ATTEMPTED BY Claude"**. That wording asserts intent the product cannot produce. Recorded
-as **S06-N3** at `apps/web/app/DecisionCard.tsx`; it is a wording change, not a mechanism
-change, and it was deliberately not made during a filming slice.
+**S06-N3 is closed, and the underlying limit is not.** The take 6 card read
+**"ATTEMPTED BY Claude"**, which asserted intent the product cannot produce, and this
+document had to spend a paragraph telling an editor to narrate against the screen. UI2-4
+replaced it: the card now reads **"Requested under Claude's mandate."** — true, because the
+request named Claude as its subject and was evaluated against Claude's mandate, and it
+claims nothing about intent. The film harness asserts the word "attempted" appears nowhere
+on the card, so it cannot return.
+
+That fixed the WORDING. It did not give any agent the ability to request anything, and this
+entry stands exactly as it did before: **the request in beat 5 is still issued on Claude's
+behalf by a caller**, and the agency is still not demonstrated. The screen no longer works
+against the caption; the caption still has to be right.
 
 **2. The mandate is unsigned.** There is no `sig` field, by design in v0 — omit, never stub.
 A fake `ed25519:` string would have been worse than an absent one. The hash on screen proves
@@ -108,14 +125,15 @@ demonstrated anywhere in this film and must not be narrated.
 
 Other wordings to avoid across the whole cut:
 
-| do not say                                   | because                                                    | say instead                                                |
-| -------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
-| "signed receipt", "provable", "notarised"    | no chain, no signatures exist (S2.3)                       | "recorded in an append-only log"                           |
-| "verified identity", "authenticated members" | nothing verifies a principal claim (S1.2)                  | "each member declares the principal it speaks for"         |
-| "the agent was blocked from merging"         | the agent never requested it, and could not                | "a merge request against that member's mandate is refused" |
-| "approve it here"                            | the buttons are inert and labelled S2.2                    | "the co-signature step lands in S2.2"                      |
-| "agents can't be tricked"                    | quoted and imported content still activates (RT-004, S1.7) | "an agent's own output cannot summon another agent"        |
-| "isolated context per principal"             | one shared 30-message window today (S1.5)                  | "one shared room context"                                  |
+| do not say                                   | because                                                       | say instead                                                |
+| -------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------- |
+| "signed receipt", "provable", "notarised"    | no chain, no signatures exist (S2.3)                          | "recorded in an append-only log"                           |
+| "verified identity", "authenticated members" | nothing verifies a principal claim (S1.2)                     | "each member declares the principal it speaks for"         |
+| "the agent was blocked from merging"         | the agent never requested it, and could not                   | "a merge request against that member's mandate is refused" |
+| "the card shows Claude attempted a merge"    | the card has not said that since UI2-4, and it was never true | "the card shows what was requested under Claude's mandate" |
+| "approve it here"                            | the buttons are inert and labelled S2.2                       | "the co-signature step lands in S2.2"                      |
+| "agents can't be tricked"                    | quoted and imported content still activates (RT-004, S1.7)    | "an agent's own output cannot summon another agent"        |
+| "isolated context per principal"             | one shared 30-message window today (S1.5)                     | "one shared room context"                                  |
 
 **One further honesty note about the recording itself.** The five beats are one continuous
 take with no cuts, but the _pacing_ is set by the harness: holds are deliberate, and the two
@@ -135,9 +153,9 @@ is an owner decision and is recorded here as the open item, not resolved.
 
 ## Findings raised by this slice
 
-| id     | finding                                                                                                                                                                                                                                                                                     | trigger                                                               |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| S06-N1 | the capture harness's selectors rotted silently when S-UI rewrote the room — three stale selectors matched nothing rather than failing, and it lives outside CI                                                                                                                             | the next UI change to the room, or the next slice that films it       |
-| S06-N2 | the room header renders the room **id**; the room's `title` is rendered nowhere, so every frame carries a slug                                                                                                                                                                              | **S1.1**, when rooms acquire real membership and a name worth showing |
-| S06-N3 | the DECISION card's "Attempted by" asserts agency the product does not have                                                                                                                                                                                                                 | the slice that gives adapters tool calls (S1.3's handoff object)      |
-| S06-N4 | **Bible §11 has no budget row for opening a room** — which is where the database wake now lands (ADR-008) and where a pilot's first action of the day pays it. The film's beat one opened in 454ms only because the harness warmed first; there is no written budget it could have breached | **S1.1**, when rooms acquire real membership                          |
+| id         | finding                                                                                                                                                                                                                                                                                     | trigger                                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| S06-N1     | the capture harness's selectors rotted silently when S-UI rewrote the room — three stale selectors matched nothing rather than failing, and it lives outside CI                                                                                                                             | the next UI change to the room, or the next slice that films it                                                                                 |
+| S06-N2     | the room header renders the room **id**; the room's `title` is rendered nowhere, so every frame carries a slug                                                                                                                                                                              | **S1.1**, when rooms acquire real membership and a name worth showing                                                                           |
+| ~~S06-N3~~ | **CLOSED in UI2-4** — the card's "Attempted by" asserted agency the product does not have; it now reads "requested under … 's mandate". The LIMIT it described is unchanged and is stated in beat 5 above                                                                                   | closed as a wording defect. The limit itself lifts only when adapters carry tool calls (S1.3's handoff object), and beat 5's claim changes then |
+| S06-N4     | **Bible §11 has no budget row for opening a room** — which is where the database wake now lands (ADR-008) and where a pilot's first action of the day pays it. The film's beat one opened in 454ms only because the harness warmed first; there is no written budget it could have breached | **S1.1**, when rooms acquire real membership                                                                                                    |

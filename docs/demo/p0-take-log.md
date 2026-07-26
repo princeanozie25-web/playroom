@@ -32,9 +32,14 @@ All seven frame-verified with `verify-p0.sh`: three frames pulled from 20%, 50% 
 each clip and hashed — **3/3 distinct** for every take. One distinct hash would mean a still
 image, which is the failure A4 was built to catch.
 
-## Recommended take: 6
+## Recommended take: 10
 
-56.5s, all five beats, one continuous take. What it recorded:
+52.2s, all five beats, one continuous take, shot on the S-UI2 surface. Takes 1–7 were shot
+before S-UI2 and are kept: they are the record of what the room looked like when the P0 film
+was first cut, and take 8 is kept because it is the take that failed on the decision card
+before UI2-4 reworded it.
+
+What take 6 recorded — the pre-S-UI2 surface, retained for comparison:
 
 | beat | recorded                                                                                                                                                                                  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -44,9 +49,23 @@ image, which is the failure A4 was built to catch.
 | 4    | `@sol` streamed, caret observed, `292→152 tok · $0.00013`                                                                                                                                 |
 | 5    | `DECISION · CO_SIGN`, `pr.merge`, `PROTECTED_ACTION`, co-signature from `principal:prince`, `sha256:1af314ca8427474e…`, Approve/Deny disabled and labelled `S2.2`                         |
 
-Warm-up before the take: **629ms** — database 98ms, claude-main 628ms, sol 598ms,
-concurrent. Beat one opened in 454ms with no stall, which is the S0.5c primitive doing the
-job it was built for outside its own measurement.
+Warm-up before take 6: **629ms** — database 98ms, claude-main 628ms, sol 598ms, concurrent.
+Beat one opened in 454ms with no stall, which is the S0.5c primitive doing the job it was
+built for outside its own measurement.
+
+**What take 10 recorded**, on the same five beats and the same assertions:
+
+| beat | recorded                                                                                                                                                                                                           |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1    | roster: `Claude · for Prince · review + comment, merge (co-sign)` and `Sol · for Jerry · review + comment only`, each in its principal's accent                                                                    |
+| 2    | untagged message, 7.0s of held silence, nothing summoned                                                                                                                                                           |
+| 3    | `@claude` streamed, caret observed, spend visible                                                                                                                                                                  |
+| 4    | `@sol` streamed, caret observed, spend visible                                                                                                                                                                     |
+| 5    | `Decision · CO_SIGN` · `pr.merge` · "Requested under Claude's mandate." · `PROTECTED_ACTION` · "Needs a signature from Prince." · `sha256:1af314ca8427474e…` · Approve/Deny disabled, "co-signing arrives in S2.2" |
+
+The beats, the assertions and the claims are identical. Only the surface moved — and the
+harness proved it by re-running take 6's script against the new room with **no selector
+edited**, which is what the app-owned hooks were added for (S06-N1).
 
 ## What the harness asserts before a take passes
 
