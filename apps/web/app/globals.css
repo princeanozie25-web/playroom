@@ -15,6 +15,35 @@
   --paper-2: #f8fafc;
   --line: #e2e8f0;
 
+  /* ── PRINCIPAL ACCENTS ──────────────────────────────────────────────────
+     One accent per principal, assigned by the principal's INDEX in adapters.yaml.
+     An agent inherits its principal's accent, which is what answers "whose
+     authority does this carry" with no words — and keeps answering it in a room
+     with four principals, where a clause per member would not fit.
+
+     HUE SEPARATION IS DELIBERATE and works around the state colours below:
+     --ok is green (~142), --warn amber (~28), --bad red (~0). The accents sit at
+     245 / 192 / 295 / 336 so no accent lands on a state hue. The fourth, rose, is
+     the closest to --bad and is therefore LAST: the first three are handed out
+     before it. Even then the two never co-occur in one element — a member accent
+     appears on a marker, a name and a roster border; the state colours appear only
+     in the connection badge, which never carries an accent.
+
+     Colour is never the only channel. Shape and fill distinguish human from agent
+     (see .chip-marker), so this palette is redundant encoding, not load-bearing. */
+  --p0: #4338ca; /* indigo 245 — also the deck's anchor, so the first principal matches it */
+  --p1: #0e7490; /* cyan 192 */
+  --p2: #a21caf; /* fuchsia 295 */
+  --p3: #be185d; /* rose 336 */
+  --p0-soft: #eef2ff;
+  --p1-soft: #ecfeff;
+  --p2-soft: #fdf4ff;
+  --p3-soft: #fff1f2;
+  --p0-line: #c7d2fe;
+  --p1-line: #a5f3fc;
+  --p2-line: #f5d0fe;
+  --p3-line: #fecdd3;
+
   /* state — connected / reconnecting / refused */
   --ok: #15803d;
   --ok-soft: #dcfce7;
@@ -157,6 +186,31 @@ body {
   margin-top: var(--s-3);
 }
 
+/* An element carrying an accent resolves it to --accent/--accent-soft/--accent-line, so
+   every rule below reads one variable regardless of which principal it belongs to. A member
+   with NO principal in config gets no data-accent and falls back to the neutral ink — it
+   never borrows a colour it was not assigned. */
+[data-accent='0'] {
+  --accent: var(--p0);
+  --accent-soft: var(--p0-soft);
+  --accent-line: var(--p0-line);
+}
+[data-accent='1'] {
+  --accent: var(--p1);
+  --accent-soft: var(--p1-soft);
+  --accent-line: var(--p1-line);
+}
+[data-accent='2'] {
+  --accent: var(--p2);
+  --accent-soft: var(--p2-soft);
+  --accent-line: var(--p2-line);
+}
+[data-accent='3'] {
+  --accent: var(--p3);
+  --accent-soft: var(--p3-soft);
+  --accent-line: var(--p3-line);
+}
+
 /* ── member chip ───────────────────────────────────────────────────────── */
 
 .chip {
@@ -171,18 +225,22 @@ body {
   line-height: 1.6;
   white-space: nowrap;
 }
-/* Humans and agents differ without reading the name: agents carry the indigo
-   rule and a filled marker, humans are quiet and outlined. */
+/* HUMAN VERSUS AGENT IS SHAPE AND FILL, NOT COLOUR.
+   Colour-only encoding fails for a substantial minority of viewers, and this distinction is
+   load-bearing — it is the difference between a person and something acting on a person's
+   authority. So it is carried three times over: an agent is a filled ROUNDED SQUARE, a human
+   an outlined CIRCLE, and the agent's chip has a tinted field. Remove colour entirely and the
+   square/circle and filled/hollow contrast both survive. */
 .chip-agent {
-  border-color: var(--indigo-line);
-  background: var(--indigo-soft);
+  border-color: var(--accent-line, var(--line));
+  background: var(--accent-soft, var(--paper-2));
 }
 .chip-name {
   font-weight: 650;
   color: var(--ink);
 }
 .chip-agent .chip-name {
-  color: var(--indigo);
+  color: var(--accent, var(--ink));
 }
 .chip-meta {
   color: var(--ink-2);
@@ -196,20 +254,52 @@ body {
   font-size: var(--t-xs);
 }
 .chip-marker {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  width: 7px;
+  height: 7px;
   align-self: center;
+  flex: none;
 }
+/* agent: filled rounded square */
 .chip-agent .chip-marker {
-  background: var(--indigo);
+  border-radius: 2px;
+  background: var(--accent, var(--ink));
 }
+/* human: hollow circle */
 .chip-human .chip-marker {
+  border-radius: 50%;
   border: 1.5px solid var(--ink-3);
 }
-.chip-inline {
-  padding: 0;
-  border: 0;
+
+/* ── inline member name, in the transcript ──────────────────────────────────
+   NOT a chip. A turn shows who is speaking in their principal's colour with their
+   shape, and nothing else: no affiliation clause, no mandate, no "human" label.
+   Nobody restates a colleague's job title above every message, and the roster strip
+   already carries the full picture once, at the top. */
+.member {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-sm);
+  font-weight: 650;
+  white-space: nowrap;
+}
+.member-agent {
+  color: var(--accent, var(--ink));
+}
+.member-human {
+  color: var(--ink-2);
+}
+.member .chip-marker {
+  width: 8px;
+  height: 8px;
+}
+.member-agent .chip-marker {
+  border-radius: 2px;
+  background: var(--accent, var(--ink));
+}
+.member-human .chip-marker {
+  border-radius: 50%;
+  border: 1.5px solid var(--ink-3);
   background: none;
 }
 

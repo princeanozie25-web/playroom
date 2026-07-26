@@ -17,7 +17,7 @@ import {
   type ServerEvent,
   type ServerHello,
 } from '@playroom/shared';
-import { MemberChip } from '../../MemberChip';
+import { MemberChip, MemberName } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
 import { HOOK, pr } from '../../hooks';
 import type { RosterMember } from '../../roster';
@@ -268,9 +268,9 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
           it.kind === 'message' ? (
             <li key={it.key} {...pr(HOOK.message)} data-pr-author={it.author}>
               <div className="turn-head">
-                <span className="turn-author" {...pr(HOOK.author)}>
-                  {it.author}
-                </span>
+                {/* A human's byline is the same component an agent gets — the SHAPE and the
+                    absence of an accent are what distinguish them, not a word. */}
+                <MemberName member={byId.get(it.author)} name={it.author} />
               </div>
               <div className="msg-body" {...pr(HOOK.body)}>
                 {it.body}
@@ -283,7 +283,7 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
           ) : (
             <li key={it.key} {...pr(HOOK.turn)} data-pr-member={it.adapter_id}>
               <div className="turn-head">
-                <MemberChip member={byId.get(it.adapter_id)} name={it.adapter_id} inline />
+                <MemberName member={byId.get(it.adapter_id)} name={it.adapter_id} />
                 {it.streaming && <span className="working">working…</span>}
               </div>
               {/* Agent output is rendered as TEXT with whitespace preserved and

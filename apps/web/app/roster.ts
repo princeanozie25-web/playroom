@@ -2,16 +2,18 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
 import { loadMandates } from '@playroom/fabric';
+import { principalAccent } from './mandate';
 
 // SERVER ONLY. This module reads the filesystem; it must never be imported from a
 // component marked 'use client'. The roster is resolved on the server and handed to
 // the room as props — no YAML parser and no config file ever reaches the browser.
 //
-// Until S1.1 lands a real membership model, adapters.yaml doubles as the roster.
-// Only four fields are projected out of it: id, display_name, principal,
-// mandate_label. `provider` and `model` are deliberately NOT projected, so the §6
-// rule — the room, fabric and data model never contain a provider name — survives
-// the web app reading this file at all.
+// Until S1.1 lands a real membership model, adapters.yaml doubles as the roster and also
+// carries the principals block. Projected out of it: `id`, `display_name`, `principal`, and
+// each principal's `display_name`. `provider` and `model` are deliberately NOT projected, so
+// the §6 rule — the room, fabric and data model never contain a provider name — survives the
+// web app reading this file at all. (`mandate_label` was projected once and is gone: M-3
+// deleted it because it described authority without being it.)
 
 export interface RosterMember {
   id: string;
@@ -33,6 +35,23 @@ export interface RosterMember {
    * make those two look identical.
    */
   protected_actions: string[] | null;
+  /**
+   * The principal's DISPLAY NAME, or null if config does not name them.
+   *
+   * Null renders no affiliation at all. It never falls back to the identifier: putting
+   * `principal:jerry` on screen is the same category error as `mandate_label` was, and the
+   * same rule applies as for a missing mandate — no data, no claim.
+   */
+  principal_name: string | null;
+  /**
+   * Which accent this member inherits from its principal, or null if unaffiliated.
+   *
+   * This is what answers "whose authority does this agent carry" without a sentence. An
+   * agent shares its principal's colour, so the question is answered by looking rather
+   * than reading — and it keeps working in a room with four principals, where a clause per
+   * member would not fit.
+   */
+  accent: number | null;
 }
 
 interface RawEntry {
@@ -40,6 +59,11 @@ interface RawEntry {
   enabled?: unknown;
   display_name?: unknown;
   principal?: unknown;
+}
+
+interface RawPrincipal {
+  id?: unknown;
+  display_name?: unknown;
 }
 
 function str(v: unknown): string | null {
@@ -64,6 +88,40 @@ function yamlPath(): string {
   throw new Error(`adapters.yaml not found (looked in: ${candidates.join(', ')})`);
 }
 
+export interface Principal {
+  id: string;
+  display_name: string;
+  accent: number;
+}
+
+/**
+ * The principals config declares, in declared order — THE ORDER IS THE ACCENT ASSIGNMENT.
+ *
+ * An entry missing either field is skipped rather than defaulted, so a typo produces a
+ * member with no affiliation shown rather than one affiliated to nothing in particular. A
+ * duplicate id is ignored: the first declaration wins, so a second copy cannot silently
+ * re-colour a principal already on screen.
+ *
+ * Exported because the DECISION card needs it too — `required_signer` is a principal id and
+ * must render as a name there for the same reason it does on a chip.
+ */
+export function loadPrincipals(): Principal[] {
+  const parsed: unknown = parse(readFileSync(yamlPath(), 'utf8'));
+  const obj =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  const raw = Array.isArray(obj['principals']) ? (obj['principals'] as RawPrincipal[]) : [];
+  const out: Principal[] = [];
+  const seen = new Set<string>();
+  for (const rp of raw) {
+    const id = str(rp.id);
+    const display_name = str(rp.display_name);
+    if (!id || !display_name || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, display_name, accent: principalAccent(out.length) });
+  }
+  return out;
+}
+
 /**
  * Agent members the roster declares. An entry missing any roster field is SKIPPED,
  * not defaulted: a chip invented from a missing field would be the UI asserting a
@@ -74,10 +132,11 @@ export function loadRoster(): RosterMember[] {
   // with no mandate is still a member — they simply have no granted scope to show.
   const mandates = loadMandates();
   const parsed: unknown = parse(readFileSync(yamlPath(), 'utf8'));
-  const entries =
-    typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as never)['adapters'])
-      ? ((parsed as Record<string, unknown>)['adapters'] as RawEntry[])
-      : [];
+  const obj =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  const entries = Array.isArray(obj['adapters']) ? (obj['adapters'] as RawEntry[]) : [];
+
+  const principals = new Map(loadPrincipals().map((p) => [p.id, p]));
 
   const members: RosterMember[] = [];
   for (const e of entries) {
@@ -87,10 +146,13 @@ export function loadRoster(): RosterMember[] {
     const principal = str(e.principal);
     if (!id || !display_name || !principal) continue;
     const m = mandates.get(id)?.mandate;
+    const p = principals.get(principal);
     members.push({
       id,
       display_name,
       principal,
+      principal_name: p?.display_name ?? null,
+      accent: p?.accent ?? null,
       scope: m?.scope ?? null,
       protected_actions: m?.protected_actions ?? null,
     });

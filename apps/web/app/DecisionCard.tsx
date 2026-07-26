@@ -1,5 +1,5 @@
 import type { DecisionEvent } from '@playroom/shared';
-import { MemberChip } from './MemberChip';
+import { MemberName } from './MemberChip';
 import type { RosterMember } from './roster';
 import { HOOK, pr } from './hooks';
 
@@ -57,7 +57,7 @@ export function DecisionCard({ event, roster }: { event: DecisionEvent; roster: 
       <dl className="decision-rows">
         <dt>Attempted by</dt>
         <dd>
-          <MemberChip member={attempted} name={p.subject} inline />
+          <MemberName member={attempted} name={p.subject} />
         </dd>
 
         <dt>Stopped because</dt>

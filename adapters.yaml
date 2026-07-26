@@ -35,3 +35,23 @@ adapters:
     cost_per_1k_out: 0.0006
     display_name: Sol
     principal: principal:jerry
+
+# PRINCIPALS — the people whose authority members carry.
+#
+# Read by the web app's SERVER layer only, exactly like the roster fields above. Two things
+# come from here and nothing else does:
+#
+#   display_name  `principal:jerry` is an INTERNAL IDENTIFIER and must never reach the
+#                 screen — the same category error `mandate_label` was, in the other
+#                 direction. The room says "Jerry".
+#   accent        NOT set here. It is the entry's INDEX in this list, so a principal cannot
+#                 be given a colour another already has, and adding one cannot silently
+#                 recolour an existing member. Order is therefore meaningful; keep it.
+#
+# These are config names, not user-chosen ones. A principal picking their own display name
+# needs an account, which is S1.1 — logged there rather than built as a settings screen.
+principals:
+  - id: principal:prince
+    display_name: Prince
+  - id: principal:jerry
+    display_name: Jerry
