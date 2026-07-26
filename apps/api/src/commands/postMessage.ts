@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { ServerEvent } from '@playroom/shared';
 import { appendMessage, appendSummon } from '../events.js';
-import { summonedAdapterId } from '../agent.js';
+import { summonedAdapterIds } from '../agent.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // Persist a message, fan it out, and — if it summons a member — record the summon and
@@ -34,12 +34,17 @@ export async function postMessageCommand(
   const t1 = performance.now(); // S0.3c span boundary: triggering message committed
   deps.bus.publish(input.roomId, event);
 
-  const summoned = summonedAdapterId(event);
-  if (summoned) {
-    // Idempotency comes free from the message: `appendMessage` is idempotent on
-    // (room_id, client_msg_id), so a replayed send resolves to the ALREADY-COMMITTED
-    // row and returns its original seq. A summon is therefore raised against the first
-    // commit only — a duplicate frame cannot raise a second one.
+  for (const summoned of summonedAdapterIds(event)) {
+    // A REPLAYED FRAME MUST NOT MAKE AN AGENT SPEAK TWICE. Message idempotency does not
+    // give this for free, which is what the property test caught: `appendMessage` is
+    // idempotent on (room_id, client_msg_id), so a duplicate send commits no second
+    // message — but it returns the already-committed row, and the code below then read
+    // its seq and summoned against it again. Two turns, one ask, and the zero query
+    // never noticed because both turns were genuinely human-rooted.
+    //
+    // The refusal now lives in migration 005: (room_id, cause_seq, member) is unique
+    // among summon rows, so the second insert loses and `appendSummon` returns null.
+    // The turn is triggered ONLY on a summon this call actually wrote.
     const summonId = `sum_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
     const summon = await appendSummon(deps.pool, input.roomId, {
       summon_id: summonId,
@@ -52,6 +57,7 @@ export async function postMessageCommand(
       depth: 0,
       cause_seq: event.seq,
     });
+    if (!summon) continue; // already summoned by this cause; the turn is already running or done
     deps.bus.publish(input.roomId, summon);
 
     void deps

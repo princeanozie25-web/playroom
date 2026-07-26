@@ -180,6 +180,12 @@ export interface SummonRef {
  * in the database until S1.1, so there is nothing for SQL to resolve a root against —
  * and once written, the judgement reflects the roster as it stood, which is the correct
  * semantics for an append-only log even after the roster changes.
+ *
+ * RETURNS NULL if this cause has already summoned this member (migration 005's unique
+ * index). Null is not an error and not a silent drop: it means the summon exists, so
+ * the turn it authorises has already been triggered and must not be triggered again.
+ * The caller is expected to branch on it — which is why the return type says so instead
+ * of pretending a row came back.
  */
 export async function appendSummon(
   pool: Pool,
@@ -193,10 +199,13 @@ export async function appendSummon(
     depth: number;
     cause_seq: number;
   },
-): Promise<ServerEvent> {
+): Promise<ServerEvent | null> {
   const { rows } = await pool.query<EventRow>(
     `INSERT INTO events (room_id, actor_id, event_type, payload, summon_id, root_is_human)
      VALUES ($1, $2, 'summon', $3, $4, $5)
+     ON CONFLICT (room_id, (payload ->> 'cause_seq'), (payload ->> 'member'))
+       WHERE event_type = 'summon'
+       DO NOTHING
      RETURNING ${EVENT_COLS}`,
     [
       roomId,
@@ -206,7 +215,10 @@ export async function appendSummon(
       payload.root_is_human,
     ],
   );
-  return rowToServerEvent(rows[0]);
+  // Deliberately NOT re-fetching and returning the existing row. The only caller needs
+  // to know whether it won the insert, and handing back a summon that some earlier frame
+  // raised would invite it to trigger a turn against someone else's authorisation.
+  return rows[0] ? rowToServerEvent(rows[0]) : null;
 }
 
 // §17 telemetry written on an agent.turn.completed row.
