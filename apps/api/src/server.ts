@@ -8,6 +8,8 @@ import {
   ERROR_ROOM_NOT_FOUND,
   ERROR_CREDENTIAL_REQUIRED,
   ERROR_CREDENTIAL_INVALID,
+  ERROR_FRAME_MALFORMED,
+  ERROR_FRAME_UNRECOGNISED,
   WS_CLOSE_ROOM_NOT_FOUND,
   WS_CLOSE_UNAUTHENTICATED,
   type AgentAdapter,
@@ -137,6 +139,28 @@ function credentialRefusal(failure: AuthFailure, roomId: string): ServerErrorFra
       failure === 'credential_required'
         ? 'no credential was presented — this connection carries no identity'
         : 'the credential presented is not valid — it may have been revoked',
+    room_id: roomId,
+  });
+}
+
+/** Marker for "parsed as JSON, is not a frame we accept" — the two cases share one catch. */
+class UnrecognisedFrame extends Error {}
+
+/**
+ * The two send-path refusals.
+ *
+ * `ClientFrame` accepts `send` and `request_action`. THERE IS NO FRAME THAT STARTS AN AGENT
+ * TURN, and this refusal is where that becomes observable rather than merely true: a caller
+ * inventing one is told the frame is not recognised, instead of watching a socket stay silent
+ * and having to guess whether the turn is coming.
+ */
+function frameRefusal(unrecognised: boolean, roomId: string): ServerErrorFrame {
+  return ServerErrorFrame.parse({
+    type: 'error',
+    code: unrecognised ? ERROR_FRAME_UNRECOGNISED : ERROR_FRAME_MALFORMED,
+    message: unrecognised
+      ? 'that is not a frame this room accepts — only `send` and `request_action`'
+      : 'that frame was not valid JSON',
     room_id: roomId,
   });
 }
@@ -379,9 +403,25 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
             if (!actor) return;
             let msg: ClientFrame;
             try {
-              msg = ClientFrame.parse(JSON.parse(raw.toString()));
-            } catch {
-              return; // drop malformed frames — never trust unparsed wire data
+              // Two steps, because the two failures are different mistakes and get different
+              // words. Neither is trusted: the frame is only ever read through the schema.
+              const json: unknown = JSON.parse(raw.toString());
+              const parsed = ClientFrame.safeParse(json);
+              if (!parsed.success) throw new UnrecognisedFrame();
+              msg = parsed.data;
+            } catch (err) {
+              // REFUSED OUT LOUD, where this used to `return`. A dropped frame is
+              // indistinguishable from a lost socket AND from a server that accepted it and
+              // did nothing — RT-001's shape, on the send path. The socket STAYS OPEN: the
+              // connection is authenticated and its next frame may be perfectly good.
+              //
+              // Nothing from the frame is echoed back or logged. It is untrusted wire data,
+              // and a refusal that quotes it is a refusal that can be made to say anything.
+              const unrecognised = err instanceof UnrecognisedFrame;
+              const frame = frameRefusal(unrecognised, roomId);
+              app.log.warn({ room_id: roomId, code: frame.code }, 'frame refused');
+              socket.send(JSON.stringify(frame));
+              return;
             }
             // Thin translation. Both frames go through the single entry (ADR-004):
             // `send` persists room content, `request_action` traverses the mandate

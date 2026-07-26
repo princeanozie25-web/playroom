@@ -7,6 +7,7 @@ import type { AgentAdapter, AgentMessage, ServerEvent } from '@playroom/shared';
 import { costUsd, getAdapterConfig, listAdapters } from '@playroom/adapters';
 import type { RoomBus } from './bus.js';
 import { appendAgentEvent, appendMessage, recentMessages, type SummonRef } from './events.js';
+import { stampFor } from './stamp.js';
 
 const CONTEXT_MESSAGES = 30; // PM7 hard cap — last 30 room messages, nothing more
 
@@ -381,10 +382,17 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
   let tokensOut: number | null = null;
 
   try {
+    // THE STAMP, BEFORE ANYTHING SEES THE TURN (Bible §4.1, §8.1). Derived from records, not
+    // passed in — see stamp.ts. It throws for a member that does not exist, inside this try, so
+    // an unstampable turn fails loudly as completed{success:false} rather than starting.
+    const stamp = await stampFor(pool, adapterId);
+
     publish(
       await appendAgentEvent(pool, roomId, adapterId, summon, 'agent.turn.started', {
         turn_id: turnId,
         adapter_id: adapterId,
+        principal_id: stamp.principal_id,
+        mandate_hash: stamp.mandate_hash,
       }),
     );
 

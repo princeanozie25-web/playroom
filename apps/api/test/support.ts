@@ -3,6 +3,8 @@ import WebSocket from 'ws';
 import {
   ServerEvent,
   ServerHello,
+  ServerErrorFrame,
+  type ServerErrorFrame as ServerErrorFrameT,
   type AgentAdapter,
   type AgentTurnChunk,
   type ServerEvent as ServerEventT,
@@ -128,6 +130,7 @@ export async function httpCreateRoom(httpBase: string, id: string): Promise<Resp
 export class Client {
   readonly ws: WebSocket;
   readonly events: ServerEventT[] = [];
+  readonly errors: ServerErrorFrameT[] = [];
   hello: number | undefined;
   private readonly seen = new Set<number>();
   private waiters: Array<() => void> = [];
@@ -142,6 +145,11 @@ export class Client {
       const raw = JSON.parse(data.toString());
       if (raw?.type === 'hello') {
         this.hello = ServerHello.parse(raw).last_seq;
+      } else if (raw?.type === 'error') {
+        // REFUSALS ARE COLLECTED, not discarded. A helper that drops them makes every
+        // refusal look like silence from the test's point of view, which is the observation
+        // this codebase spends most of its guards trying to avoid producing.
+        this.errors.push(ServerErrorFrame.parse(raw));
       } else if (raw?.type === 'event') {
         // Delivery is at-least-once; dedupe on seq, exactly as a real client must.
         const event = ServerEvent.parse(raw);
@@ -216,6 +224,36 @@ export class Client {
     while (this.ofType(eventType).length === 0) {
       if (Date.now() - start > timeoutMs) {
         throw new Error(`timed out waiting for event_type ${eventType}`);
+      }
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, 50);
+        this.waiters.push(() => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    }
+  }
+
+  /**
+   * Wait for a refusal frame matching a predicate.
+   *
+   * Takes a predicate rather than a count because a test usually cares WHICH refusal arrived,
+   * and asserting on `errors[0]` after a bare wait makes the test order-dependent on frames
+   * the server is free to reorder.
+   */
+  async waitForError(
+    match: (e: ServerErrorFrameT) => boolean,
+    timeoutMs = 10000,
+  ): Promise<ServerErrorFrameT> {
+    const start = Date.now();
+    for (;;) {
+      const hit = this.errors.find(match);
+      if (hit) return hit;
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(
+          `timed out waiting for a refusal (have ${this.errors.map((e) => e.code).join(', ') || 'none'})`,
+        );
       }
       await new Promise<void>((resolve) => {
         const t = setTimeout(resolve, 50);

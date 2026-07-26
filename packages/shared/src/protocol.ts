@@ -77,10 +77,29 @@ export const MessageEvent = z.object({
 // An agent turn is streamed as: started → many delta → completed. All three
 // share a `turn_id` so the client groups deltas into one bubble and resume
 // reassembles the same text. Deltas are prunable; completed carries the whole.
+/**
+ * A turn begins, and it arrives STAMPED — Bible §4.1, §8.1.
+ *
+ * `principal_id` and `mandate_hash` are the stamp: who this member speaks for, and under which
+ * mandate document, recorded on the first event anything sees of the turn. All three fields come
+ * from records — the member row, its principal binding, the mandate file — so there is nothing
+ * here a client could influence.
+ *
+ * The point is not that the gateway needs convincing. It is that nothing downstream has to
+ * TRUST an unstamped turn: a projection, a receipt or a host adapter reading this event has the
+ * authority context in hand rather than having to ask, and a turn without it is visibly
+ * different from one with it.
+ */
 export const AgentTurnStarted = z.object({
   ...eventBase,
   event_type: z.literal('agent.turn.started'),
-  payload: z.object({ turn_id: z.string(), adapter_id: z.string() }),
+  payload: z.object({
+    turn_id: z.string(),
+    adapter_id: z.string(),
+    principal_id: z.string(),
+    /** Null when the member has no mandate. Omitted authority, never a placeholder. */
+    mandate_hash: z.string().nullable(),
+  }),
 });
 export const AgentTurnDelta = z.object({
   ...eventBase,
@@ -231,6 +250,22 @@ export const ERROR_ROOM_NOT_FOUND = 'room_not_found';
 export const ERROR_CREDENTIAL_REQUIRED = 'credential_required';
 /** A credential was presented and is not valid — revoked, mistyped, or another deployment's. */
 export const ERROR_CREDENTIAL_INVALID = 'credential_invalid';
+/** The bytes were not JSON. A broken client or a corrupted frame, not a rejected request. */
+export const ERROR_FRAME_MALFORMED = 'frame_malformed';
+/**
+ * Valid JSON, and not a frame this server accepts.
+ *
+ * Kept apart from `frame_malformed` for the usual reason: a client sending mangled bytes and a
+ * client asking for something the server does not offer are different mistakes with different
+ * fixes. Both were a SILENT DROP until S1.2 — indistinguishable from a lost socket, and
+ * indistinguishable from the server having accepted the frame and done nothing, which is the
+ * one shape this codebase refuses to leave in place.
+ *
+ * `ClientFrame` admits `send` and `request_action` and nothing else. In particular there is no
+ * frame that starts an agent turn: a caller inventing `{"type":"triggerAgentTurn"}` now gets
+ * this refusal, and the refusal is the evidence that the gateway path is the only path.
+ */
+export const ERROR_FRAME_UNRECOGNISED = 'frame_unrecognised';
 
 // Application WebSocket close codes (4000-4999 is the application-reserved range).
 // The frame carries the human-readable reason; the close code is what a client can
