@@ -364,3 +364,76 @@ describe('evaluation latency against Bible §11 (<10 ms P50, <30 ms P95)', () =>
     expect(p95).toBeLessThan(1);
   });
 });
+
+// ── COUNTERPARTIES: `roster_only` finally has a roster (S1.1b) ──────────────────────────
+//
+// This branch was ABSENT until rooms had members — not dead code and not a branch that always
+// passed, but a comment holding a position in the order. The field `counterparties:
+// "roster_only"` sat in both mandate documents claiming a restriction nothing could enforce,
+// which is `room.post`'s failure inside an authority document rather than beside one.
+describe('counterparties — roster_only', () => {
+  const review = { type: 'pr.review', resource: 'repo:x#1' };
+
+  it('BLOCKS a member acting in a room they are not enrolled in', () => {
+    const v = evaluate(review, 'claude-main', loaded(), NOW, ['sol', 'prince']);
+    expect(v.decision).toBe('BLOCK');
+    expect(v.reason_code).toBe('ROSTER_VIOLATION');
+    // Still audited against the mandate it was refused under.
+    expect(v.effective_mandate_hash).toMatch(/^sha256:/);
+  });
+
+  it('ALLOWS the same action when the member is in the room', () => {
+    const v = evaluate(review, 'claude-main', loaded(), NOW, ['claude-main', 'prince']);
+    expect(v.decision).toBe('ALLOW');
+    expect(v.reason_code).toBe('ALLOWED_IN_SCOPE');
+  });
+
+  it('is checked AFTER scope — an unknown action is unknown wherever it is asked', () => {
+    // Order matters and it is the Bible's. A member outside the room asking for something
+    // they were never granted should hear the more fundamental refusal.
+    const v = evaluate(
+      { type: 'totally.made.up', resource: 'repo:x#1' },
+      'claude-main',
+      loaded(),
+      NOW,
+      ['sol'],
+    );
+    expect(v.reason_code).toBe('OUT_OF_SCOPE');
+  });
+
+  it('is checked AFTER protected actions, per the Bible order — and that has a consequence', () => {
+    // Bible §9.2 numbers the branches: 1 expiry, 2 scope, 3 replay, 4 protected,
+    // 5 counterparties, 6 limits. The order is the Bible's and this file does not reorder it.
+    //
+    // THE CONSEQUENCE, ASSERTED RATHER THAN LEFT TO BE DISCOVERED: a protected action asked
+    // under a member who is NOT in the room returns CO_SIGN, not ROSTER_VIOLATION. A human is
+    // invited to sign for a member who is not even in the room. It stays fail-closed — nothing
+    // executes without that signature — but it asks the wrong question first, and the roster
+    // refusal is the more fundamental one.
+    //
+    // Recorded as S11b-N1 rather than fixed here: reordering the Bible's evaluation sequence
+    // is an owner ruling, not an implementation detail. The same reasoning that put scope
+    // before protected — so an ungranted protected action is BLOCK and not CO_SIGN — argues
+    // for putting the roster check before it too.
+    const m = loaded({ scope: ['pr.review', 'pr.comment', 'pr.merge'] });
+    const merge = { type: 'pr.merge', resource: 'repo:x#1' };
+    expect(evaluate(merge, 'claude-main', m, NOW, ['claude-main']).reason_code).toBe(
+      'PROTECTED_ACTION',
+    );
+    expect(evaluate(merge, 'claude-main', m, NOW, ['sol']).reason_code).toBe('PROTECTED_ACTION');
+
+    // Where the roster refusal DOES win: in scope, and not protected.
+    expect(evaluate(review, 'claude-main', m, NOW, ['sol']).reason_code).toBe('ROSTER_VIOLATION');
+  });
+
+  it('is SKIPPED when the caller has no room context, rather than inventing a verdict', () => {
+    // Absent input, absent branch — the same discipline that keeps replay and limits out of
+    // this function entirely. A caller with no room cannot be told whether a member is in one.
+    expect(evaluate(review, 'claude-main', loaded(), NOW).decision).toBe('ALLOW');
+  });
+
+  it('does not fire for a mandate whose counterparties rule is something else', () => {
+    const m = loaded({ counterparties: 'anyone' });
+    expect(evaluate(review, 'claude-main', m, NOW, ['sol']).decision).toBe('ALLOW');
+  });
+});

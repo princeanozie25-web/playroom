@@ -16,12 +16,13 @@ Severity is about the trust boundary, not user annoyance:
 - **medium** — a failure is detectable but not surfaced to the party who needs it.
 - **low** — hardening; no observable trust consequence yet.
 
-| id     | date        | severity | discovered by                     | principle violated                                                                                         | disposition                              | commit    |
-| ------ | ----------- | -------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------- |
-| RT-001 | 25 Jul 2026 | high     | found during A4 automated capture | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one        | fixed                                    | `161aa16` |
-| RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001      | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to            | accepted until **S1.1**                  | —         |
-| RT-003 | 26 Jul 2026 | high     | property test, S0.5a              | one human action must produce one agent action; a rooted turn is not automatically an asked-for one        | fixed                                    | `01ae2e8` |
-| RT-004 | 26 Jul 2026 | high     | S0.5b activation-boundary review  | model output is DATA; a summon token in generated text would convert injection into cross-principal action | guarded, one gap accepted until **S1.7** | `fe642c0` |
+| id     | date        | severity | discovered by                     | principle violated                                                                                                          | disposition                              | commit    |
+| ------ | ----------- | -------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------- |
+| RT-001 | 25 Jul 2026 | high     | found during A4 automated capture | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one                         | fixed                                    | `161aa16` |
+| RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001      | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                             | accepted until **S1.1**                  | —         |
+| RT-003 | 26 Jul 2026 | high     | property test, S0.5a              | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                         | fixed                                    | `01ae2e8` |
+| RT-004 | 26 Jul 2026 | high     | S0.5b activation-boundary review  | model output is DATA; a summon token in generated text would convert injection into cross-principal action                  | guarded, one gap accepted until **S1.7** | `fe642c0` |
+| RT-005 | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b     | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member | accepted until **S1.2**                  | —         |
 
 ## RT-001 — a refused write was indistinguishable from an accepted one
 
@@ -161,14 +162,56 @@ is forced at that commit rather than being rediscovered.
 Findings logged without a fix, each with the event that re-opens it. A deferral with no
 trigger is a deferral that expires when someone happens to notice.
 
-| id      | finding                                                                                                                                                                                                                                                                                   | trigger                                                                                 |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| S05a-N1 | one-turn-per-member is an in-process `Set`; a restart forgets it and a second instance never knew                                                                                                                                                                                         | the first pilot, or the first deploy during a live turn — whichever is first            |
-| S05a-N2 | the drift query scans `events` to find `agent.turn.%` rows; no index on `event_type`, and 004's partial index cannot serve it                                                                                                                                                             | **S2.9**, when the nightly job meets pilot volume instead of 39 rows                    |
-| S05b-N1 | any `@word` that names nobody produces a refusal notice, including ordinary prose like `@solar`                                                                                                                                                                                           | the first complaint about the noise, or **S1.7** — whichever is first                   |
-| S05c-N1 | no keep-alive: the warm-up is paid at boot and never again, so a quiet afternoon leaves the connections cold. A timer calling `warmUp()` is the fix and the interval is a guess until a pilot exists                                                                                      | the first pilot, or the first deploy during a live turn — whichever is first            |
-| S05c-N2 | **Bible §11's fan-out row is measured by an instrument that cannot fail** — `t_fanout` reads P50/P90/P95 all 0ms because the span ends at an in-process EventEmitter, before any socket write or client. The row says "fan-out to room **members**". RA-004's shape in a different column | ADR-002's swap to Redis pub/sub, or the first non-localhost client — whichever is first |
-| S06-N1  | the capture harness's selectors rotted silently when S-UI rewrote the room — three stale selectors matched nothing rather than failing. It lives outside the repo and outside CI, so nothing could notice                                                                                 | the next UI change to the room, or the next slice that films it                         |
-| S06-N2  | the room header renders the room **id**; the room's `title` is rendered nowhere, so every filmed frame carries a slug                                                                                                                                                                     | **S1.1**, when rooms acquire real membership and a name worth showing                   |
-| S06-N3  | the DECISION card's "Attempted by" asserts agency the product does not have — no adapter carries tool calls, so a request is always issued ON a member's behalf                                                                                                                           | the slice that gives adapters tool calls (S1.3's handoff object)                        |
-| S06-N4  | **Bible §11 has no budget row for opening a room** — where the database wake now lands (ADR-008) and where a pilot's first action of the day pays it. There is no written budget it could breach                                                                                          | **S1.1**, when rooms acquire real membership                                            |
+| id      | finding                                                                                                                                                                                                                                                                                   | trigger                                                                                            |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| S05a-N1 | one-turn-per-member is an in-process `Set`; a restart forgets it and a second instance never knew                                                                                                                                                                                         | the first pilot, or the first deploy during a live turn — whichever is first                       |
+| S05a-N2 | the drift query scans `events` to find `agent.turn.%` rows; no index on `event_type`, and 004's partial index cannot serve it                                                                                                                                                             | **S2.9**, when the nightly job meets pilot volume instead of 39 rows                               |
+| S05b-N1 | any `@word` that names nobody produces a refusal notice, including ordinary prose like `@solar`                                                                                                                                                                                           | the first complaint about the noise, or **S1.7** — whichever is first                              |
+| S05c-N1 | no keep-alive: the warm-up is paid at boot and never again, so a quiet afternoon leaves the connections cold. A timer calling `warmUp()` is the fix and the interval is a guess until a pilot exists                                                                                      | the first pilot, or the first deploy during a live turn — whichever is first                       |
+| S05c-N2 | **Bible §11's fan-out row is measured by an instrument that cannot fail** — `t_fanout` reads P50/P90/P95 all 0ms because the span ends at an in-process EventEmitter, before any socket write or client. The row says "fan-out to room **members**". RA-004's shape in a different column | ADR-002's swap to Redis pub/sub, or the first non-localhost client — whichever is first            |
+| S06-N1  | the capture harness's selectors rotted silently when S-UI rewrote the room — three stale selectors matched nothing rather than failing. It lives outside the repo and outside CI, so nothing could notice                                                                                 | the next UI change to the room, or the next slice that films it                                    |
+| S06-N2  | the room header renders the room **id**; the room's `title` is rendered nowhere, so every filmed frame carries a slug                                                                                                                                                                     | **S1.1**, when rooms acquire real membership and a name worth showing                              |
+| S06-N3  | the DECISION card's "Attempted by" asserts agency the product does not have — no adapter carries tool calls, so a request is always issued ON a member's behalf                                                                                                                           | the slice that gives adapters tool calls (S1.3's handoff object)                                   |
+| S11b-N1 | `counterparties` is checked AFTER `protected_actions`, per Bible §9.2's order, so a protected action asked under a member who is NOT in the room returns CO_SIGN — a human invited to sign for someone who is not there. Fail-closed, but it asks the wrong question first                | an owner ruling on the evaluation order; the same argument that put scope before protected applies |
+| S06-N4  | **Bible §11 has no budget row for opening a room** — where the database wake now lands (ADR-008) and where a pilot's first action of the day pays it. There is no written budget it could breach                                                                                          | **S1.1**, when rooms acquire real membership                                                       |
+
+## RT-005 — the roster is readable by anyone, and M-N1 lets them use it
+
+`GET /rooms/:id/members` requires no authentication. Any caller who can reach the api
+receives, for every member of a room: their id, their display name, the principal they act
+for, and **the exact scope and protected-action list from their mandate**.
+
+Read-only. It asserts nothing, writes nothing, and names no provider (§6 holds). On its own
+it is an information-disclosure finding of ordinary severity.
+
+**It is not on its own.** M-N1 says `actor_id` arrives on the wire as a free string and the
+server writes what it is given — a caller may claim to be any member. Put the two together:
+
+> The roster read tells you **which member may take which action**. M-N1 lets you **claim to
+> be that member**.
+
+That is target selection followed by impersonation, using two documented findings and no
+exploit. Before this the same information required filesystem access to the deployment; the
+roster is now an HTTP GET. **This raises M-N1's severity rather than sitting beside it** —
+M-N1 was logged as a gap in identity stamping, and it should be read from here on as the
+second half of a two-step with a published first half.
+
+**Accepted until S1.2**, which stamps identity at the gateway. Fixing it earlier means
+inventing an authentication model in the wrong slice and replacing it, and there is nothing
+to scope a read _to_ until a caller has a verified identity.
+
+What makes the acceptance reasonable rather than convenient: the api is not
+internet-exposed; every action a claimed member could take still traverses the mandate
+evaluator, so **a caller impersonating `claude-main` gains claude-main's mandate and not more
+than it** — `pr.merge` is still CO_SIGN and still cannot be completed (S2.2), and an action
+outside scope is still BLOCK. The disclosure widens who can aim; it does not widen what the
+aim achieves.
+
+What would make it unreasonable, and should re-open this immediately: exposing the api beyond
+localhost, any pilot traffic, or any slice that makes an ALLOW verdict cause a real external
+side effect before S1.2 lands. The third is the one to watch — today no ALLOW does anything,
+which is most of why this is survivable.
+
+S1.1b narrowed the read from every member in the system to the members of one room, which is
+a smaller disclosure and the reason the capability was built here. Who may ask is still not
+enforced.

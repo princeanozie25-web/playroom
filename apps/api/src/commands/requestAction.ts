@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { evaluate, loadMandates, type LoadedMandate } from '@playroom/fabric';
 import { appendDecision } from '../events.js';
+import { listRoomMembers } from '../members.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // ============================================================================
@@ -48,12 +49,19 @@ export async function requestActionCommand(
   ctx: CommandContext,
   input: { roomId: string; clientMsgId: string; subject: string; action: string; resource: string },
 ): Promise<void> {
+  // The room's roster, for the `counterparties` branch. Read BEFORE the timer starts: the
+  // §11 budget is on the evaluation, which is pure and measured in microseconds, and folding
+  // a database round trip into that number would make the budget meaningless.
+  const roster = (await listRoomMembers(deps.pool, input.roomId)).map((m) => m.id);
+
   const t0 = performance.now();
   const mandate = mandateFor(input.subject);
   const verdict = evaluate(
     { type: input.action, resource: input.resource },
     input.subject,
     mandate,
+    undefined,
+    roster,
   );
   const durationMs = Number((performance.now() - t0).toFixed(3));
 
