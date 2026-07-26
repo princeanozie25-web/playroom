@@ -34,10 +34,11 @@ image, which is the failure A4 was built to catch.
 
 ## Recommended take: 10
 
-52.2s, all five beats, one continuous take, shot on the S-UI2 surface. Takes 1–7 were shot
-before S-UI2 and are kept: they are the record of what the room looked like when the P0 film
-was first cut, and take 8 is kept because it is the take that failed on the decision card
-before UI2-4 reworded it.
+52.8s, all five beats, one continuous take, shot on the S-UI2 surface and **re-shot after
+S1.2** (see below — the clip currently on disk is the S1.2 one, and the earlier 52.2s cut was
+overwritten by a re-run of the same script). Takes 1–7 were shot before S-UI2 and are kept:
+they are the record of what the room looked like when the P0 film was first cut, and take 8 is
+kept because it is the take that failed on the decision card before UI2-4 reworded it.
 
 What take 6 recorded — the pre-S-UI2 surface, retained for comparison:
 
@@ -66,6 +67,33 @@ built for outside its own measurement.
 The beats, the assertions and the claims are identical. Only the surface moved — and the
 harness proved it by re-running take 6's script against the new room with **no selector
 edited**, which is what the app-owned hooks were added for (S06-N1).
+
+### Take 10, re-shot after S1.2 — 26 Jul 2026
+
+Identity is stamped at the handshake now, so the film's own harness had to authenticate. The
+take was re-shot rather than re-used, because a film of a room whose door has changed should
+be a film of the room as it is.
+
+| what changed                                                                                                                                                                                                                            | what did not                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| the harness presents a **member credential** on beat 5's socket, issued with `issue-credential.ts prince "capture harness"` — its own credential, separate from the browser's, so revoking the camera does not lock out the dev browser | the script, the prompts, the pacing, and **every selector** |
+| the browser reads the room as an authenticated member (`PLAYROOM_WEB_TOKEN` in `apps/web/.env.local`) — without it the socket is refused 4401 and the roster returns 401                                                                | the five beats and all of their assertions                  |
+| the composer no longer has a `you` field to fill — the harness's two lines that filled it are gone, along with the field                                                                                                                | nothing in the product was adjusted for the camera          |
+
+Re-shot clip: **52.80s**, 3279K, `sha256:71efbc68e9dda027…`, frame-verified **3/3 distinct**
+by `verify-p0.sh` like every take before it. App code filmed: `4498ad2` (S12-3), web
+production build, api warmed at boot.
+
+Re-shot run: warm-up **584ms** (database 120ms, claude-main 221ms, sol 583ms), beat 1 opened
+with no stall, `262→178 tok · $0.00115` for Claude and `292→136 tok · $0.00013` for Sol, and
+beat 5 rendered `CO_SIGN · pr.merge` from a real `decision` row. **Every beat asserted green
+on the first run** — no selector edits, which is the second time the `data-pr` hook contract
+has survived a change it was not designed for.
+
+**A test-only path around authentication would have made this take worthless.** The harness
+walks through the same door as a browser: `?token=` on the socket, because the browser
+WebSocket API cannot set a header, and the credential is a real row in `member_credentials`.
+A film shot through a door the product does not have proves nothing about the product.
 
 ## What the harness asserts before a take passes
 
