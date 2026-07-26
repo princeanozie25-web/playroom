@@ -45,9 +45,8 @@ export function MemberChip({
           {member.scope && member.scope.length > 0 && (
             <span className="chip-mandate" title="granted scope, from this member's mandate">
               {member.scope
-                .filter((a) => a !== 'room.post')
                 .map((a) => (member.protected_actions?.includes(a) ? `${a} (co-sign)` : a))
-                .join(', ') || 'post only'}
+                .join(', ')}
             </span>
           )}
         </>

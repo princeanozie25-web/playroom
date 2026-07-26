@@ -21,6 +21,17 @@ export const Mandate = z
     mandate_id: z.string().regex(/^mnd_/, 'mandate_id must carry the mnd_ prefix'),
     principal: z.string().min(1),
     member: z.string().min(1),
+    /**
+     * Granted action types.
+     *
+     * EVERY ENTRY MUST BE AN ACTION THE EVALUATOR ACTUALLY RECEIVES. An entry nothing
+     * dispatches is not harmless: it is text inside an authority document that reads as
+     * a granted power, and the next person to look will trust it. `room.post` sat here
+     * until S0.4 and was never evaluated — the same failure shape as `mandate_label`,
+     * which described authority without being it.
+     *
+     * Before adding an entry, check that some code path calls evaluate() with it.
+     */
     scope: z.array(z.string().min(1)),
     protected_actions: z.array(z.string().min(1)),
     co_sign: z.object({ actions: z.array(z.string().min(1)), by: z.string().min(1) }),
