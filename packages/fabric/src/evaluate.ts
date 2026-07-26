@@ -87,7 +87,7 @@ export function evaluate(
 
   // 2. Scope. THE DENY-BY-DEFAULT LINE, and the single most important branch in this
   // function: an action type that is not explicitly listed is BLOCKED. An unknown
-  // action is denied, never permitted by omission (Bible §10). Note this is checked
+  // action is denied, never granted by omission (Bible §10). Note this is checked
   // BEFORE protected_actions, so a protected action absent from scope is a BLOCK and
   // not a CO_SIGN — the order matters and it is the Bible's.
   if (!m.scope.includes(action.type)) {

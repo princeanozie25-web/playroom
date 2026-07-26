@@ -88,7 +88,7 @@ const CASES: Case[] = [
     reason: 'OUT_OF_SCOPE',
   },
   {
-    name: '5. UNKNOWN action type is DENIED, not permitted (deny-by-default)',
+    name: '5. UNKNOWN action type is DENIED, not granted (deny-by-default)',
     action: 'totally.made.up.action',
     member: 'claude-main',
     mandate: loaded(),
