@@ -8,3 +8,4 @@ export type { ClientLike, StreamLike } from './transport.js';
 // each one directly with a stub transport. Production code never names an implementation:
 // it calls createAdapter(id) and receives a provider-neutral AgentAdapter.
 export * from './anthropic/index.js';
+export * from './openai/index.js';
