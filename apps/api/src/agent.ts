@@ -35,31 +35,41 @@ export function isAgentActor(actorId: string): boolean {
 }
 
 /**
- * Summon tokens, derived FROM THE ROSTER — never hardcoded.
+ * Summon tokens, PER ROOM — derived from that room's membership, never hardcoded.
  *
- * This file used to contain a hardcoded summon prefix and a literal member id, which meant
- * enabling a second member required editing app code. That is the §6 anti-lock-in rule
- * failing in the one place it is easiest to miss: the interface was clean, the adapter
- * boundary was clean, and the SELECTOR was hardcoded. Bible §21.2's binary exit — "same
- * prompt routes through either member via roster config, no app-code change" — is only true
- * because of this function.
+ * This file once held a hardcoded prefix and a literal member id, which meant enabling a
+ * second member required editing app code: the §6 anti-lock-in rule failing in the one place
+ * easiest to miss, where the interface was clean, the adapter boundary was clean, and the
+ * SELECTOR was hardcoded. Bible §21.2's exit — "same prompt routes through either member via
+ * roster config, no app-code change" — is only true because of this.
  *
  * A member is addressable by `@<display_name>` or `@<id>`, lowercased.
  *
- * THE SOURCE MOVED IN S1.1a, THE RULE DID NOT. Display names used to come from
- * adapters.yaml; they are member records now, so the table is SET by the server at boot
- * (`setMemberTokens`) rather than read from a file on first use. Not one guard in
- * `summonRuling` changed, and its signature did not either — this function is the boundary's
- * input, not the boundary.
+ * ── PER ROOM, AND WITHOUT TOUCHING THE BOUNDARY ──
  *
- * IT REFUSES TO GUESS. If the table has not been loaded, `tokenTable()` throws rather than
- * returning empty. An empty table resolves no tags, which means a room that accepts every
- * message and summons nobody — a working-looking room that is silently dead. That is the
- * RT-001 shape, and it is exactly what an unset cache would produce.
+ * S1.1a made this a process-wide snapshot loaded at boot (S11a-N2), which was defensible
+ * while membership was configuration. Membership is data now and can change at runtime, so a
+ * boot snapshot would answer yesterday's question. It is resolved PER ROOM and PER MESSAGE
+ * instead: `postMessage` awaits `loadRoomTokens` before ruling, and `summonRuling` reads the
+ * table for `event.room_id`.
+ *
+ * The room id was already on the event, so this cost NO change to `summonRuling`'s signature
+ * and NO change to any of its guards. The table is the boundary's input, not the boundary.
+ *
+ * The map is a keyed hand-off, not a cache: `loadRoomTokens` overwrites the room's entry from
+ * the database on every message, so nothing goes stale between a membership change and the
+ * next message. One indexed read of a two-row join per send, against a path whose measured
+ * overhead is ~30-120ms of provider latency (ADR-008) — correctness at a cost that does not
+ * register.
+ *
+ * IT REFUSES TO GUESS. A room whose table was never loaded THROWS rather than resolving
+ * nothing. An empty table means every tag silently fails to summon, which is a room that
+ * accepts messages and answers none — a working-looking room that is dead, and the RT-001
+ * shape exactly.
  */
-let summonTokens: Map<string, string> | undefined;
+const roomTokens = new Map<string, Map<string, string>>();
 
-/** The subset of a member record this needs. Keeps the boundary off the database. */
+/** The subset of a member record the summon rule needs. Keeps the boundary off the database. */
 export interface SummonableMember {
   id: string;
   display_name: string;
@@ -67,30 +77,53 @@ export interface SummonableMember {
 }
 
 /**
- * Install the roster the summon rule resolves tags against. Called once at server ready.
+ * Install the tokens for one room.
  *
- * Only AGENT members become addressable: a summon starts an agent turn, and a `@`-tag naming
- * a human would resolve to a member with no adapter to run. Humans are addressed by typing
- * their name like anyone would — S1.1b, which adds human members, does not make them
- * summonable by doing so.
+ * Only AGENT members become addressable. A summon starts an agent turn, so a `@`-tag naming
+ * a human would resolve to a member with no adapter to run — `prince` is a member record as
+ * of S1.1b and is deliberately NOT summonable by becoming one.
  */
-export function setMemberTokens(members: SummonableMember[]): void {
+export function setRoomTokens(roomId: string, members: SummonableMember[]): void {
   const table = new Map<string, string>();
   for (const m of members) {
     if (m.kind !== 'agent') continue;
     table.set(`@${m.display_name.toLowerCase()}`, m.id);
     table.set(`@${m.id.toLowerCase()}`, m.id);
   }
-  summonTokens = table;
+  roomTokens.set(roomId, table);
 }
 
-function tokenTable(): Map<string, string> {
-  if (!summonTokens) {
+/** Forget a room's tokens. Used when a room is deleted, so the map cannot grow forever. */
+export function forgetRoomTokens(roomId: string): void {
+  roomTokens.delete(roomId);
+}
+
+function tokenTable(roomId: string): Map<string, string> {
+  const table = roomTokens.get(roomId);
+  if (!table) {
     throw new Error(
-      'summon token table not loaded — call setMemberTokens() before handling messages',
+      `summon tokens not loaded for room "${roomId}" — call setRoomTokens() before ruling`,
     );
   }
-  return summonTokens;
+  return table;
+}
+
+/**
+ * Every member id, across every loaded room. Lets the rule tell "nobody is called that" apart
+ * from "they exist, but not here" — two refusals with two reasons, per the standing rule that
+ * fail-closed must distinguish refused from misconfigured.
+ */
+let knownMemberTokens = new Set<string>();
+
+/** Install the set of tokens that name a real member ANYWHERE. Set alongside the roster. */
+export function setKnownMemberTokens(members: SummonableMember[]): void {
+  const all = new Set<string>();
+  for (const m of members) {
+    if (m.kind !== 'agent') continue;
+    all.add(`@${m.display_name.toLowerCase()}`);
+    all.add(`@${m.id.toLowerCase()}`);
+  }
+  knownMemberTokens = all;
 }
 
 /**
@@ -107,6 +140,7 @@ export type SummonRule =
   | 'SYSTEM_AUTHORED' // the room itself wrote it (notices, refusals)
   | 'AGENT_AUTHORED' // BARRIER 2 — a member message whose author is an adapter
   | 'NO_TOKEN' // member-authored, addressed nobody
+  | 'NOT_IN_ROOM' // named a real member who is not in THIS room
   | 'UNKNOWN_MEMBER'; // addressed something, and nothing addressable was named
 
 export interface SummonRuling {
@@ -119,6 +153,15 @@ export interface SummonRuling {
    * commands/summon.ts, which is what says so out loud).
    */
   unknown: string[];
+  /**
+   * Tokens naming a real member who is NOT in this room.
+   *
+   * Kept apart from `unknown` because they are different mistakes with different fixes: a
+   * misspelling versus someone who exists but was never enrolled here. Fail-closed must
+   * distinguish REFUSED from MISCONFIGURED, and this is the mild version of that rule — the
+   * room's sentence differs accordingly.
+   */
+  elsewhere: string[];
 }
 
 // The event types an agent turn produces. Named as a set rather than inferred from a
@@ -192,7 +235,12 @@ function memberAuthoredText(event: ServerEvent): string | null {
  * later without rework. Tokens match as whole words, so `@solar` is not `@sol`.
  */
 export function summonRuling(event: ServerEvent): SummonRuling {
-  const refuse = (rule: SummonRule): SummonRuling => ({ rule, members: [], unknown: [] });
+  const refuse = (rule: SummonRule): SummonRuling => ({
+    rule,
+    members: [],
+    unknown: [],
+    elsewhere: [],
+  });
 
   // BARRIER 1 — provenance of the text. Checked FIRST so the refusal is named for what
   // it is rather than reported as "not room content", which is what the event-type
@@ -205,9 +253,12 @@ export function summonRuling(event: ServerEvent): SummonRuling {
   if (event.actor_id === 'system') return refuse('SYSTEM_AUTHORED');
   if (isAgentActor(event.actor_id)) return refuse('AGENT_AUTHORED');
 
-  const table = tokenTable();
+  // PER ROOM. The room id was already on the event, so scoping resolution cost no change to
+  // this function's signature and none to the guards above.
+  const table = tokenTable(event.room_id);
   const members: string[] = [];
   const unknown: string[] = [];
+  const elsewhere: string[] = [];
   // Word-boundary split keeps `@sol,` addressable while `@solar` is not `@sol`. `-` and
   // `_` are kept as word characters, so `@claude-main` is one token and cannot be read
   // as `@claude` — which is why a prefix pair in the table is not an ambiguity.
@@ -216,14 +267,22 @@ export function summonRuling(event: ServerEvent): SummonRuling {
     const id = table.get(word);
     if (id) {
       if (!members.includes(id)) members.push(id);
+    } else if (knownMemberTokens.has(word)) {
+      // A REAL MEMBER, JUST NOT HERE. Distinguished from a token naming nobody so the room
+      // can say which mistake was made — "no member of this room is called @x" and "@x is
+      // not in this room" are different sentences because they have different remedies.
+      if (!elsewhere.includes(word)) elsewhere.push(word);
     } else if (!unknown.includes(word)) {
       unknown.push(word);
     }
   }
 
-  if (members.length > 0) return { rule: 'ACTIVATED', members, unknown };
-  if (unknown.length > 0) return { rule: 'UNKNOWN_MEMBER', members, unknown };
-  return { rule: 'NO_TOKEN', members, unknown };
+  if (members.length > 0) return { rule: 'ACTIVATED', members, unknown, elsewhere };
+  // Ordered so the more specific diagnosis wins: naming a real member who is absent is more
+  // informative than naming nobody, and a message doing both should say the useful thing.
+  if (elsewhere.length > 0) return { rule: 'NOT_IN_ROOM', members, unknown, elsewhere };
+  if (unknown.length > 0) return { rule: 'UNKNOWN_MEMBER', members, unknown, elsewhere };
+  return { rule: 'NO_TOKEN', members, unknown, elsewhere };
 }
 
 // One in-flight turn per MEMBER per room (§22b, corrected for a multi-member roster).

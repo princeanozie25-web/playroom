@@ -1,6 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { ServerEvent } from '@playroom/shared';
-import { setMemberTokens, summonRuling, type SummonRule } from '../src/agent.js';
+import {
+  setKnownMemberTokens,
+  setRoomTokens,
+  summonRuling,
+  type SummonRule,
+} from '../src/agent.js';
 
 // THE ACTIVATION BOUNDARY (S0.5b).
 //
@@ -20,11 +25,15 @@ import { setMemberTokens, summonRuling, type SummonRule } from '../src/agent.js'
 // touching this file. The roster is member records now and the server installs it at boot,
 // so the fixture is declared here: `@claude` and `@claude-main` mean claude-main, `@sol`
 // means sol, and the prefix pair those cases rely on is visible in the fixture itself.
+const ROOM = 'r';
+const ROSTER = [
+  { id: 'claude-main', display_name: 'Claude', kind: 'agent' as const },
+  { id: 'sol', display_name: 'Sol', kind: 'agent' as const },
+];
+
 beforeAll(() => {
-  setMemberTokens([
-    { id: 'claude-main', display_name: 'Claude', kind: 'agent' },
-    { id: 'sol', display_name: 'Sol', kind: 'agent' },
-  ]);
+  setRoomTokens(ROOM, ROSTER);
+  setKnownMemberTokens(ROSTER);
 });
 
 const msg = (body: string, actor = 'prince'): ServerEvent => ({

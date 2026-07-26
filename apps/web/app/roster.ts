@@ -75,9 +75,11 @@ interface ApiMember {
  * chip, no affiliation and no mandate — a room that looks ungoverned because a fetch failed.
  * That is RT-001's shape at the page level, and silence is exactly what it must not be.
  */
-async function fetchMembers(): Promise<ApiMember[]> {
-  const res = await fetch(`${API_URL}/members`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`GET /members failed: ${res.status}`);
+async function fetchMembers(roomId: string): Promise<ApiMember[]> {
+  const res = await fetch(`${API_URL}/rooms/${encodeURIComponent(roomId)}/members`, {
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`GET /rooms/${roomId}/members failed: ${res.status}`);
   const body: unknown = await res.json();
   if (typeof body !== 'object' || body === null || !Array.isArray((body as never)['members'])) {
     throw new Error('GET /members returned no members array');
@@ -86,14 +88,14 @@ async function fetchMembers(): Promise<ApiMember[]> {
 }
 
 /**
- * The principals present in the room, in accent order.
+ * The principals present in THIS ROOM, in accent order.
  *
  * Derived from the members rather than fetched separately: a principal with no member is not
  * in the room, and would be a colour assigned to nobody.
  */
-export async function loadPrincipals(): Promise<Principal[]> {
+export async function loadPrincipals(roomId: string): Promise<Principal[]> {
   const seen = new Map<string, Principal>();
-  for (const m of await fetchMembers()) {
+  for (const m of await fetchMembers(roomId)) {
     if (seen.has(m.principal_id)) continue;
     seen.set(m.principal_id, {
       id: m.principal_id,
@@ -111,8 +113,8 @@ export async function loadPrincipals(): Promise<Principal[]> {
  * and a human member has none to show. S1.1b, which adds human members, decides how they
  * appear — this slice must not change the strip.
  */
-export async function loadRoster(): Promise<RosterMember[]> {
-  return (await fetchMembers())
+export async function loadRoster(roomId: string): Promise<RosterMember[]> {
+  return (await fetchMembers(roomId))
     .filter((m) => m.kind === 'agent')
     .map((m) => ({
       id: m.id,

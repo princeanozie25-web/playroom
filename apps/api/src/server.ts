@@ -17,8 +17,8 @@ import { RoomBus } from './bus.js';
 import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
-import { listMembers } from './members.js';
-import { setMemberTokens } from './agent.js';
+import { listMembers, listRoomMembers } from './members.js';
+import { setKnownMemberTokens } from './agent.js';
 
 export interface BuildOptions {
   databaseUrl?: string;
@@ -149,15 +149,19 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     if (pool) await pool.end();
   });
 
-  // THE SUMMON TOKEN TABLE, loaded from records before the server accepts anything.
+  // THE KNOWN-MEMBER TOKENS, loaded before the server accepts anything.
   //
-  // AWAITED, unlike the warm-up below. A server that is up but cannot resolve `@claude`
-  // would accept messages and summon nobody — silence that looks like a working room, which
-  // is the failure shape this codebase keeps refusing. Failing to start is the honest
-  // outcome, and `listMembers` throws here if a mandate names a member that does not exist.
+  // This is the set that lets the summon rule say "@sol is not in this room" rather than
+  // "nobody is called @sol". A room's OWN tokens are resolved per message from that room's
+  // membership (agent.ts), because membership is data now and a boot snapshot would answer
+  // yesterday's question.
+  //
+  // AWAITED, unlike the warm-up below, and `listMembers` throws here if a mandate names a
+  // member that does not exist — so a misconfigured deployment fails to start rather than
+  // running a room where one agent quietly cannot act.
   app.addHook('onReady', async () => {
     if (!pool) return;
-    setMemberTokens(await listMembers(pool));
+    setKnownMemberTokens(await listMembers(pool));
   });
 
   // Warm THIS server's own pool and adapter factory. Not a separate pool built at the
@@ -193,7 +197,20 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // path to leak `node:fs` into a browser bundle.
     //
     // Read-only, no principal-scoped data, and it names no provider (§6).
-    fastify.get('/members', async () => ({ members: await listMembers(db()) }));
+    // Scoped to a room. S11a-N1 shipped an unauthenticated roster of EVERY member; a room's
+    // roster is narrower and is what the web tier actually needs. The CAPABILITY to scope
+    // arrives here because a roster cannot be scoped to a room until rooms have one.
+    //
+    // WHO MAY ASK IS STILL NOT ENFORCED — that is S1.2's, and RT-005 records the acceptance
+    // along with why it is worse than it looks next to M-N1.
+    fastify.get('/rooms/:id/members', async (req, reply) => {
+      const { id } = req.params as { id: string };
+      if (!(await getRoom(db(), id))) {
+        reply.code(404);
+        return roomNotFound(id);
+      }
+      return { members: await listRoomMembers(db(), id) };
+    });
 
     // POST /internal/warmup → pay the cold connection costs now, and report what it cost.
     //

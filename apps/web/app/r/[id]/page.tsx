@@ -10,6 +10,6 @@ export default async function RoomRoute({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   // Both awaited: the roster is records now, fetched from the API rather than read off the
   // disk. A server component is the right place for that — the browser never makes the call.
-  const [roster, principals] = await Promise.all([loadRoster(), loadPrincipals()]);
+  const [roster, principals] = await Promise.all([loadRoster(id), loadPrincipals(id)]);
   return <Room roomId={id} roster={roster} principals={principals} />;
 }

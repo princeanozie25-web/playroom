@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { getAdapterConfig } from '@playroom/adapters';
 import { loadMandates } from '@playroom/fabric';
+import { setRoomTokens } from './agent.js';
 
 /**
  * THE ROSTER, READ FROM RECORDS.
@@ -128,4 +129,32 @@ export async function listMembers(pool: Pool): Promise<MemberRecord[]> {
       protected_actions: m?.protected_actions ?? null,
     };
   });
+}
+
+/**
+ * The members of ONE room.
+ *
+ * The same shape and the same validation as `listMembers`, narrowed by the room's roster.
+ * Reusing the validation matters: a room-scoped read that skipped the mandate checks would
+ * be a second, laxer path to the same records.
+ */
+export async function listRoomMembers(pool: Pool, roomId: string): Promise<MemberRecord[]> {
+  const { rows } = await pool.query<{ member_id: string }>(
+    'SELECT member_id FROM room_members WHERE room_id = $1',
+    [roomId],
+  );
+  const inRoom = new Set(rows.map((r) => r.member_id));
+  return (await listMembers(pool)).filter((m) => inRoom.has(m.id));
+}
+
+/**
+ * Install the summon tokens for a room, from that room's current membership.
+ *
+ * Called on the send path before the activation boundary rules, so a tag resolves against
+ * who is in the room NOW. S11a-N2 made this a boot-time process snapshot, which was fine
+ * while membership was configuration and is not fine now that it is data — a member removed
+ * from a room would have stayed addressable until the next deploy.
+ */
+export async function loadRoomTokens(pool: Pool, roomId: string): Promise<void> {
+  setRoomTokens(roomId, await listRoomMembers(pool, roomId));
 }

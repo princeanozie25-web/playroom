@@ -53,8 +53,8 @@ export default async function DecisionCardFixture() {
       <div style={{ marginTop: 24 }}>
         <DecisionCard
           event={FIXTURE}
-          roster={await loadRoster()}
-          principals={await loadPrincipals()}
+          roster={await loadRoster(FIXTURE.room_id)}
+          principals={await loadPrincipals(FIXTURE.room_id)}
         />
       </div>
     </main>

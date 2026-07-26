@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { httpCreateRoom, startTestServer, testPool, type TestServer } from './support.js';
-import { listMembers } from '../src/members.js';
+import { listMembers, listRoomMembers, loadRoomTokens } from '../src/members.js';
 
 // THE ROSTER, AS RECORDS AND AS THE ROOM SEES IT.
 //
@@ -23,9 +23,8 @@ afterAll(async () => {
 
 describe('listMembers', () => {
   it('returns the agents exactly as they rendered before members were records', async () => {
-    // `prince` became a HUMAN member record in this commit (migration 008), so the full list
-    // is no longer agents-only. The AGENTS' fields are what the roster strip draws and are
-    // what must not move.
+    // `prince` joined the records in S1.1b as a HUMAN member, so the full list is no longer
+    // agents-only. The agents' fields are what the roster strip draws and must not move.
     const members = (await listMembers(pool)).filter((m) => m.kind === 'agent');
     expect(members).toEqual([
       {
@@ -66,23 +65,65 @@ describe('listMembers', () => {
     const ordinals = members.map((m) => m.principal_ordinal);
     expect([...ordinals].sort((a, b) => a - b)).toEqual(ordinals);
   });
+
+  it('carries prince as a HUMAN member bound to his principal, with no adapter', async () => {
+    // The film's human was a free string in actor_id with no referent anywhere. S1.1b makes
+    // him a record under the same binding every other member has had since 007.
+    const prince = (await listMembers(pool)).find((m) => m.id === 'prince');
+    expect(prince).toMatchObject({
+      kind: 'human',
+      display_name: 'Prince',
+      principal_id: 'principal:prince',
+      adapter_id: null,
+    });
+  });
 });
 
-describe('GET /members', () => {
-  it('serves the roster to the web tier, with no filesystem read on that side', async () => {
+describe('a room roster, scoped', () => {
+  it('GET /rooms/:id/members returns only that room, and 404s for a room that is not there', async () => {
     server = await startTestServer();
-    const res = await fetch(`${server.httpBase}/members`);
+    const room = `members-scope-${Date.now()}`;
+    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+
+    const res = await fetch(`${server.httpBase}/rooms/${room}/members`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { members: Array<{ id: string; principal_name: string }> };
-    // prince is a member as of this commit, and the endpoint is not room-scoped yet.
+    // A new room gets every current member — today's behaviour, recorded rather than narrowed.
     expect(body.members.map((m) => m.id).sort()).toEqual(['claude-main', 'prince', 'sol']);
+
+    const ghost = await fetch(`${server.httpBase}/rooms/no-such-room-here/members`);
+    expect(ghost.status).toBe(404);
+
+    await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
   });
 
-  it('the summon tokens the server loaded resolve the same tags as before', async () => {
+  it('a member removed from a room is no longer in its roster', async () => {
+    // The path that makes per-room scoping observable. There is no product surface for
+    // removing a member yet — invites and their inverse need an authenticated actor (S1.2) —
+    // but membership is data, and the read must follow it.
+    const room = `members-remove-${Date.now()}`;
+    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+    await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
+      room,
+      'sol',
+    ]);
+
+    const inRoom = await listRoomMembers(pool, room);
+    expect(inRoom.map((m) => m.id).sort()).toEqual(['claude-main', 'prince']);
+    // The full-roster read still sees sol — the member exists, they are just not here.
+    expect((await listMembers(pool)).map((m) => m.id)).toContain('sol');
+
+    await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
+  });
+
+  it('the summon tokens for a room resolve the same tags as before', async () => {
     // `@claude` must still mean claude-main. The display name moved from adapters.yaml to a
-    // member record between S11a-1 and S11a-2, and this tag is what the film types.
+    // member record in S1.1a and resolution became per-room in S1.1b; this is the tag the
+    // film types, checked through both moves.
     const room = `members-tokens-${Date.now()}`;
     expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+    await loadRoomTokens(pool, room);
+
     const { summonRuling } = await import('../src/agent.js');
     const ruling = summonRuling({
       type: 'event',
@@ -95,7 +136,7 @@ describe('GET /members', () => {
     });
     expect(ruling.rule).toBe('ACTIVATED');
     expect(ruling.members).toEqual(['claude-main', 'sol']);
-    await pool.query('DELETE FROM events WHERE room_id = $1', [room]);
+
     await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
   });
 });
