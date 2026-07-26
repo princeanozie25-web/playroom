@@ -22,8 +22,8 @@ import {
 // The §19 query is then run AS SQL from the file the nightly job reads, against the same
 // database, so the test and the production check are provably the same statement.
 
-const ZERO_QUERY = readFileSync(
-  resolve(import.meta.dirname, '../../../scripts/sql/unprompted-turns.sql'),
+const DRIFT_QUERY = readFileSync(
+  resolve(import.meta.dirname, '../../../scripts/sql/summon-drift.sql'),
   'utf8',
 );
 
@@ -152,20 +152,68 @@ describe('summon provenance (Bible §19)', () => {
     expect(new Set(fromDouble.map((r) => r.payload.member)).size).toBe(2);
   });
 
-  it('THE ZERO QUERY returns zero, as the SQL the nightly job reads', async () => {
+  it('two identical frames arriving concurrently produce ONE summon and ONE turn', async () => {
+    // Not the sequential replay above: both frames are in flight before either message is
+    // committed, so `appendMessage`'s ON CONFLICT decides which one wins the row and BOTH
+    // callers then read the same seq. Migration 005's unique summon key is the only thing
+    // that stops each of them summoning against it. A boolean set after the first commit
+    // would be too late — this is the race the closeout said an `if` could not survive.
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`);
+    await c.open();
+    const before = await log();
+
+    c.send('@sol race me', 'race-1', 'prince');
+    c.send('@sol race me', 'race-1', 'prince'); // same tick, no await between
+
+    // Give both frames time to be handled and any turn they started to finish.
+    await new Promise((r) => setTimeout(r, 4000));
+    const after = await log();
+    const added = after.slice(before.length);
+
+    expect(added.filter((r) => r.event_type === 'message')).toHaveLength(1);
+    expect(added.filter((r) => r.event_type === 'summon')).toHaveLength(1);
+    expect(added.filter((r) => r.event_type === 'agent.turn.started')).toHaveLength(1);
+    expect(added.filter((r) => r.event_type === 'agent.turn.completed')).toHaveLength(1);
+
+    // WHICH MECHANISM REFUSED. `inFlight` would have refused the second TURN with a system
+    // notice in the room ("sol is already replying"); migration 005 refuses the second
+    // SUMMON silently, before a turn is ever triggered. Asserting no notice is what makes
+    // this case evidence about the durable guarantee rather than about the in-process Set
+    // that S05a-N1 says not to rely on.
+    expect(
+      added.filter((r) => r.actor_id === 'system'),
+      'the in-flight Set refused this, not the unique index',
+    ).toHaveLength(0);
+    c.close();
+  });
+
+  it('THE DRIFT QUERY returns zero on BOTH numbers, as the SQL the nightly job reads', async () => {
     const { rows } = await pool.query<{
-      unprompted_turns: number;
+      unrooted_turns: number;
       no_summon_ref: number;
       dangling_ref: number;
       not_human_rooted: number;
-    }>(ZERO_QUERY);
+      multi_turn_summons: number;
+      turn_rows_examined: number;
+      summons_examined: number;
+    }>(DRIFT_QUERY);
     const r = rows[0];
+
+    // A zero over an empty log proves the query parses and nothing else — the first run of
+    // the single-number version did exactly that. Assert it had something to examine.
+    expect(r.turn_rows_examined, 'nothing to examine — this pass would be vacuous').toBeGreaterThan(
+      0,
+    );
+    expect(r.summons_examined).toBeGreaterThan(0);
+
     // Reported rather than just asserted, so a failure says WHICH way it failed.
-    expect({ ...r }, `unprompted turns present: ${JSON.stringify(r)}`).toEqual({
-      unprompted_turns: 0,
+    const { turn_rows_examined: _t, summons_examined: _s, ...counts } = r;
+    expect(counts, `drift present: ${JSON.stringify(r)}`).toEqual({
+      unrooted_turns: 0,
       no_summon_ref: 0,
       dangling_ref: 0,
       not_human_rooted: 0,
+      multi_turn_summons: 0,
     });
   });
 

@@ -203,12 +203,34 @@ export function summonRuling(event: ServerEvent): SummonRuling {
 // is fine at one region today and it is a real bug the first time there is a pilot and a
 // deploy mid-turn. It belongs with the durability argument that put depth on the summon
 // record rather than in a counter: process memory is not where an invariant lives.
+//
+//   TRIGGER: the first pilot, or the first deploy during a live turn — whichever comes
+//   first. Not "when convenient": both of those events make it observable to a user, and
+//   the durable replacement (migration 006's unique index on started rows) already exists
+//   for the narrower case, so the work is to route the refusal through it rather than to
+//   invent a mechanism.
 const inFlight = new Set<string>();
 const inFlightKey = (roomId: string, adapterId: string): string => `${roomId} ${adapterId}`;
 
 // End time of the previous turn in THIS process — lets each turn record the gap
 // since the last one, so cold-start/autosuspend effects are visible (S0.3c).
 let lastTurnEndedAt: number | undefined;
+
+/**
+ * Did this error come from migration 006's one-turn-per-summon index?
+ *
+ * Matched on BOTH the SQLSTATE and the constraint name, not on 23505 alone: a unique
+ * violation from anywhere else — a duplicate client_msg_id, a future index — is a
+ * different fault and must keep travelling to the error path rather than being quietly
+ * read as "someone else is already answering".
+ */
+export const ONE_TURN_PER_SUMMON_INDEX = 'events_one_turn_per_summon_uniq';
+
+function isDuplicateTurnForSummon(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const e = err as { code?: unknown; constraint?: unknown };
+  return e.code === '23505' && e.constraint === ONE_TURN_PER_SUMMON_INDEX;
+}
 
 export interface AgentTurnDeps {
   pool: Pool;
@@ -349,6 +371,20 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
       ),
     );
   } catch (err) {
+    // A SUMMON MAY START AT MOST ONE TURN (migration 006). This turn lost the race for
+    // the `agent.turn.started` row, so another turn already answers this summon.
+    //
+    // Return WITHOUT writing a completed row. That row would carry a turn_id nothing
+    // started and would itself be a second turn appearing in the log against one summon
+    // — the exact drift the index exists to prevent, recorded by the code reporting it.
+    // Nothing is owed to the room either: the member asked once and is getting one
+    // answer, from the turn that won. `finally` still releases the in-flight key.
+    if (isDuplicateTurnForSummon(err)) {
+      console.log(
+        `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} refused=duplicate_turn_for_summon summon=${summon.summon_id}`,
+      );
+      return;
+    }
     const errorClass = err instanceof Error ? err.name : 'Error';
     const latencyMs = Date.now() - startedAt;
     publish(

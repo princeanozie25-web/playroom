@@ -72,6 +72,27 @@ describe('barrier 1 — model-generated text never activates', () => {
     }
   });
 
+  it('refuses a summon event as NOT_ROOM_CONTENT — a summon cannot summon', () => {
+    const summon: ServerEvent = {
+      type: 'event',
+      seq: 4,
+      room_id: 'r',
+      ts: '2026-07-26T00:00:00.000Z',
+      actor_id: 'prince',
+      event_type: 'summon',
+      payload: {
+        summon_id: 'sum_1',
+        member: 'sol',
+        requested_by: 'prince',
+        root_actor: 'prince',
+        root_is_human: true,
+        depth: 0,
+        cause_seq: 1,
+      },
+    };
+    ruled(summon, 'NOT_ROOM_CONTENT');
+  });
+
   it('refuses a non-message event as NOT_ROOM_CONTENT — an allowlist, not a filter', () => {
     // Deny by default: a `decision` row carries an action string that could contain a
     // token, and every event type added after this was written is refused until
@@ -112,6 +133,165 @@ describe('barrier 2 — authorship', () => {
     // Load-bearing for the refusal notices themselves: the room says "no member named
     // @nobody" as a system message, and that sentence must not summon anyone.
     ruled(msg('claude-main is already replying. @claude', 'system'), 'SYSTEM_AUTHORED');
+  });
+});
+
+// The token table this roster produces: @claude and @claude-main both name claude-main,
+// @sol names sol. Asserted here so a case below that depends on `@claude` being a PREFIX
+// of `@claude-main` fails loudly if the roster changes, rather than silently testing
+// nothing.
+describe('the case table', () => {
+  interface Case {
+    name: string;
+    body: string;
+    author?: string;
+    rule: SummonRule;
+    members?: string[];
+    unknown?: string[];
+  }
+
+  const CASES: Case[] = [
+    // ---- nothing addressed ----
+    { name: 'no tag', body: 'morning all, shipping today', rule: 'NO_TOKEN' },
+    { name: 'empty body', body: '', rule: 'NO_TOKEN' },
+    { name: 'a bare @ is not an address', body: 'bought 50 @ 3 each', rule: 'NO_TOKEN' },
+    {
+      name: 'an untagged reply to an agent turn',
+      body: 'thanks, that covers it',
+      rule: 'NO_TOKEN',
+    },
+
+    // ---- addressed, and resolvable ----
+    {
+      name: 'one tag',
+      body: '@claude what governs this room?',
+      rule: 'ACTIVATED',
+      members: ['claude-main'],
+    },
+    {
+      name: 'a message that is only a tag',
+      body: '@claude',
+      rule: 'ACTIVATED',
+      members: ['claude-main'],
+    },
+    {
+      name: 'two different members in one message → two summons',
+      body: '@claude and @sol, both please',
+      rule: 'ACTIVATED',
+      members: ['claude-main', 'sol'],
+    },
+    {
+      name: 'first-mention order decides summon order',
+      body: '@sol first, then @claude',
+      rule: 'ACTIVATED',
+      members: ['sol', 'claude-main'],
+    },
+    {
+      name: 'the same member tagged twice collapses to one summon',
+      body: '@claude — and again, @claude',
+      rule: 'ACTIVATED',
+      members: ['claude-main'],
+    },
+    {
+      name: 'two DIFFERENT tokens for the same member also collapse',
+      body: '@claude and @claude-main are one member',
+      rule: 'ACTIVATED',
+      members: ['claude-main'],
+    },
+    {
+      name: 'tags at start, middle and end',
+      body: '@claude look at this, then ask @sol, and report back @claude-main',
+      rule: 'ACTIVATED',
+      members: ['claude-main', 'sol'],
+    },
+    { name: 'uppercase', body: '@CLAUDE hello', rule: 'ACTIVATED', members: ['claude-main'] },
+    { name: 'mixed case', body: 'hey @Sol', rule: 'ACTIVATED', members: ['sol'] },
+    {
+      name: 'trailing punctuation does not break the token',
+      body: '@claude, please look. @sol!',
+      rule: 'ACTIVATED',
+      members: ['claude-main', 'sol'],
+    },
+    {
+      name: 'wrapped in parentheses',
+      body: 'ask (@sol) about the pricing',
+      rule: 'ACTIVATED',
+      members: ['sol'],
+    },
+    {
+      name: 'a known and an unknown member together — one summons, one is refused out loud',
+      body: '@claude and @nobody, please',
+      rule: 'ACTIVATED',
+      members: ['claude-main'],
+      unknown: ['@nobody'],
+    },
+
+    // ---- addressed, and NOT resolvable: the room owes a sentence ----
+    {
+      name: 'unknown name',
+      body: '@nobody are you there',
+      rule: 'UNKNOWN_MEMBER',
+      unknown: ['@nobody'],
+    },
+    {
+      name: 'a token naming a member absent from the roster',
+      body: '@gemini can you review',
+      rule: 'UNKNOWN_MEMBER',
+      unknown: ['@gemini'],
+    },
+    {
+      name: 'a longer token sharing a prefix with a real one is NOT that member',
+      body: '@claude-mainframe reboot',
+      rule: 'UNKNOWN_MEMBER',
+      unknown: ['@claude-mainframe'],
+    },
+    {
+      name: 'a trailing underscore makes a different token',
+      body: '@claude_ hello',
+      rule: 'UNKNOWN_MEMBER',
+      unknown: ['@claude_'],
+    },
+    {
+      name: 'two unknown tokens are both reported, deduplicated',
+      body: '@nobody and @nobody and @someone',
+      rule: 'UNKNOWN_MEMBER',
+      unknown: ['@nobody', '@someone'],
+    },
+
+    // ---- token-shaped text that is not an address ----
+    //
+    // `@solar` does not ACTIVATE — which is the guarantee — but it IS tag-shaped, so it is
+    // reported as unknown and the room says "no member is called @solar". Pedantic on
+    // prose that happens to begin a word with @, and the deliberate direction to err in:
+    // a false notice is visible and harmless, a missing one is RT-001. Distinguishing
+    // "meant to address someone" from "wrote an @ word" is not something the rule can do.
+    // FINDING S05b-N1. Trigger: the first time a member complains about the noise, or
+    // S1.7, whichever comes first.
+    {
+      name: 'substring of an ordinary word does not activate (but is tag-shaped)',
+      body: 'the @solar panel array',
+      rule: 'UNKNOWN_MEMBER',
+      unknown: ['@solar'],
+    },
+    { name: 'an email address', body: 'mail claude@anthropic.com', rule: 'NO_TOKEN' },
+    {
+      name: 'an email whose local part is a member name',
+      body: 'write to sol@example.org today',
+      rule: 'NO_TOKEN',
+    },
+  ];
+
+  it.each(CASES)('$name → $rule', (c) => {
+    const r = summonRuling(msg(c.body, c.author ?? 'prince'));
+    expect(r.rule, `expected ${c.rule}, got ${r.rule}`).toBe(c.rule);
+    expect(r.members).toEqual(c.members ?? []);
+    expect(r.unknown).toEqual(c.unknown ?? []);
+  });
+
+  it('a system-authored message containing a token is refused by authorship, not by tokens', () => {
+    // Ordering matters: the token IS resolvable, so only the barrier stops it. If these
+    // were checked the other way round the rule would read ACTIVATED for room notices.
+    ruled(msg('@claude is already replying in this room.', 'system'), 'SYSTEM_AUTHORED');
   });
 });
 
