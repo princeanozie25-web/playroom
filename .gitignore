@@ -3,6 +3,8 @@ node_modules/
 dist/
 dist-test/
 .next/
+.next-dev/
+.next-prod/
 coverage/
 *.tsbuildinfo
 next-env.d.ts

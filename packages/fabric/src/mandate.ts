@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { z } from 'zod';
 
 // Mandate loading and hashing. Bible §9.1 (document), §9.5 (mandates as code).
@@ -55,10 +55,28 @@ export function mandateHash(mandate: Mandate): string {
   return `sha256:${createHash('sha256').update(canonicalise(mandate)).digest('hex')}`;
 }
 
-// mandates/ lives at the repo root, resolved relative to this source file — the same
-// approach packages/adapters uses for adapters.yaml.
+// mandates/ lives at the repo root. Resolved from cwd against a candidate list rather
+// than `new URL('../../../mandates/', import.meta.url)`: a bundler reads that as a
+// module specifier and fails the build, and this package is imported by apps/web, whose
+// server code webpack compiles. PLAYROOM_MANDATES_DIR overrides for a deployment whose
+// layout differs.
 function defaultMandatesDir(): string {
-  return fileURLToPath(new URL('../../../mandates/', import.meta.url));
+  const fromEnv = process.env.PLAYROOM_MANDATES_DIR;
+  if (fromEnv) return fromEnv;
+  const candidates = [
+    resolve(process.cwd(), 'mandates'), // repo root (api, tests)
+    resolve(process.cwd(), '../../mandates'), // apps/web, apps/api
+    resolve(process.cwd(), '../mandates'),
+  ];
+  for (const c of candidates) {
+    try {
+      readdirSync(c);
+      return c;
+    } catch {
+      // try the next candidate
+    }
+  }
+  throw new Error(`mandates/ not found (looked in: ${candidates.join(', ')})`);
 }
 
 /**
@@ -72,9 +90,7 @@ function defaultMandatesDir(): string {
 export function loadMandates(dir: string = defaultMandatesDir()): Map<string, LoadedMandate> {
   const out = new Map<string, LoadedMandate>();
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
-    const raw: unknown = JSON.parse(
-      readFileSync(new URL(file, `file://${dir.replace(/\\/g, '/')}`), 'utf8'),
-    );
+    const raw: unknown = JSON.parse(readFileSync(resolve(dir, file), 'utf8'));
     const parsed = Mandate.safeParse(raw);
     if (!parsed.success) {
       throw new Error(`mandates/${file} is not a valid mandate: ${parsed.error.message}`);
