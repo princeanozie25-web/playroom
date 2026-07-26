@@ -10,6 +10,7 @@ between the two and has already caused one collision. See CONTRIBUTING and
 - `roadmap/` — Master Roadmap v1.0, **superseded but retained** as the historical record: `playroom-master-roadmap-v1.pdf` (as the owner produced it) and `playroom-master-roadmap-v1.md` (transcription, for grep and section citation). Its body is not edited. `roadmap/amendments/` holds the RAs; `RA-001` re-scopes P4 into slices.
 - `decisions/` — Architecture Decision Records. Start from `ADR-TEMPLATE.md`. `ADR-001` fixes the fail-closed mandate engine; `ADR-006` records the `mandate` terminology ruling and document precedence; `ADR-008` makes cold start a separately published number.
 - `security/` — [`red-team-log.md`](security/red-team-log.md), the findings ledger S2.8 extends. RT-001 and RT-003 fixed, RT-002 accepted until S1.1, RT-004 guarded with one gap accepted until S1.7. Its deferred-findings table carries the triggers that re-open each one.
+- `design/` — **[the frontend design contract](design/design.md)** — the owner-authored UI direction, adopted from S1.4 onward. Its §14 records three places where it and the shipped app disagree; its reconciliation log records what DOC-1 changed and why.
 - `demo/` — the P0 film's written record: [`p0-claims.md`](demo/p0-claims.md) — **read before cutting, captioning or showing it** — and [`p0-take-log.md`](demo/p0-take-log.md), the provenance of the recording. No video is committed.
 - `deck/` — the YC deck v2. _Placeholder — owner will drop the file in._
 
