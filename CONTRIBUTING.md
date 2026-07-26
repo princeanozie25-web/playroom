@@ -19,9 +19,29 @@ advice — it is how the repo stays trustworthy from commit one.
   not casts — a test that reaches a member's payload proves the member, it doesn't assert it.
 - **No implementation agent commits outside an authorizing brief.** If it isn't in the
   brief, it isn't in the commit.
-- **Every slice ends with something a camera can see** (roadmap §11.1).
-- **Providers are named only inside `packages/adapters/`** (roadmap §2, §6). No provider
+- **Every slice ends with something a camera can see** (Bible §21.1).
+- **Providers are named only inside `packages/adapters/`** (Bible §10, Roadmap §6). No provider
   name appears in a room, the fabric, or shared code.
+
+## Citing the documents
+
+Two documents govern this repository and their section numbers collide.
+
+- **[Architecture Bible v1.1](docs/architecture/playroom-architecture-bible-v1.1.md)** is
+  canonical. Cite as **`Bible §11`**.
+- **[Master Roadmap v1.0](docs/roadmap/playroom-master-roadmap-v1.md)** is superseded but
+  retained; where the Bible is silent its operational detail still stands. Cite as
+  **`Roadmap §7`**.
+
+**Never write a bare `§7`.** It resolves to latency budgets in one document and context
+boundaries in the other. On 25 July a brief and a closeout each cited "§7" meaning a
+different document, both were correct, and neither noticed. This applies to briefs,
+commit messages, closeouts and ADRs as much as to code comments. Precedence is recorded
+in [ADR-006](docs/decisions/ADR-006-terminology-and-document-precedence.md).
+
+**`mandate`, never `permit`** (Bible terminology ruling). Prefix `mnd_`, directory
+`mandates/`, field `effective_mandate_hash`. The superseded term survives only inside
+historical documents, which are not edited.
 
 ## Closed unions vs. open strings
 
@@ -29,7 +49,7 @@ Both are house style; which one is correct depends on who controls the values.
 
 - **Closed union** (`z.enum`, discriminated union) for anything you **dispatch on and
   control both ends of**: `event_type` at the point a reducer switches on it,
-  `permit_decision`, `screen_verdict`. If an unknown value would be a bug, close it.
+  `mandate_decision`, `screen_verdict`. If an unknown value would be a bug, close it.
 - **Open string with a visible fallback** for anything that **will grow**: the `code`
   on `ServerErrorFrame`, `reason_code` on a decision, and any future taxonomy a later
   slice extends. Render the unknown value rather than dropping it.
@@ -45,9 +65,24 @@ This is a convention, not a one-off exemption for one field. Do not "tidy" an op
 
 ## Provider names: source vs. config
 
-Provider-name rule (§6) applies to source code: the room, fabric, and data model
-never branch on a provider. Deployment config (.env keys, adapters.yaml) is
-exempt and is consumed only by packages/adapters/.
+Provider-name rule (Bible §10, Roadmap §6) applies to source code: the room, the fabric
+and the data model never branch on a provider. Deployment config (`.env` keys,
+`adapters.yaml`) is exempt.
+
+**`adapters.yaml` has two consumers, not one** (corrects SUI-N2, which recorded that this
+paragraph had become inaccurate):
+
+1. **`packages/adapters/`** reads the provider fields — `provider`, `model`, prices,
+   `max_output_tokens`. It is the §6-exempt boundary and the only place a provider is named.
+2. **`apps/web`'s server layer** reads the _roster_ fields only — `id`, `display_name`,
+   `principal`. It projects those four and **never** `provider` or `model`, so no provider
+   name reaches a room even though the web app now reads that file. If a change makes the
+   web layer able to see `provider`, that is the defect, not the read.
+
+**Ownership of the roster is S1.1's decision.** Two filesystem readers of one config file is
+a stopgap for the absence of a membership model, not a design. S1.1 lands principals,
+members and the roster properly and should take the roster into the room-state payload,
+retiring the second reader.
 
 ## Setup
 

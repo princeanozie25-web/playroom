@@ -6,6 +6,37 @@
 
 ---
 
+> ## ⚠ SUPERSEDED — 26 July 2026
+>
+> **[Architecture Bible v1.1](../architecture/playroom-architecture-bible-v1.1.md) is canonical
+> and absorbs this document.** Where the two disagree, the Bible wins. Where the Bible is
+> silent, this roadmap's operational detail still stands. Recorded as
+> [ADR-006](../decisions/ADR-006-terminology-and-document-precedence.md).
+>
+> **Nothing below has been rewritten.** This file is the historical record of what was
+> decided on 24 July 2026, and [RA-001](amendments/RA-001-membership-modes.md) amends it.
+> Editing it to match the Bible would destroy the provenance the Bible's own precedence
+> table depends on.
+>
+> **What the Bible retains from this document** (per its precedence table): the delivery
+> sequence, slices and binary exits (Roadmap §11); the latency, cost and telemetry budgets
+> (Roadmap §7, §16, §17); the commercial commitment — £99/team/month, three paying teams by
+> 30 November (Roadmap S2.9, restored verbatim); founder capacity and the exam window
+> (Roadmap §20); and the trust-fabric stages and fail-closed rule (Roadmap §4, §12.2).
+>
+> **Where the Bible wins:** positioning and the cross-surface thesis; the member / principal
+> / host / model / route separation; canonical room versus host projection; context promotion
+> and consent; the signed decision contract; replay and host compromise in the threat model.
+> It also **retires `permit` in favour of `mandate`** — so every occurrence of `permit`,
+> `pmt_` and `permits/` below is superseded terminology, preserved because this is a
+> historical document.
+>
+> **Citation:** cite this file as `Roadmap §N` and the Bible as `Bible §N`. A bare `§N` is
+> ambiguous between them — that ambiguity produced a real collision on 25 July, where a brief
+> and a closeout each cited a different document by the same number and both were correct.
+
+---
+
 <!--
 TRANSCRIPTION NOTE — read before citing.
 

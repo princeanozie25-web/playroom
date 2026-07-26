@@ -21,7 +21,7 @@ export interface RosterMember {
    *
    * This is what the roster *says* a member is for. It is not consulted by
    * anything, it gates nothing, and no code branches on it. It cannot deny an
-   * action and it cannot permit one — the permission engine that will do that
+   * action and it cannot grant one — the mandate engine that will do that
    * does not exist yet (S2.1).
    *
    * When S2.1 lands, this field is replaced by the effective mandate hash and the
