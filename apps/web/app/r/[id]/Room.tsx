@@ -19,6 +19,7 @@ import {
 } from '@playroom/shared';
 import { MemberChip } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
+import { HOOK, pr } from '../../hooks';
 import type { RosterMember } from '../../roster';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -230,18 +231,21 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
   };
 
   return (
-    <main className="room">
+    <main className="room" {...pr(HOOK.room)}>
       <header className="room-header">
         <h1 className="room-title">
           <span>
             room <span className="room-id">/ {roomId}</span>
           </span>
-          <span className={`conn conn-${conn}`}>
+          {/* `data-pr-state` carries the state as DATA. The harness read a `title`
+              attribute here once and the attribute was removed by a redesign, matching
+              nothing — a hook is a contract, a class name is not (S06-N1). */}
+          <span className={`conn conn-${conn}`} {...pr(HOOK.conn)} data-pr-state={conn}>
             <span className="dot" />
             {conn}
           </span>
         </h1>
-        <div className="roster">
+        <div className="roster" {...pr(HOOK.roster)}>
           {roster.map((m) => (
             <MemberChip key={m.id} member={m} name={m.id} />
           ))}
@@ -252,28 +256,32 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
       </header>
 
       {refusal && (
-        <p role="alert" className="refusal">
+        <p role="alert" className="refusal" {...pr(HOOK.refusal)}>
           <strong>{refusal.message}</strong>
           <span className="code">{refusal.code}</span> — nothing you type here will be delivered.
           Your message was not sent.
         </p>
       )}
 
-      <ul className="transcript">
+      <ul className="transcript" {...pr(HOOK.transcript)}>
         {items.map((it) =>
           it.kind === 'message' ? (
-            <li key={it.key}>
+            <li key={it.key} {...pr(HOOK.message)} data-pr-author={it.author}>
               <div className="turn-head">
-                <span className="turn-author">{it.author}</span>
+                <span className="turn-author" {...pr(HOOK.author)}>
+                  {it.author}
+                </span>
               </div>
-              <div className="msg-body">{it.body}</div>
+              <div className="msg-body" {...pr(HOOK.body)}>
+                {it.body}
+              </div>
             </li>
           ) : it.kind === 'decision' ? (
             <li key={it.key}>
               <DecisionCard event={it.event} roster={roster} />
             </li>
           ) : (
-            <li key={it.key}>
+            <li key={it.key} {...pr(HOOK.turn)} data-pr-member={it.adapter_id}>
               <div className="turn-head">
                 <MemberChip member={byId.get(it.adapter_id)} name={it.adapter_id} inline />
                 {it.streaming && <span className="working">working…</span>}
@@ -284,15 +292,19 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
                   rendering model output as markup is an injection surface, while
                   preserving newlines is not. Do NOT "improve" this into a markdown
                   renderer — that needs a sanitisation story and an ADR first. */}
-              <div className="turn-body">
+              <div className="turn-body" {...pr(HOOK.body)}>
                 {it.text}
-                {it.streaming && <span className="caret">▌</span>}
+                {it.streaming && (
+                  <span className="caret" {...pr(HOOK.caret)}>
+                    {'▌'}
+                  </span>
+                )}
               </div>
               {!it.streaming && it.success === false && (
                 <div className="turn-error">⚠ the turn failed</div>
               )}
               {!it.streaming && (it.tokens_in != null || it.cost_usd != null) && (
-                <div className="meter">
+                <div className="meter" {...pr(HOOK.spend)}>
                   {it.tokens_in != null ? `${it.tokens_in}→${it.tokens_out} tok` : ''}
                   {it.cost_usd != null ? ` · $${it.cost_usd}` : ''}
                 </div>
@@ -303,7 +315,7 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
         <div ref={tailRef} />
       </ul>
 
-      <form className="composer" onSubmit={onSubmit}>
+      <form className="composer" onSubmit={onSubmit} {...pr(HOOK.composer)}>
         <input
           className="who"
           placeholder="you"

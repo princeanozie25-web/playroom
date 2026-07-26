@@ -1,4 +1,5 @@
 import type { RosterMember } from './roster';
+import { HOOK, pr } from './hooks';
 
 // The member chip. Renders `<name> · speaks for <principal> · <scope>` — the
 // name, the principal, and the member's ACTUAL GRANTED SCOPE read from their mandate.
@@ -35,15 +36,23 @@ export function MemberChip({
       className={['chip', isAgent ? 'chip-agent' : 'chip-human', inline ? 'chip-inline' : '']
         .filter(Boolean)
         .join(' ')}
+      {...(inline ? {} : pr(HOOK.rosterMember))}
+      data-pr-member={member ? member.id : name}
     >
       <span className="chip-marker" />
-      <span className="chip-name">{member ? member.display_name : name}</span>
+      <span className="chip-name" {...pr(HOOK.author)}>
+        {member ? member.display_name : name}
+      </span>
       {member ? (
         <>
           <span className="chip-meta">speaks for {member.principal}</span>
           {/* Derived from the mandate's scope. Absent mandate renders nothing at all. */}
           {member.scope && member.scope.length > 0 && (
-            <span className="chip-mandate" title="granted scope, from this member's mandate">
+            <span
+              className="chip-mandate"
+              title="granted scope, from this member's mandate"
+              {...pr(HOOK.mandateSummary)}
+            >
               {member.scope
                 .map((a) => (member.protected_actions?.includes(a) ? `${a} (co-sign)` : a))
                 .join(', ')}

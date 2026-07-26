@@ -1,6 +1,7 @@
 import type { DecisionEvent } from '@playroom/shared';
 import { MemberChip } from './MemberChip';
 import type { RosterMember } from './roster';
+import { HOOK, pr } from './hooks';
 
 // The DECISION card. It takes a `decision` event and renders what the fabric
 // stopped, who attempted it, why it was stopped, and who has to sign.
@@ -45,9 +46,11 @@ export function DecisionCard({ event, roster }: { event: DecisionEvent; roster: 
   const attempted = roster.find((m) => m.id === p.subject);
 
   return (
-    <section className="decision" aria-label="decision required">
-      <div className="decision-kicker">Decision · {p.decision}</div>
-      <div className="decision-action">
+    <section className="decision" aria-label="decision required" {...pr(HOOK.decision)}>
+      <div className="decision-kicker">
+        Decision · <span {...pr(HOOK.decisionVerdict)}>{p.decision}</span>
+      </div>
+      <div className="decision-action" {...pr(HOOK.decisionAction)}>
         <code>{p.action}</code>
       </div>
 
@@ -58,27 +61,29 @@ export function DecisionCard({ event, roster }: { event: DecisionEvent; roster: 
         </dd>
 
         <dt>Stopped because</dt>
-        <dd>
+        <dd {...pr(HOOK.decisionReason)}>
           {REASONS[p.reason_code] ?? 'refused'}{' '}
-          <span className="decision-pending">({p.reason_code})</span>
+          <span className="decision-pending" {...pr(HOOK.decisionCode)}>
+            ({p.reason_code})
+          </span>
         </dd>
 
         {p.required_signer && (
           <>
             <dt>Requires</dt>
-            <dd>a co-signature from {p.required_signer}</dd>
+            <dd {...pr(HOOK.decisionSigner)}>a co-signature from {p.required_signer}</dd>
           </>
         )}
 
         <dt>Under mandate</dt>
-        <dd className="decision-pending">
+        <dd className="decision-pending" {...pr(HOOK.decisionHash)}>
           {p.effective_mandate_hash
             ? p.effective_mandate_hash.slice(0, 23) + '\u2026'
             : 'no mandate'}
         </dd>
       </dl>
 
-      <div className="decision-actions">
+      <div className="decision-actions" {...pr(HOOK.decisionActions)}>
         <button type="button" disabled>
           Approve
         </button>
