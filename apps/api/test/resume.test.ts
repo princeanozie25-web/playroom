@@ -30,8 +30,8 @@ describe('resume-from-last-id', () => {
   });
 
   it('reconnects with ?after and receives exactly the missed events', async () => {
-    const a = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
-    const b1 = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+    const a = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
+    const b1 = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await Promise.all([a.open(), b1.open()]);
 
     // B receives event 1.
@@ -49,7 +49,7 @@ describe('resume-from-last-id', () => {
     await a.waitForEvents(3);
 
     // B reconnects from the last seq it saw.
-    const b2 = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=${lastSeen}`);
+    const b2 = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=${lastSeen}`, server.token);
     await b2.open();
     await b2.waitForEvents(2);
 

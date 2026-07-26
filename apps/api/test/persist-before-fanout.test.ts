@@ -31,8 +31,8 @@ describe('persist-before-fanout', () => {
 
   it('finds the event committed the moment a client receives it', async () => {
     const pool = testPool();
-    const a = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
-    const b = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+    const a = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
+    const b = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await Promise.all([a.open(), b.open()]);
 
     a.send('committed?', 'pbf-1');

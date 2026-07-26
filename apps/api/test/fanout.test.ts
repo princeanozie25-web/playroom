@@ -27,8 +27,8 @@ describe('fan-out', () => {
   });
 
   it("delivers A's three sends to B in seq order", async () => {
-    const a = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
-    const b = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+    const a = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
+    const b = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await Promise.all([a.open(), b.open()]);
 
     a.send('one', 'm1');

@@ -71,7 +71,7 @@ async function log(): Promise<Row[]> {
 
 describe('summon provenance (Bible §19)', () => {
   it('generates a log and every agent turn resolves to a human root', async () => {
-    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
     await c.open();
 
     // A generated sequence covering the shapes that matter. Deliberately includes the
@@ -87,7 +87,7 @@ describe('summon provenance (Bible §19)', () => {
     let expected = 0;
     for (const s of sends) {
       expected += s.expectTurns;
-      c.send(s.body, s.id, 'prince');
+      c.send(s.body, s.id);
       // Wait for the turns this message should have produced to complete.
       const until = Date.now() + 20_000;
       while (c.ofType('agent.turn.completed').length < expected && Date.now() < until) {
@@ -104,7 +104,7 @@ describe('summon provenance (Bible §19)', () => {
     // ask. Asserting on the WHOLE log length, not on the turn count, is what surfaced it:
     // counting only turns would have missed the extra summon row.
     const before = await log();
-    c.send('@claude what governs this room', 'p-2', 'prince');
+    c.send('@claude what governs this room', 'p-2');
     await new Promise((r) => setTimeout(r, 1500));
     const after = await log();
     expect(after.length, 'a replayed frame appended rows').toBe(before.length);
@@ -158,12 +158,12 @@ describe('summon provenance (Bible §19)', () => {
     // callers then read the same seq. Migration 005's unique summon key is the only thing
     // that stops each of them summoning against it. A boolean set after the first commit
     // would be too late — this is the race the closeout said an `if` could not survive.
-    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
     await c.open();
     const before = await log();
 
-    c.send('@sol race me', 'race-1', 'prince');
-    c.send('@sol race me', 'race-1', 'prince'); // same tick, no await between
+    c.send('@sol race me', 'race-1');
+    c.send('@sol race me', 'race-1'); // same tick, no await between
 
     // Give both frames time to be handled and any turn they started to finish.
     await new Promise((r) => setTimeout(r, 4000));

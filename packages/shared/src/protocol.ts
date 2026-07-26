@@ -4,10 +4,19 @@ import { z } from 'zod';
 // cast raw wire data — an untrusted frame is validated or dropped, never trusted.
 
 // Client → server: a message send. `client_msg_id` is the idempotency key.
+//
+// THERE IS NO `author` FIELD, AND THAT IS THE POINT OF S1.2. It carried the sender's claim
+// about who they were, and the server wrote what it was given: a caller could author as
+// `claude-main` and the room rendered it with Claude's chip. Five findings and RT-005 rested
+// on this one field.
+//
+// The actor is now resolved ONCE at the handshake from a credential and held in the socket's
+// closure, so the frame has no way to express the claim. That is a stronger guarantee than
+// validating the field would have been — a validated claim is still a claim, and every
+// mechanism above it stays advisory for as long as it can be made.
 export const ClientSend = z.object({
   type: z.literal('send'),
   client_msg_id: z.string().min(1),
-  author: z.string().min(1),
   body: z.string(),
 });
 export type ClientSend = z.infer<typeof ClientSend>;
@@ -23,9 +32,18 @@ export type ClientSend = z.infer<typeof ClientSend>;
 // bind members to the principals who grant them (Bible §9.1), and a human typing in
 // their own room acts as a principal, not under a mandate.
 //
-// `subject` is UNAUTHENTICATED in v0 — any caller may name any member. S1.2 stamps
-// identity at the gateway and drops unstamped messages; until then this frame proves
-// the evaluator, not the identity. Recorded as a finding rather than left implicit.
+// `subject` REMAINS A CLAIM, and deliberately so — it is not the same field as `author` was.
+//
+// The REQUESTER is authenticated as of S1.2: the connection resolves to a member, and that
+// member is who the audit line and the decision event record as having asked. `subject` is the
+// member the action is attributed to, which is a different party: a host sidecar asks on its
+// member's behalf, and beat 5 of the film is exactly that — Prince's client asking under
+// Claude's mandate.
+//
+// So the narrowing is real but partial: WHO ASKED is now proven, WHOSE MANDATE IT WAS ASKED
+// UNDER is still asserted by the frame. Binding a subject to the authenticated caller needs the
+// host-sidecar identity model, which is P4's connected-member work (ADR-004). Recorded rather
+// than left implicit.
 export const ClientRequestAction = z.object({
   type: z.literal('request_action'),
   client_msg_id: z.string().min(1),
@@ -209,9 +227,22 @@ export type ServerErrorFrame = z.infer<typeof ServerErrorFrame>;
 
 // Known `code` values. Add here as new refusals appear; never remove one.
 export const ERROR_ROOM_NOT_FOUND = 'room_not_found';
+/** No credential was presented at all — a client that was never configured. */
+export const ERROR_CREDENTIAL_REQUIRED = 'credential_required';
+/** A credential was presented and is not valid — revoked, mistyped, or another deployment's. */
+export const ERROR_CREDENTIAL_INVALID = 'credential_invalid';
 
 // Application WebSocket close codes (4000-4999 is the application-reserved range).
 // The frame carries the human-readable reason; the close code is what a client can
 // branch on without string matching — in particular, to stop reconnecting to a room
 // that does not exist rather than looping on it.
 export const WS_CLOSE_ROOM_NOT_FOUND = 4404;
+/**
+ * The connection presented no usable credential. 4401 by analogy with HTTP 401.
+ *
+ * A distinct code from 4404 because a client must react differently: a room that does not
+ * exist is permanent and reconnecting is pointless, whereas a credential problem is fixed by
+ * configuring the client and retrying. Both stop the reconnect loop; only one is worth a
+ * message telling the operator what to change.
+ */
+export const WS_CLOSE_UNAUTHENTICATED = 4401;

@@ -91,7 +91,15 @@ export async function requestActionCommand(
   // approvals for actions that never ran, which reads as work having happened.
   if (verdict.decision === 'ALLOW') return;
 
-  const event = await appendDecision(deps.pool, input.roomId, input.subject, {
+  // THE EVENT'S ACTOR IS THE REQUESTER, NOT THE SUBJECT.
+  //
+  // It was the subject until S1.2, which was wrong in two ways. The actor of an event is who
+  // CAUSED it, and a decision is caused by whoever asked — the subject is the member whose
+  // mandate was evaluated, which is what the payload already records. And because `subject` is
+  // still a claim from the frame, using it as the actor meant a caller could write an event
+  // attributed to a name that is not a member at all: migration 010's constraint — every event
+  // names a member or is the room speaking — could not hold while that was true.
+  const event = await appendDecision(deps.pool, input.roomId, ctx.actorId, {
     decision_id: `dec_${randomUUID().replace(/-/g, '').slice(0, 16)}`,
     subject: input.subject,
     principal: mandate?.mandate.principal ?? 'unknown',

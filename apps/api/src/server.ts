@@ -6,7 +6,10 @@ import {
   ServerHello,
   ServerErrorFrame,
   ERROR_ROOM_NOT_FOUND,
+  ERROR_CREDENTIAL_REQUIRED,
+  ERROR_CREDENTIAL_INVALID,
   WS_CLOSE_ROOM_NOT_FOUND,
+  WS_CLOSE_UNAUTHENTICATED,
   type AgentAdapter,
   type ServerEvent,
 } from '@playroom/shared';
@@ -17,6 +20,7 @@ import { RoomBus } from './bus.js';
 import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
+import { authenticate, type AuthFailure, type AuthResult } from './credentials.js';
 import { listMembers, listRoomMembers } from './members.js';
 import { setKnownMemberTokens } from './agent.js';
 
@@ -112,6 +116,27 @@ function roomNotFound(roomId: string): ServerErrorFrame {
     type: 'error',
     code: ERROR_ROOM_NOT_FOUND,
     message: `room "${roomId}" does not exist`,
+    room_id: roomId,
+  });
+}
+
+/**
+ * The two credential refusals, as sentences.
+ *
+ * A MISSING credential and a BAD one are different mistakes and get different words, because
+ * they send an operator to different places: the first is a client that was never configured,
+ * the second is a token that was revoked, mistyped, or belongs to another deployment. Merging
+ * them into "unauthorized" would be the same failure as collapsing NOT_IN_ROOM into
+ * UNKNOWN_MEMBER — a refusal that is correct and useless.
+ */
+function credentialRefusal(failure: AuthFailure, roomId: string): ServerErrorFrame {
+  return ServerErrorFrame.parse({
+    type: 'error',
+    code: failure === 'credential_required' ? ERROR_CREDENTIAL_REQUIRED : ERROR_CREDENTIAL_INVALID,
+    message:
+      failure === 'credential_required'
+        ? 'no credential was presented — this connection carries no identity'
+        : 'the credential presented is not valid — it may have been revoked',
     room_id: roomId,
   });
 }
@@ -261,7 +286,8 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // order, then live-tail via the in-process bus.
     fastify.get('/rooms/:id/ws', { websocket: true }, (socket, req) => {
       const { id: roomId } = req.params as { id: string };
-      const after = Number((req.query as { after?: string }).after ?? 0) || 0;
+      const query = req.query as { after?: string; token?: string };
+      const after = Number(query.after ?? 0) || 0;
 
       const send = (
         frame: ServerEvent | ReturnType<typeof ServerHello.parse> | ServerErrorFrame,
@@ -287,6 +313,16 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         socket.close(WS_CLOSE_ROOM_NOT_FOUND, 'room not found');
       };
 
+      // Every refusal travels the same way: a typed frame the client can branch on, a close
+      // code it can react to, and a log line. Never a silent drop, and never a socket that
+      // opens and then does nothing — RT-001's shape, which this codebase refuses.
+      const refuseWith = (frame: ServerErrorFrame, closeCode: number): void => {
+        unsub();
+        app.log.warn({ room_id: roomId, code: frame.code }, `ws refused: ${frame.message}`);
+        send(frame);
+        socket.close(closeCode, frame.code);
+      };
+
       // Resolves true once the room is confirmed, false if the socket was refused or
       // failed to open. Never rejects.
       //
@@ -296,19 +332,37 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       // bug. Gating here means a write is attempted only after the room is known to
       // exist. The FK stays as the last line of defence (a room deleted mid-session
       // still fails there, now loudly).
-      const accepted: Promise<boolean> = (async () => {
+      // ── THE HANDSHAKE STAMPS THE ACTOR, ONCE ─────────────────────────────────────────
+      //
+      // `accepted` used to resolve a boolean; it now resolves THE IDENTITY, or null if the
+      // socket was refused. That is deliberate: awaiting it both gates the write and NARROWS
+      // the actor, so there is no path where a frame is handled without an authenticated
+      // member in hand and no non-null assertion pretending there isn't.
+      //
+      // Resolved once, held in this closure for the life of the socket. No frame can override
+      // it, because `ClientSend` no longer has a field for the claim.
+      const accepted: Promise<AuthResult | null> = (async () => {
+        // AUTHENTICATE BEFORE ANYTHING ELSE, including the room lookup. An unauthenticated
+        // caller learns nothing — not even whether a room exists — and no query runs on their
+        // behalf. The order is the refusal order: identity, then existence.
+        const result = await authenticate(db(), query.token);
+        if (!result.ok) {
+          refuseWith(credentialRefusal(result.failure, roomId), WS_CLOSE_UNAUTHENTICATED);
+          return null;
+        }
+
         if (!(await getRoom(db(), roomId))) {
           refuse();
-          return false;
+          return null;
         }
         const helloSeq = await lastSeq(db(), roomId);
         send(ServerHello.parse({ type: 'hello', last_seq: helloSeq }));
         const backlog = await eventsAfter(db(), roomId, after);
         for (const event of backlog) send(event);
-        return true;
+        return result.auth;
       })().catch((err) => {
         app.log.error({ err, room_id: roomId }, 'ws open failed');
-        return false;
+        return null;
       });
 
       // Frames from one socket are processed strictly in order: each send's INSERT
@@ -318,8 +372,11 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       socket.on('message', (raw: Buffer) => {
         sendQueue = sendQueue
           .then(async () => {
-            // Refused socket (or one that failed to open): never attempt the write.
-            if (!(await accepted)) return;
+            // Refused socket (or one that failed to open): never attempt the write. The
+            // awaited value IS the authenticated member, so this gate and the actor are the
+            // same fact — there is no way to handle a frame without one.
+            const actor = await accepted;
+            if (!actor) return;
             let msg: ClientFrame;
             try {
               msg = ClientFrame.parse(JSON.parse(raw.toString()));
@@ -330,8 +387,11 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
             // `send` persists room content, `request_action` traverses the mandate
             // evaluator. Neither bypasses executeCommand.
             if (msg.type === 'request_action') {
+              // THE REQUESTER is the authenticated member. `subject` stays a claim from the
+              // frame — a host sidecar asks on its member's behalf, which is beat 5 of the
+              // film — so the two are different parties and only one of them is proven.
               await executeCommand(
-                { actorId: msg.subject, mode: 'hosted' },
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
                 {
                   kind: 'requestAction',
                   roomId,
@@ -344,8 +404,9 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
               );
               return;
             }
+            // THE STAMPED ACTOR, not a claim from the frame.
             await executeCommand(
-              { actorId: msg.author, mode: 'human' },
+              { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
               { kind: 'postMessage', roomId, clientMsgId: msg.client_msg_id, body: msg.body },
               deps,
             );

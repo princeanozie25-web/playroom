@@ -36,9 +36,9 @@ describe('agent turn contract', () => {
   });
 
   it('writes started → delta(s) → completed in order with ascending seqs', async () => {
-    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await c.open();
-    c.send('@claude hi', 'm1', 'alice');
+    c.send('@claude hi', 'm1');
     await c.waitForType('agent.turn.completed');
 
     const agent = c.events.filter(

@@ -33,9 +33,9 @@ describe('agent error handling', () => {
   });
 
   it('emits completed{success:false} with an error_class, no hang', async () => {
-    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await c.open();
-    c.send('@claude boom', 'err-1', 'carol');
+    c.send('@claude boom', 'err-1');
     await c.waitForType('agent.turn.completed');
 
     const completed = expectEvent(c.ofType('agent.turn.completed')[0], 'agent.turn.completed');

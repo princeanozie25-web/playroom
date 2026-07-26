@@ -41,10 +41,10 @@ describe('one in-flight turn per room', () => {
   });
 
   it('rejects the second concurrent summon with a system notice', async () => {
-    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await c.open();
-    c.send('@claude one', 'a', 'alice');
-    c.send('@claude two', 'b', 'alice');
+    c.send('@claude one', 'a');
+    c.send('@claude two', 'b');
     await c.waitForType('agent.turn.completed');
     await new Promise((r) => setTimeout(r, 300));
 

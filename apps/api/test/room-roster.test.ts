@@ -53,10 +53,10 @@ describe('per-room summon resolution', () => {
   it('summons a member who IS in the room, exactly as before', async () => {
     const id = room('roster-in');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
-    c.send('@sol are you there?', 'in-1', 'prince');
+    c.send('@sol are you there?', 'in-1');
     await c.waitForType('agent.turn.completed');
     expect(c.ofType('summon')).toHaveLength(1);
     c.close();
@@ -70,9 +70,9 @@ describe('per-room summon resolution', () => {
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [id, 'sol']);
 
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
-    c.send('@sol can you look at this?', 'out-1', 'prince');
+    c.send('@sol can you look at this?', 'out-1');
     await c.waitForEvents(2);
     await new Promise((r) => setTimeout(r, 800));
 
@@ -88,9 +88,9 @@ describe('per-room summon resolution', () => {
     // The other refusal, unchanged. Two sentences, because two remedies.
     const id = room('roster-unknown');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
-    c.send('@nobody hello', 'unk-1', 'prince');
+    c.send('@nobody hello', 'unk-1');
     await c.waitForEvents(2);
 
     expect(c.bodies()[1]).toBe('No member of this room is called @nobody.');
@@ -102,9 +102,9 @@ describe('per-room summon resolution', () => {
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [id, 'sol']);
 
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
-    c.send('@sol and @nobody, please', 'both-1', 'prince');
+    c.send('@sol and @nobody, please', 'both-1');
     await c.waitForEvents(2);
     await new Promise((r) => setTimeout(r, 800));
 
@@ -121,17 +121,17 @@ describe('per-room summon resolution', () => {
     // next deploy.
     const id = room('roster-live');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
-    c.send('@sol first time', 'live-1', 'prince');
+    c.send('@sol first time', 'live-1');
     await c.waitForType('agent.turn.completed');
     expect(c.ofType('summon')).toHaveLength(1);
 
     // Same process, same server, no restart.
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [id, 'sol']);
 
-    c.send('@sol second time', 'live-2', 'prince');
+    c.send('@sol second time', 'live-2');
     await new Promise((r) => setTimeout(r, 1500));
     expect(c.ofType('summon')).toHaveLength(1); // still one — the second was refused
     expect(c.bodies()).toContain('@sol is not in this room.');
@@ -170,9 +170,9 @@ describe('events.actor_member_id', () => {
   it('links an event to the member who wrote it, when the actor IS one', async () => {
     const id = room('actor-link');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
-    c.send('hello from a real member', 'link-1', 'prince');
+    c.send('hello from a real member', 'link-1');
     await c.waitForEvents(1);
 
     const { rows } = await pool.query<{ actor_id: string; actor_member_id: string | null }>(
@@ -183,24 +183,47 @@ describe('events.actor_member_id', () => {
     c.close();
   });
 
-  it('leaves it NULL for an actor who is not a member, and still writes the event', async () => {
-    // WHAT THE CONSTRAINT PERMITS, stated as a test rather than a comment. A caller may still
-    // claim any name and the event is still written — rejecting it needs to know who the
-    // caller really is, which is S1.2. The column records whether the actor resolved to a
-    // member; it does not yet require that they do.
-    const id = room('actor-ghost');
+  it('leaves it NULL only for `system` — a client can no longer produce a non-member actor', async () => {
+    // THIS TEST'S PREMISE CHANGED IN S1.2, and the change is the point.
+    //
+    // It used to send as 'not-a-member-at-all' and assert the event was written with a NULL
+    // link — because a caller could name any actor and rejecting them required knowing who they
+    // really were. The wire has no author field now, so the only actor a client can produce is
+    // the authenticated member. The NULL case survives for exactly one writer: `system`, the
+    // room speaking, which is not a member and has no principal.
+    //
+    // Migration 010 turned that into a constraint: every event names a member OR is the room
+    // speaking. Nothing else, and the third possibility is gone rather than tolerated.
+    const id = room('actor-system');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
-    c.send('I am nobody in particular', 'ghost-1', 'not-a-member-at-all');
-    await c.waitForEvents(1);
+    // A tag naming nobody makes the ROOM speak — the one remaining NULL writer.
+    c.send('@nobody hello', 'sys-1');
+    await c.waitForEvents(2);
 
     const { rows } = await pool.query<{ actor_id: string; actor_member_id: string | null }>(
-      "SELECT actor_id, actor_member_id FROM events WHERE room_id = $1 AND event_type = 'message'",
+      `SELECT actor_id, actor_member_id FROM events
+        WHERE room_id = $1 AND event_type = 'message' ORDER BY seq`,
       [id],
     );
-    expect(rows[0]).toEqual({ actor_id: 'not-a-member-at-all', actor_member_id: null });
+    expect(rows[0]).toEqual({ actor_id: 'prince', actor_member_id: 'prince' });
+    expect(rows[1]).toEqual({ actor_id: 'system', actor_member_id: null });
     c.close();
+  });
+
+  it('REFUSES a non-member, non-system actor at the database — migration 010', async () => {
+    // The constraint stated as a test. No client can reach this any more; a hand-run INSERT or
+    // a future command that forgot the stamp still can, and that is what the check is for.
+    const id = room('actor-check');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    await expect(
+      pool.query(
+        `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+         VALUES ($1, 'someone-invented', NULL, 'message', '{"body":"x"}')`,
+        [id],
+      ),
+    ).rejects.toThrow(/events_actor_is_member_or_system/);
   });
 
   it('refuses an event naming a member that does not exist — the foreign key holds', async () => {

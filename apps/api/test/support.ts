@@ -10,6 +10,7 @@ import {
 import { loadRootEnv } from '../src/env.js';
 import { buildServer } from '../src/server.js';
 import { makePool } from '../src/db.js';
+import { issueCredential } from '../src/credentials.js';
 
 loadRootEnv();
 
@@ -31,6 +32,24 @@ export interface TestServer {
   httpBase: string;
   wsBase: string;
   close: () => Promise<void>;
+  /**
+   * A real credential for `prince`, issued against the test database.
+   *
+   * NOT A BYPASS. Every test connects through the same handshake the product uses, because a
+   * test-only path around authentication is the thing S1.2 exists to remove — and a suite that
+   * skips the handshake proves nothing about the server a viewer is talking to.
+   */
+  token: string;
+}
+
+/** Issue a credential against the test database, for a suite that needs its own. */
+export async function issueTestCredential(memberId: string, label = 'test'): Promise<string> {
+  const pool = testPool();
+  try {
+    return (await issueCredential(pool, memberId, label)).token;
+  } finally {
+    await pool.end();
+  }
 }
 
 export async function startTestServer(
@@ -59,6 +78,7 @@ export async function startTestServer(
     httpBase: `http://127.0.0.1:${addr.port}`,
     wsBase: `ws://127.0.0.1:${addr.port}`,
     close: () => app.close(),
+    token: await issueTestCredential('prince', 'test server'),
   };
 }
 
@@ -112,8 +132,12 @@ export class Client {
   private readonly seen = new Set<number>();
   private waiters: Array<() => void> = [];
 
-  constructor(url: string) {
-    this.ws = new WebSocket(url);
+  /**
+   * @param token the member credential this connection authenticates as. Required, because the
+   *   handshake refuses a socket without one — there is no unauthenticated path to exercise.
+   */
+  constructor(url: string, token: string) {
+    this.ws = new WebSocket(`${url}${url.includes('?') ? '&' : '?'}token=${token}`);
     this.ws.on('message', (data) => {
       const raw = JSON.parse(data.toString());
       if (raw?.type === 'hello') {
@@ -140,8 +164,16 @@ export class Client {
     });
   }
 
-  send(body: string, clientMsgId: string, author = 'tester'): void {
-    this.ws.send(JSON.stringify({ type: 'send', client_msg_id: clientMsgId, author, body }));
+  /**
+   * Send a message.
+   *
+   * THERE IS NO AUTHOR PARAMETER, and its absence is the exit criterion. It used to accept one
+   * and put it on the frame; the frame has no such field now, so a test cannot author as
+   * someone else any more than a caller can. Tests that need a different actor connect with a
+   * different credential.
+   */
+  send(body: string, clientMsgId: string): void {
+    this.ws.send(JSON.stringify({ type: 'send', client_msg_id: clientMsgId, body }));
   }
 
   seqs(): number[] {

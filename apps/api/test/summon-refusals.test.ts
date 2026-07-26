@@ -59,10 +59,10 @@ describe('refuse out loud', () => {
   it('says so when a tag names nobody, and writes no summon', async () => {
     const id = room('summon-unknown');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
-    c.send('@nobody are you there?', 'u-1', 'prince');
+    c.send('@nobody are you there?', 'u-1');
     await c.waitForEvents(2); // the member's message, then the room's refusal
 
     const bodies = c.bodies();
@@ -80,12 +80,12 @@ describe('refuse out loud', () => {
     // identical refusal — the same class of bug as the replayed summon.
     const id = room('summon-unknown-replay');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
-    c.send('@ghost hello', 'u-2', 'prince');
+    c.send('@ghost hello', 'u-2');
     await c.waitForEvents(2);
-    c.send('@ghost hello', 'u-2', 'prince'); // verbatim replay
+    c.send('@ghost hello', 'u-2'); // verbatim replay
     await new Promise((r) => setTimeout(r, 1200));
 
     const { rows } = await pool.query<{ n: string }>(
@@ -99,10 +99,10 @@ describe('refuse out loud', () => {
   it('names the known member AND refuses the unknown one in the same message', async () => {
     const id = room('summon-mixed');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
-    c.send('@claude and @nobody, please', 'm-1', 'prince');
+    c.send('@claude and @nobody, please', 'm-1');
     await c.waitForType('agent.turn.completed');
 
     expect(c.bodies()).toContain('No member of this room is called @nobody.');
@@ -117,10 +117,10 @@ describe('refuse out loud', () => {
     // Not silence, which is what a caught-and-swallowed factory error would have been.
     const id = room('summon-unreachable');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
-    c.send('@sol can you take this?', 'x-1', 'prince');
+    c.send('@sol can you take this?', 'x-1');
     await c.waitForType('agent.turn.completed');
 
     const done = c.ofType('agent.turn.completed')[0];

@@ -26,7 +26,10 @@ describe('a room that does not exist', () => {
     const server = await startTestServer();
     const ghost = uniqueRoomId('ghost');
     try {
-      const ws = new WebSocket(`${server.wsBase}/rooms/${ghost}/ws?after=0`);
+      // AUTHENTICATED, and refused anyway. Identity is checked before existence on purpose:
+      // an unauthenticated caller must not learn whether a room exists. So a room-not-found
+      // probe has to present a valid credential, or it never reaches the question.
+      const ws = new WebSocket(`${server.wsBase}/rooms/${ghost}/ws?after=0&token=${server.token}`);
       const frames: unknown[] = [];
       const closed = new Promise<{ code: number }>((resolve) => {
         ws.on('message', (d) => frames.push(JSON.parse(d.toString())));
@@ -79,7 +82,10 @@ describe('a room that does not exist', () => {
     const server = await startTestServer({ loggerStream: stream });
     const ghost = uniqueRoomId('ghost-race');
     try {
-      const ws = new WebSocket(`${server.wsBase}/rooms/${ghost}/ws?after=0`);
+      // AUTHENTICATED, and refused anyway. Identity is checked before existence on purpose:
+      // an unauthenticated caller must not learn whether a room exists. So a room-not-found
+      // probe has to present a valid credential, or it never reaches the question.
+      const ws = new WebSocket(`${server.wsBase}/rooms/${ghost}/ws?after=0&token=${server.token}`);
       const closed = new Promise<void>((resolve) => ws.on('close', () => resolve()));
       await new Promise<void>((resolve, reject) => {
         ws.once('open', () => resolve());

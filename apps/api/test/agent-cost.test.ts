@@ -33,9 +33,9 @@ describe('agent cost + telemetry', () => {
   });
 
   it('records adapter_id, tokens, cost_usd and prompt_hash on completion', async () => {
-    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await c.open();
-    c.send('@claude cost please', 'cost-1', 'bob');
+    c.send('@claude cost please', 'cost-1');
     await c.waitForType('agent.turn.completed');
 
     const pool = testPool();

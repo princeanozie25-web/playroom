@@ -109,23 +109,38 @@ function buildItems(events: ServerEvent[]): Item[] {
   return order;
 }
 
-function socketUrl(roomId: string, after: number): string {
+function socketUrl(roomId: string, after: number, token: string): string {
   const base = API_URL.replace(/^http/, 'ws');
-  return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}`;
+  // The credential travels in the query string because a browser cannot set headers on a
+  // WebSocket handshake. That puts it in the api's access log if one is ever enabled, which is
+  // recorded as S12-N2 rather than papered over — the fix is a subprotocol or a cookie, and
+  // both are more machinery than this slice should introduce.
+  return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}&token=${encodeURIComponent(token)}`;
 }
 
 export function Room({
   roomId,
   roster,
   principals,
+  token,
 }: {
   roomId: string;
   roster: RosterMember[];
   principals: Principal[];
+  /**
+   * The member credential this browser connects as (S1.2).
+   *
+   * IT REACHES THE BROWSER, and that is a real limitation rather than an oversight. It is a
+   * member credential held by a process, and a browser page is a process the viewer can read:
+   * anyone with the page can connect as that member. What it buys is that the WIRE can no
+   * longer name its author — the claim is gone from the protocol, which is the part that five
+   * findings rested on. What it does not buy is a person. A per-human credential needs a login,
+   * which is a product; see S12-N1 in the red-team log.
+   */
+  token: string;
 }) {
   const [events, setEvents] = useState<ServerEvent[]>([]);
   const [status, setStatus] = useState<Status>('connecting');
-  const [author, setAuthor] = useState<string>('');
   const [body, setBody] = useState<string>('');
   const [refusal, setRefusal] = useState<ServerErrorFrame | null>(null);
 
@@ -160,7 +175,7 @@ export function Room({
   const connect = useCallback((): void => {
     if (!roomId) return;
     setStatus('connecting');
-    const ws = new WebSocket(socketUrl(roomId, lastSeqRef.current));
+    const ws = new WebSocket(socketUrl(roomId, lastSeqRef.current, token));
     wsRef.current = ws;
 
     ws.onopen = (): void => {
@@ -209,7 +224,7 @@ export function Room({
       timerRef.current = setTimeout(connect, delay);
     };
     ws.onerror = (): void => ws.close();
-  }, [roomId]);
+  }, [roomId, token]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -238,7 +253,6 @@ export function Room({
     const payload: ClientSend = {
       type: 'send',
       client_msg_id: crypto.randomUUID(),
-      author: author.trim() || 'anon',
       body: text,
     };
     pendingRef.current = text;
@@ -341,12 +355,12 @@ export function Room({
       </ul>
 
       <form className="composer" onSubmit={onSubmit} {...pr(HOOK.composer)}>
-        <input
-          className="who"
-          placeholder="you"
-          value={author}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setAuthor(e.target.value)}
-        />
+        {/* THE `you` INPUT IS GONE. It let a sender type their own name, which the server
+            wrote down — the claim S1.2 exists to delete. Identity now comes from the
+            credential on the socket, so a box labelled "you" would control nothing, and a
+            control that changes nothing is a UI telling a lie about itself. Showing WHO you
+            are authenticated as is a real need and a design decision; it belongs to the shell
+            slice, not here. */}
         <input
           className="what"
           placeholder="message"

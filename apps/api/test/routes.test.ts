@@ -148,10 +148,10 @@ describe('route.selected is recorded (§6.2)', () => {
   it('emits which route, for which member, and why — alongside the summon', async () => {
     const id = room('route-selected');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
-    c.send('@sol hello', 'rs-1', 'prince');
+    c.send('@sol hello', 'rs-1');
     await c.waitForType('agent.turn.completed');
 
     const selected = c.ofType('route.selected');
@@ -179,9 +179,9 @@ describe('route.selected is recorded (§6.2)', () => {
     // message list is unchanged by it.
     const id = room('route-quiet');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
-    c.send('@sol hello', 'rq-1', 'prince');
+    c.send('@sol hello', 'rq-1');
     await c.waitForType('route.selected');
     // One human message, and no system notice — the route record is silent on screen.
     expect(c.bodies()).toEqual(['@sol hello']);
@@ -198,9 +198,9 @@ describe('a member with no usable route', () => {
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
     await pool.query("UPDATE routes SET status = 'unavailable' WHERE member_id = 'sol'");
     try {
-      const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+      const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
       await c.open();
-      c.send('@sol are you there?', 'rn-1', 'prince');
+      c.send('@sol are you there?', 'rn-1');
       await c.waitForEvents(2);
       await new Promise((r) => setTimeout(r, 900));
 
@@ -226,14 +226,14 @@ describe('a member with no usable route', () => {
     ]);
     await pool.query("UPDATE routes SET status = 'unavailable' WHERE member_id = 'sol'");
     try {
-      const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+      const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
       await c.open();
 
-      c.send('@nobody', 'd-1', 'prince');
+      c.send('@nobody', 'd-1');
       await c.waitForEvents(2);
-      c.send('@claude', 'd-2', 'prince');
+      c.send('@claude', 'd-2');
       await new Promise((r) => setTimeout(r, 900));
-      c.send('@sol', 'd-3', 'prince');
+      c.send('@sol', 'd-3');
       await new Promise((r) => setTimeout(r, 1200));
 
       // Filtered by AUTHOR, not by text. A first attempt filtered out anything starting with

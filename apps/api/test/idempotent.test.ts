@@ -27,7 +27,7 @@ describe('idempotent sends', () => {
   });
 
   it('collapses a repeated client_msg_id to one row and one seq', async () => {
-    const a = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+    const a = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await a.open();
 
     a.send('hello', 'dup-1');

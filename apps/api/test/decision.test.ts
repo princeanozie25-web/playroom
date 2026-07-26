@@ -44,7 +44,7 @@ describe('mandate v0 — the producer', () => {
     const room = uniqueRoomId('decision-cosign');
     try {
       await httpCreateRoom(server.httpBase, room);
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`);
+      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
         JSON.stringify({
@@ -84,7 +84,7 @@ describe('mandate v0 — the producer', () => {
     const room = uniqueRoomId('decision-unknown');
     try {
       await httpCreateRoom(server.httpBase, room);
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`);
+      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
         JSON.stringify({
@@ -111,7 +111,7 @@ describe('mandate v0 — the producer', () => {
     const room = uniqueRoomId('decision-nomandate');
     try {
       await httpCreateRoom(server.httpBase, room);
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`);
+      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
         JSON.stringify({
@@ -139,7 +139,7 @@ describe('mandate v0 — the producer', () => {
     const room = uniqueRoomId('decision-allow');
     try {
       await httpCreateRoom(server.httpBase, room);
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`);
+      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
         JSON.stringify({
@@ -172,9 +172,9 @@ describe('mandate v0 — the producer', () => {
     const room = uniqueRoomId('decision-chat');
     try {
       await httpCreateRoom(server.httpBase, room);
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`);
+      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
       await c.open();
-      c.send('just talking', 'm3-chat-1', 'prince');
+      c.send('just talking', 'm3-chat-1');
       await c.waitForEvents(1);
       expect(c.ofType('message')).toHaveLength(1);
       expect(await decisionRows(room)).toHaveLength(0);

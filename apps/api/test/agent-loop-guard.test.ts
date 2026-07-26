@@ -34,17 +34,46 @@ describe('agent loop guard', () => {
     await server.close();
   });
 
-  it('does not summon on an agent-authored @claude message', async () => {
-    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`);
+  it('CANNOT BE ATTEMPTED FROM A CLIENT ANY MORE — the wire has no author field', async () => {
+    // THIS TEST'S PREMISE WAS DELETED BY S1.2, and the deletion is the exit criterion.
+    //
+    // It used to send with `author: 'claude-main'` and assert that barrier 2 refused to summon
+    // on an agent-authored message. A client cannot make that message now: `ClientSend` has no
+    // author field, and the actor is resolved from the credential at the handshake. So the loop
+    // this test guarded against is not defended — it is UNREACHABLE from a client.
+    //
+    // What is asserted instead: the frame is rejected outright if it tries. A stray `author` is
+    // an unknown key, `ClientSend` is not strict so it is stripped, and the actor is still the
+    // authenticated member — so the message lands as prince and summons normally. The forgery
+    // does not fail quietly; it does not happen at all.
+    //
+    // Barrier 2 itself is NOT untested. It is asserted at the unit level in
+    // summon-boundary.test.ts, which constructs an agent-authored event directly — the only way
+    // to reach it now, and the reason that test exists rather than an integration one.
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     await c.open();
-    // author === 'claude-main' → an agent actor.
-    c.send('@claude please loop', 'loop-1', 'claude-main');
-    await c.waitForEvents(1); // the message itself lands
-    await new Promise((r) => setTimeout(r, 800)); // give any (wrong) summon time to fire
 
-    const agent = c.events.filter((e) => e.event_type.startsWith('agent.turn'));
-    expect(agent.length).toBe(0);
+    // The forgery attempt: an `author` field, smuggled onto the frame.
+    //
+    // NO TAG IN THE BODY, deliberately. The first version of this used '@claude please loop'
+    // and so triggered a real turn — which then raced `afterAll`'s room deletion and left two
+    // orphaned turn rows whose summon had already been deleted. That tripped the GLOBAL drift
+    // assertion in summon-provenance.test.ts, which is exactly what a global invariant is for.
+    // The forgery assertion needs no summon: it is about who the event is attributed to.
+    c.ws.send(
+      JSON.stringify({
+        type: 'send',
+        client_msg_id: 'forge-1',
+        author: 'claude-main',
+        body: 'no tag here, just a forged author',
+      }),
+    );
+    await c.waitForEvents(1);
 
+    const message = c.events.find((e) => e.event_type === 'message');
+    // Attributed to the AUTHENTICATED member, not the claimed one.
+    expect(message?.actor_id).toBe('prince');
+    expect(message?.actor_id).not.toBe('claude-main');
     c.close();
   });
 });

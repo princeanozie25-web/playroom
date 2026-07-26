@@ -11,5 +11,17 @@ export default async function RoomRoute({ params }: { params: Promise<{ id: stri
   // Both awaited: the roster is records now, fetched from the API rather than read off the
   // disk. A server component is the right place for that — the browser never makes the call.
   const [roster, principals] = await Promise.all([loadRoster(id), loadPrincipals(id)]);
-  return <Room roomId={id} roster={roster} principals={principals} />;
+
+  // THE CREDENTIAL THIS BROWSER CONNECTS AS (S1.2).
+  //
+  // Read on the SERVER and handed to the client, because a browser cannot set headers on a
+  // WebSocket handshake. It is a member credential — issued with `pnpm tsx
+  // scripts/issue-credential.ts prince browser` — and it reaches the page, which means anyone
+  // who can read the page can connect as that member. That is the honest limit of a credential
+  // without a login, and it is recorded as S12-N1.
+  //
+  // Absent rather than defaulted: with no token the socket is refused at the handshake with a
+  // typed reason, which is the correct behaviour and visibly different from a room that works.
+  const token = process.env.PLAYROOM_WEB_TOKEN ?? '';
+  return <Room roomId={id} roster={roster} principals={principals} token={token} />;
 }
