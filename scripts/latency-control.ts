@@ -9,17 +9,17 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadRootEnv } from '../apps/api/src/env.js';
-import { getAdapterConfig } from '../packages/adapters/src/registry.js';
-import { AnthropicAdapter } from '../packages/adapters/src/anthropic/index.js';
+import { createAdapter, getAdapterConfig } from '../packages/adapters/src/index.js';
 
 loadRootEnv();
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error('ANTHROPIC_API_KEY not set — aborting control');
-  process.exit(1);
-}
 
+// S0.5c: the control takes an ADAPTER ID, so ADR-008 can compare each member against its
+// own provider baseline. It used to construct one adapter implementation by name, which
+// made "the control" mean "the control for the first member" without saying so.
+//   pnpm exec tsx scripts/latency-control.ts [n] [adapterId]
 const N = Number(process.argv[2] ?? 50);
-const cfg = getAdapterConfig('claude-main');
+const adapterId = process.argv[3] ?? 'claude-main';
+const cfg = getAdapterConfig(adapterId);
 // Same system prompt as the room, for an equivalent request.
 const sys = readFileSync(
   fileURLToPath(new URL('../prompts/room-agent.v1.md', import.meta.url)),
@@ -28,7 +28,7 @@ const sys = readFileSync(
 const topics = ['the sky', 'coffee', 'the ocean', 'music', 'mountains'];
 
 async function ttft(topic: string): Promise<number> {
-  const adapter = new AnthropicAdapter(cfg);
+  const adapter = createAdapter(adapterId);
   const t0 = performance.now();
   for await (const chunk of adapter.stream(
     [{ author: 'user', body: `reply with one short sentence about ${topic}` }],
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   const pct = (p: number) =>
     samples[Math.min(samples.length - 1, Math.ceil((p / 100) * samples.length) - 1)];
   console.log(
-    `control provider TTFT (n=${samples.length}): min=${samples[0]} p50=${pct(50)} p90=${pct(90)} p95=${pct(95)} max=${samples[samples.length - 1]}`,
+    `control provider TTFT ${adapterId} (n=${samples.length}): min=${samples[0]} p50=${pct(50)} p90=${pct(90)} p95=${pct(95)} max=${samples[samples.length - 1]}`,
   );
   console.log('samples=' + samples.join(','));
 }
