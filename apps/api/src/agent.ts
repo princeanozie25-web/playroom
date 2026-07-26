@@ -6,7 +6,7 @@ import type { Pool } from 'pg';
 import type { AgentAdapter, AgentMessage, ServerEvent } from '@playroom/shared';
 import { costUsd, getAdapterConfig, listAdapters } from '@playroom/adapters';
 import type { RoomBus } from './bus.js';
-import { appendAgentEvent, appendMessage, recentMessages } from './events.js';
+import { appendAgentEvent, appendMessage, recentMessages, type SummonRef } from './events.js';
 
 const CONTEXT_MESSAGES = 30; // PM7 hard cap — last 30 room messages, nothing more
 
@@ -86,6 +86,8 @@ export interface AgentTurnDeps {
   roomId: string;
   adapterId: string;
   adapterFactory: (id: string) => AgentAdapter;
+  // The summon this turn answers. Required, so a turn cannot exist without one.
+  summon: SummonRef;
   spans?: { t0: number; t1: number }; // S0.3c: command-entry + message-committed boundaries
 }
 
@@ -93,7 +95,7 @@ export interface AgentTurnDeps {
 // completed. Persist-before-fanout holds for every one (ADR-003). A failure is
 // written as completed{success:false} with an error_class — never a silent hang.
 export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
-  const { pool, bus, roomId, adapterId, adapterFactory, spans } = deps;
+  const { pool, bus, roomId, adapterId, adapterFactory, spans, summon } = deps;
   const publish = (ev: ServerEvent): void => bus.publish(roomId, ev);
 
   // §22b: reject a second concurrent turn with an in-thread notice.
@@ -134,7 +136,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
 
   try {
     publish(
-      await appendAgentEvent(pool, roomId, adapterId, 'agent.turn.started', {
+      await appendAgentEvent(pool, roomId, adapterId, summon, 'agent.turn.started', {
         turn_id: turnId,
         adapter_id: adapterId,
       }),
@@ -152,7 +154,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         if (tFirstChunk === null) tFirstChunk = performance.now(); // span: first chunk from the SDK
         assembled += chunk.text;
         // Same persist-before-fanout sequence, only split to time it (S0.3c).
-        const delta = await appendAgentEvent(pool, roomId, adapterId, 'agent.turn.delta', {
+        const delta = await appendAgentEvent(pool, roomId, adapterId, summon, 'agent.turn.delta', {
           turn_id: turnId,
           text: chunk.text,
         });
@@ -190,6 +192,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         pool,
         roomId,
         adapterId,
+        summon,
         'agent.turn.completed',
         {
           turn_id: turnId,
@@ -222,6 +225,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         pool,
         roomId,
         adapterId,
+        summon,
         'agent.turn.completed',
         {
           turn_id: turnId,

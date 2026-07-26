@@ -160,6 +160,55 @@ export async function appendDecision(
   return rowToServerEvent(rows[0]);
 }
 
+/**
+ * A reference to the summon an agent turn answers.
+ *
+ * THIS TYPE IS THE ENFORCEMENT. `appendAgentEvent` takes one as a required positional
+ * argument, so an agent turn cannot be appended without a summon — a caller that omits
+ * it fails to compile rather than writing an orphan row and discovering it in a nightly
+ * query. Same discipline as `appendDecision` taking a Verdict: make the invariant a
+ * signature, not a convention.
+ */
+export interface SummonRef {
+  summon_id: string;
+}
+
+/**
+ * Append the durable record that a member was asked to take a turn.
+ *
+ * `root_is_human` is decided by the CALLER, at write time, and frozen. Members are not
+ * in the database until S1.1, so there is nothing for SQL to resolve a root against —
+ * and once written, the judgement reflects the roster as it stood, which is the correct
+ * semantics for an append-only log even after the roster changes.
+ */
+export async function appendSummon(
+  pool: Pool,
+  roomId: string,
+  payload: {
+    summon_id: string;
+    member: string;
+    requested_by: string;
+    root_actor: string;
+    root_is_human: boolean;
+    depth: number;
+    cause_seq: number;
+  },
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, event_type, payload, summon_id, root_is_human)
+     VALUES ($1, $2, 'summon', $3, $4, $5)
+     RETURNING ${EVENT_COLS}`,
+    [
+      roomId,
+      payload.requested_by,
+      JSON.stringify(payload),
+      payload.summon_id,
+      payload.root_is_human,
+    ],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
 // §17 telemetry written on an agent.turn.completed row.
 export interface AgentTelemetry {
   adapter_id: string;
@@ -179,6 +228,10 @@ export async function appendAgentEvent(
   pool: Pool,
   roomId: string,
   actorId: string,
+  // REQUIRED, and positioned before the payload so it cannot be quietly forgotten at a
+  // call site that passes telemetry. Every agent turn traces to a human summon; this
+  // argument is where that stops being a claim.
+  summon: SummonRef,
   eventType: string,
   payload: unknown,
   telemetry?: AgentTelemetry,
@@ -196,15 +249,16 @@ export async function appendAgentEvent(
   };
   const { rows } = await pool.query<EventRow>(
     `INSERT INTO events
-       (room_id, actor_id, event_type, payload,
+       (room_id, actor_id, event_type, payload, summon_id,
         adapter_id, tokens_in, tokens_out, cost_usd, latency_ms, prompt_hash, success, error_class, timings)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING ${EVENT_COLS}`,
     [
       roomId,
       actorId,
       eventType,
       JSON.stringify(payload),
+      summon.summon_id,
       t.adapter_id ?? null,
       t.tokens_in,
       t.tokens_out,

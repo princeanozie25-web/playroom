@@ -22,7 +22,13 @@ export interface TurnSpans {
 export type Command =
   | { kind: 'createRoom'; id?: string; title?: string }
   | { kind: 'postMessage'; roomId: string; clientMsgId: string; body: string }
-  | { kind: 'triggerAgentTurn'; roomId: string; adapterId: string; spans?: TurnSpans }
+  | {
+      kind: 'triggerAgentTurn';
+      roomId: string;
+      adapterId: string;
+      summonId: string;
+      spans?: TurnSpans;
+    }
   // A governed action request. Traverses the mandate evaluator; nothing executes.
   | {
       kind: 'requestAction';

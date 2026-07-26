@@ -31,7 +31,13 @@ export function executeCommand(
 ): Promise<ServerEvent>;
 export function executeCommand(
   ctx: CommandContext,
-  command: { kind: 'triggerAgentTurn'; roomId: string; adapterId: string; spans?: TurnSpans },
+  command: {
+    kind: 'triggerAgentTurn';
+    roomId: string;
+    adapterId: string;
+    summonId: string;
+    spans?: TurnSpans;
+  },
   deps: CommandDeps,
 ): Promise<void>;
 export function executeCommand(

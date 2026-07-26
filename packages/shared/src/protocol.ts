@@ -118,7 +118,33 @@ export const DecisionEvent = z.object({
   }),
 });
 
+// A summon: the durable record that an agent turn was ASKED FOR, and by whom.
+// Canonical — Bible §19 lists `summon` in the event_type enum.
+//
+// The invariant this exists to make checkable: EVERY AGENT TURN TRACES TO A HUMAN
+// SUMMON. `root_actor` / `root_is_human` are recorded here at write time rather than
+// resolved later, because members are not in the database until S1.1 and so there is
+// nothing for SQL to look them up in.
+//
+// `depth` is CARRIED here and enforced in S0.5b. It is always 0 today: only
+// human-rooted summons exist, and an agent cannot yet raise one.
+export const SummonEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('summon'),
+  payload: z.object({
+    summon_id: z.string(),
+    member: z.string(), // the member asked to take a turn
+    requested_by: z.string(), // the actor whose message raised this summon
+    root_actor: z.string(), // the actor at the head of the chain
+    root_is_human: z.boolean(), // judged against the roster when written, then frozen
+    depth: z.number(), // 0 = human-rooted. S0.5b enforces a cap on this.
+    cause_seq: z.number(), // the event that triggered it — the log's first back-reference
+  }),
+});
+export type SummonEvent = z.infer<typeof SummonEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
+  SummonEvent,
   MessageEvent,
   AgentTurnStarted,
   AgentTurnDelta,
