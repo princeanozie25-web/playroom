@@ -20,7 +20,7 @@ import {
 import { MemberChip, MemberName } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
 import { HOOK, pr } from '../../hooks';
-import type { RosterMember } from '../../roster';
+import type { Principal, RosterMember } from '../../roster';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -106,7 +106,15 @@ function socketUrl(roomId: string, after: number): string {
   return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}`;
 }
 
-export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[] }) {
+export function Room({
+  roomId,
+  roster,
+  principals,
+}: {
+  roomId: string;
+  roster: RosterMember[];
+  principals: Principal[];
+}) {
   const [events, setEvents] = useState<ServerEvent[]>([]);
   const [status, setStatus] = useState<Status>('connecting');
   const [author, setAuthor] = useState<string>('');
@@ -278,7 +286,7 @@ export function Room({ roomId, roster }: { roomId: string; roster: RosterMember[
             </li>
           ) : it.kind === 'decision' ? (
             <li key={it.key}>
-              <DecisionCard event={it.event} roster={roster} />
+              <DecisionCard event={it.event} roster={roster} principals={principals} />
             </li>
           ) : (
             /* `data-accent` on the ROW, so the caret and the working indicator inherit the

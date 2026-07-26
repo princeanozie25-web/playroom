@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { DecisionEvent } from '@playroom/shared';
 import { DecisionCard } from '../../DecisionCard';
-import { loadRoster } from '../../roster';
+import { loadPrincipals, loadRoster } from '../../roster';
 
 // DEV-ONLY FIXTURE. Not part of the product and NEVER filmed.
 //
@@ -51,7 +51,7 @@ export default function DecisionCardFixture() {
         decides, S2.2 signs). Never film this page.
       </p>
       <div style={{ marginTop: 24 }}>
-        <DecisionCard event={FIXTURE} roster={loadRoster()} />
+        <DecisionCard event={FIXTURE} roster={loadRoster()} principals={loadPrincipals()} />
       </div>
     </main>
   );

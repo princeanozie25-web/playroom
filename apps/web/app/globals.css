@@ -533,23 +533,47 @@ body {
   border-radius: var(--radius);
   padding: 0 var(--s-2);
 }
-.decision-rows {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--s-2) var(--s-4);
-  font-size: var(--t-sm);
-  margin-bottom: var(--s-4);
-}
-.decision-rows dt {
-  color: var(--ink-3);
-  font-size: var(--t-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding-top: 2px;
-}
-.decision-rows dd {
-  margin: 0;
+/* SENTENCES, NOT A FORM. The dl/dt/dd grid with uppercase grey labels is gone: it was
+   what made the card read as a database row that had been given a border. Each line is a
+   statement a person would say out loud. */
+.decision-line {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-md);
+  line-height: 1.5;
   color: var(--ink);
+}
+.decision-needs {
+  margin-bottom: var(--s-3);
+}
+.decision-needs strong {
+  font-weight: 650;
+}
+/* The reason code is DATA, demoted to a tag — it used to sit mid-sentence inside the human
+   explanation, which made the sentence read like log output. */
+.decision-code {
+  display: inline-block;
+  vertical-align: 1px;
+  margin-left: var(--s-1);
+  padding: 0 var(--s-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+/* The proof. It STAYS on screen — the film needs it — and it stops competing: small,
+   monospace, the quietest ink on the card. */
+.decision-hash {
+  margin: 0 0 var(--s-4);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+.decision-hash code {
+  font-size: var(--t-xs);
+  color: var(--ink-2);
 }
 .decision-actions {
   display: flex;

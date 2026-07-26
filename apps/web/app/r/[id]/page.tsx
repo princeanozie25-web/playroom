@@ -1,4 +1,4 @@
-import { loadRoster } from '../../roster';
+import { loadPrincipals, loadRoster } from '../../roster';
 import { Room } from './Room';
 
 // Server component. The roster is read here — on the server — and handed to the room
@@ -8,5 +8,5 @@ import { Room } from './Room';
 // where roster metadata should join the payload properly).
 export default async function RoomRoute({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <Room roomId={id} roster={loadRoster()} />;
+  return <Room roomId={id} roster={loadRoster()} principals={loadPrincipals()} />;
 }
