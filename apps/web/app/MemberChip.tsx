@@ -1,6 +1,6 @@
 import type { RosterMember } from './roster';
 
-// The member chip. Renders `Claude · speaks for prince · pr.review, pr.comment` — the
+// The member chip. Renders `<name> · speaks for <principal> · <scope>` — the
 // name, the principal, and the member's ACTUAL GRANTED SCOPE read from their mandate.
 //
 // The scope is the authority, not a caption of it: the array a viewer reads here is the

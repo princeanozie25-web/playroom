@@ -4,11 +4,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import type { AgentAdapter, AgentMessage, ServerEvent } from '@playroom/shared';
-import { costUsd, getAdapterConfig } from '@playroom/adapters';
+import { costUsd, getAdapterConfig, listAdapters } from '@playroom/adapters';
 import type { RoomBus } from './bus.js';
 import { appendAgentEvent, appendMessage, recentMessages } from './events.js';
 
-const SUMMON_PREFIX = '@claude';
 const CONTEXT_MESSAGES = 30; // PM7 hard cap — last 30 room messages, nothing more
 
 // The system prompt and its SHA-256, read once from prompts/room-agent.v1.md.
@@ -33,13 +32,45 @@ function isAgentActor(actorId: string): boolean {
   }
 }
 
-// Crude, temporary summon rule (§22): a human message body starting with @claude
-// summons claude-main. S0.5 replaces this with the real summon rule.
+/**
+ * Summon tokens, derived FROM THE ROSTER — never hardcoded.
+ *
+ * This file used to contain a hardcoded summon prefix and a literal member id, which
+ * meant enabling a second member required editing app code. That
+ * is the §6 anti-lock-in rule failing in the one place it is easiest to miss: the
+ * interface was clean, the adapter boundary was clean, and the SELECTOR was hardcoded.
+ * Bible §21.2's binary exit — "same prompt routes through either member via roster
+ * config, no app-code change" — is only true because of this function.
+ *
+ * A member is addressable by `@<display_name>` or `@<id>`, lowercased. Built once per
+ * process, same lifetime as the registry cache.
+ */
+let summonTokens: Map<string, string> | undefined;
+function tokenTable(): Map<string, string> {
+  if (!summonTokens) {
+    summonTokens = new Map();
+    for (const a of listAdapters()) {
+      summonTokens.set(`@${a.display_name.toLowerCase()}`, a.id);
+      summonTokens.set(`@${a.id.toLowerCase()}`, a.id);
+    }
+  }
+  return summonTokens;
+}
+
+// Crude, temporary summon rule (§22): a human message whose FIRST WORD is `@<member>`
+// summons that member. S0.5 replaces this with the real summon rule.
+//
+// Matching is on the first whitespace-delimited word, longest token first, so `@sol`
+// cannot be shadowed by a member whose name is a prefix of another's.
 export function summonedAdapterId(event: ServerEvent): string | null {
   if (event.event_type !== 'message') return null;
   if (event.actor_id === 'system') return null;
   if (isAgentActor(event.actor_id)) return null; // never agent-to-agent (§22a)
-  return event.payload.body.trim().toLowerCase().startsWith(SUMMON_PREFIX) ? 'claude-main' : null;
+  const first = event.payload.body.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? '';
+  if (!first.startsWith('@')) return null;
+  // Strip trailing punctuation so "@sol," addresses Sol.
+  const bare = first.replace(/[^a-z0-9@_-]+$/, '');
+  return tokenTable().get(bare) ?? null;
 }
 
 // One in-flight agent turn per room (§22b).

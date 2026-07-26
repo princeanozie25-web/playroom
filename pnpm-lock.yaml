@@ -118,6 +118,9 @@ importers:
 
   tests:
     devDependencies:
+      '@playroom/adapters':
+        specifier: workspace:*
+        version: link:../packages/adapters
       '@playroom/fabric':
         specifier: workspace:*
         version: link:../packages/fabric

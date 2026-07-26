@@ -9,5 +9,15 @@
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist-test"],
-  "references": [{ "path": "../packages/shared" }, { "path": "../packages/fabric" }]
+  "references": [
+    {
+      "path": "../packages/shared"
+    },
+    {
+      "path": "../packages/fabric"
+    },
+    {
+      "path": "../packages/adapters"
+    }
+  ]
 }

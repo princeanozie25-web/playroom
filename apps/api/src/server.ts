@@ -60,10 +60,6 @@ function loggerOptions(opts: BuildOptions): FastifyServerOptions['logger'] {
         'connectionString',
         'connection_string',
         'databaseUrl',
-        'DATABASE_URL',
-        'TEST_DATABASE_URL',
-        'ANTHROPIC_API_KEY',
-        'OPENAI_API_KEY',
         '*.password',
         '*.secret',
         '*.token',
@@ -72,14 +68,29 @@ function loggerOptions(opts: BuildOptions): FastifyServerOptions['logger'] {
         '*.connectionString',
         '*.connection_string',
         '*.databaseUrl',
-        '*.DATABASE_URL',
-        '*.ANTHROPIC_API_KEY',
-        '*.OPENAI_API_KEY',
+        // Every credential-shaped env var, by name, discovered at boot.
+        ...secretEnvPaths(),
       ],
       censor: '[redacted]',
     },
     ...(opts.loggerStream ? { stream: opts.loggerStream } : {}),
   };
+}
+
+// Credential-shaped names that are NOT provider-specific. Static, because deriving
+// everything from process.env turned out to be fragile: a server built before the env is
+// loaded derives an empty list, and the field then logs in clear. Discovered by the
+// redaction test failing on a nested DATABASE_URL — the derived list is a supplement, not
+// a replacement.
+const STATIC_SECRET_NAMES = ['DATABASE_URL', 'TEST_DATABASE_URL'];
+
+// Provider keys are discovered rather than named, so this file does not know which
+// providers exist (§6) and a key added later is redacted without anyone extending an
+// array. Union of the two lists; duplicates are harmless to pino.
+function secretEnvPaths(): string[] {
+  const looksSecret = /(_KEY|_TOKEN|_SECRET|PASSWORD|DATABASE_URL|CONNECTION_STRING)$/i;
+  const discovered = Object.keys(process.env).filter((k) => looksSecret.test(k));
+  return [...new Set([...STATIC_SECRET_NAMES, ...discovered])].flatMap((k) => [k, `*.${k}`]);
 }
 
 // The one refusal both transports serialise through, so an HTTP 404 body and a

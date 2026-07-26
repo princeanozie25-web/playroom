@@ -1,7 +1,7 @@
 import { runAgentTurn } from '../agent.js';
 import type { CommandContext, CommandDeps, TurnSpans } from './context.js';
 
-// The @claude trigger, as a command. The turn's own started/delta/completed writes
+// The summon trigger, as a command. The turn's own started/delta/completed writes
 // stay internal to runAgentTurn (ADR-004: the trigger decision is what passes
 // through the entry, not each delta).
 export function triggerAgentTurnCommand(

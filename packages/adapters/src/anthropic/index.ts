@@ -7,6 +7,12 @@ import type {
 } from '@playroom/shared';
 import type { AdapterConfig } from '../registry.js';
 
+// The slice of the provider client this adapter actually uses. Narrowing to it is what
+// lets the conformance suite pass a stub without `any`: the adapter depends on the shape
+// it calls, not on the whole SDK surface.
+type ProviderStream = ReturnType<Anthropic['messages']['stream']>;
+type ProviderClient = { messages: { stream: (params: never) => ProviderStream } };
+
 // A missing key is a clean, typed error — never a crash (§20). The orchestrator
 // turns this into an in-thread notice like any other adapter failure.
 export class MissingApiKeyError extends Error {
@@ -22,14 +28,23 @@ export class MissingApiKeyError extends Error {
 export class AnthropicAdapter implements AgentAdapter {
   readonly id: string;
   private readonly model: string;
-  private readonly client: Anthropic;
+  private readonly client: ProviderClient;
 
-  constructor(cfg: AdapterConfig) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new MissingApiKeyError(cfg.id);
+  // `stub` is supplied ONLY by the conformance suite, which needs this adapter's real
+  // translation loop to run without a network call, a key or spend. See transport.ts for
+  // why the boundary is the client rather than HTTP. Production passes nothing.
+  constructor(cfg: AdapterConfig, stub?: ProviderClient) {
+    if (!stub) {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new MissingApiKeyError(cfg.id);
+      this.client = new Anthropic({ apiKey });
+    } else {
+      // The key check still runs for the real path; a stubbed adapter is already past it.
+      if (!process.env.ANTHROPIC_API_KEY) throw new MissingApiKeyError(cfg.id);
+      this.client = stub;
+    }
     this.id = cfg.id;
     this.model = cfg.model;
-    this.client = new Anthropic({ apiKey });
   }
 
   async *stream(
@@ -45,7 +60,7 @@ export class AnthropicAdapter implements AgentAdapter {
       max_tokens: opts?.maxOutputTokens ?? 1024,
       ...(opts?.systemPrompt ? { system: opts.systemPrompt } : {}),
       messages: [{ role: 'user', content: transcript || '(no messages)' }],
-    });
+    } as never);
 
     for await (const event of stream) {
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {

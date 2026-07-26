@@ -18,7 +18,7 @@ export interface AgentStreamOptions {
   maxOutputTokens?: number;
 }
 
-// Every adapter implements this. `id` is the adapters.yaml id (e.g. "claude-main"),
+// Every adapter implements this. `id` is the adapters.yaml id (a member id),
 // never a provider name. `stream` yields chunks as they arrive from the provider.
 export interface AgentAdapter {
   readonly id: string;

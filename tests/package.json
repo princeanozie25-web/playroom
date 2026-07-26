@@ -5,6 +5,7 @@
   "type": "module",
   "devDependencies": {
     "@playroom/fabric": "workspace:*",
-    "@playroom/shared": "workspace:*"
+    "@playroom/shared": "workspace:*",
+    "@playroom/adapters": "workspace:*"
   }
 }
