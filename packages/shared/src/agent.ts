@@ -23,4 +23,27 @@ export interface AgentStreamOptions {
 export interface AgentAdapter {
   readonly id: string;
   stream(messages: AgentMessage[], opts?: AgentStreamOptions): AsyncIterable<AgentTurnChunk>;
+
+  /**
+   * Pay this adapter's one-time connection cost NOW, off the critical path.
+   *
+   * The first turn after a process starts carries a TLS handshake and client
+   * initialisation that no later turn pays (S04-N1, ~+1 to +1.5s). It lands on exactly
+   * the request a pilot makes first thing in the morning, and it is measured as a
+   * separate number rather than averaged into the warm distribution — see ADR-008.
+   *
+   * MUST NOT consume tokens, and must not be describable as a turn: nothing it does may
+   * reach the room, the event log, or a spend line. It is a connection, not a message.
+   * An adapter that cannot warm without spending should leave this unimplemented rather
+   * than bill a principal for a handshake.
+   *
+   * OPTIONAL, deliberately. A warm-up is an optimisation and not an invariant, and a
+   * required method here would make every stub and every future adapter implement a
+   * no-op to satisfy a contract that guarantees nothing. Callers use `adapter.warm?.()`
+   * and treat absence as "no warming available", never as an error.
+   *
+   * Idempotent and safe to call repeatedly — the capture harness calls it immediately
+   * before recording, on a process that already warmed at boot.
+   */
+  warm?(): Promise<void>;
 }

@@ -33,6 +33,9 @@ type ProviderStream = AsyncIterable<{
 }>;
 type ProviderClient = {
   chat: { completions: { create: (params: never) => Promise<ProviderStream> } };
+  // The token-free endpoint `warm()` uses. Optional for the same reason as the other
+  // adapter: the conformance stub exercises the translation loop, not the handshake.
+  models?: { list: () => Promise<unknown> };
 };
 
 export class OpenAIAdapter implements AgentAdapter {
@@ -47,6 +50,16 @@ export class OpenAIAdapter implements AgentAdapter {
     this.client = stub ?? (new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) as ProviderClient);
     this.id = cfg.id;
     this.model = cfg.model;
+  }
+
+  /**
+   * Same mechanism as the other adapter, for the same reason: a model-catalogue read on
+   * the client this adapter's turns use, no completion, no tokens. Both providers expose
+   * one, which is why the interface can carry `warm()` without either adapter needing a
+   * special case — and if a future provider does not, it leaves the method off.
+   */
+  async warm(): Promise<void> {
+    await this.client.models?.list();
   }
 
   async *stream(

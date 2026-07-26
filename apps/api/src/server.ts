@@ -16,6 +16,7 @@ import { makePool } from './db.js';
 import { RoomBus } from './bus.js';
 import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
+import { warmUp } from './warmup.js';
 
 export interface BuildOptions {
   databaseUrl?: string;
@@ -28,6 +29,15 @@ export interface BuildOptions {
   // Raise the level for a test that must observe an info-level record — notably the
   // Bible §9.2 audit line for an ALLOW, which is mandatory but not a warning.
   logLevel?: string;
+  /**
+   * Warm the database and every enabled adapter once the server is ready.
+   *
+   * OFF BY DEFAULT, and set only by the real entry point. Warming is real network I/O to
+   * real providers; wiring it into every `buildServer` would have the test suite opening
+   * provider connections in twenty files, which is both slow and a live dependency in a
+   * suite that deliberately has none.
+   */
+  warmOnBoot?: boolean;
 }
 
 const WS_OPEN = 1; // ws.WebSocket.OPEN
@@ -137,6 +147,22 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     if (pool) await pool.end();
   });
 
+  // Warm THIS server's own pool and adapter factory. Not a separate pool built at the
+  // entry point: connection state is per-object and per-process, so warming a second pool
+  // would wake the Neon compute (shared) and leave this server's connections cold
+  // (not shared) — a warm-up that measures beautifully and helps nobody.
+  //
+  // Started in onReady and deliberately NOT awaited. Fastify awaits onReady hooks before
+  // `listen` resolves, so awaiting here would move the cold cost off the member's first
+  // request and onto every deploy. A request arriving mid-warm-up pays what it would have
+  // paid anyway; nothing is made worse by not waiting.
+  if (opts.warmOnBoot) {
+    app.addHook('onReady', async () => {
+      if (!pool) return;
+      void warmUp({ pool, adapterFactory, log: app.log });
+    });
+  }
+
   // Routes live inside a plugin registered after @fastify/websocket so the
   // websocket route is recognised (the plugin's onRoute hook must exist first).
   app.register(async (fastify) => {
@@ -145,6 +171,23 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       service: 'playroom-api',
       version: PLAYROOM_VERSION,
     }));
+
+    // POST /internal/warmup → pay the cold connection costs now, and report what it cost.
+    //
+    // AN ENDPOINT RATHER THAN A SCRIPT, because connection state is PER-PROCESS. A script
+    // warming its own sockets would wake the Neon compute (shared) and do nothing at all
+    // for this process's provider connections (not shared) — a warm-up that measured
+    // beautifully and helped nobody. The capture harness has to be able to warm the
+    // process that will serve the recording, which means asking it.
+    //
+    // Unauthenticated, like POST /rooms — the same acceptance as RT-002 and bounded by the
+    // same conditions. What makes it a smaller surface than that one: it spends NO tokens
+    // (the adapters warm with a model-catalogue read), writes nothing, reads no room, and
+    // returns only timings. What would make it unreasonable, and re-opens this: exposing
+    // the api beyond localhost, or a warm-up mechanism that ever costs money.
+    fastify.post('/internal/warmup', async () => {
+      return warmUp({ pool: db(), adapterFactory, log: app.log });
+    });
 
     // POST /rooms { id?, title } → 201 with the room row (idempotent on id).
     fastify.post('/rooms', async (req, reply) => {

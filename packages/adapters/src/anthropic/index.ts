@@ -11,7 +11,13 @@ import type { AdapterConfig } from '../registry.js';
 // lets the conformance suite pass a stub without `any`: the adapter depends on the shape
 // it calls, not on the whole SDK surface.
 type ProviderStream = ReturnType<Anthropic['messages']['stream']>;
-type ProviderClient = { messages: { stream: (params: never) => ProviderStream } };
+type ProviderClient = {
+  messages: { stream: (params: never) => ProviderStream };
+  // The token-free endpoint `warm()` uses. Optional on the narrowed type so the
+  // conformance suite's stub — which exists to exercise the translation loop — does not
+  // have to fake a model catalogue to satisfy a connection warm-up.
+  models?: { list: () => Promise<unknown> };
+};
 
 // A missing key is a clean, typed error — never a crash (§20). The orchestrator
 // turns this into an in-thread notice like any other adapter failure.
@@ -45,6 +51,26 @@ export class AnthropicAdapter implements AgentAdapter {
     }
     this.id = cfg.id;
     this.model = cfg.model;
+  }
+
+  /**
+   * Establish the connection this adapter's first turn would otherwise pay for.
+   *
+   * A model-catalogue read: a real authenticated request over the SAME client the turn
+   * will use — so the TLS handshake, the HTTP/2 connection and the SDK's lazy internals
+   * are all done — and NO completion, so no tokens are spent and nothing is billed. It
+   * cannot be mistaken for a turn: it produces no text, no usage, and no event.
+   *
+   * The same client instance is the point. Warming a second client and assuming the
+   * process shares one connection pool would be exactly the kind of assumption that
+   * produced a five-sample P95.
+   *
+   * Errors are the CALLER's to swallow. A failed warm-up must never be fatal — a cold
+   * first turn is slow, a crashed boot is down — but it must not be hidden here either,
+   * or a permanently broken warm-up would look like a working one.
+   */
+  async warm(): Promise<void> {
+    await this.client.models?.list();
   }
 
   async *stream(

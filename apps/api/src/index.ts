@@ -4,7 +4,9 @@ import { buildServer } from './server.js';
 loadRootEnv();
 
 const port = Number(process.env.PORT ?? 3001);
-const app = buildServer();
+// `warmOnBoot` is opt-in HERE and nowhere else: the test suite builds servers constantly,
+// and a warm-up wired into every buildServer would make real provider calls 20 files over.
+const app = buildServer({ warmOnBoot: true });
 
 app
   .listen({ port, host: '0.0.0.0' })
