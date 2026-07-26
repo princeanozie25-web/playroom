@@ -18,6 +18,18 @@ interface EventRow {
 
 const EVENT_COLS = 'seq, room_id, ts, actor_id, event_type, payload';
 
+/**
+ * Resolves `actor_member_id` from the actor id, IN THE INSERT ITSELF.
+ *
+ * A subquery rather than a value the caller passes, so the column can never disagree with
+ * `actor_id` — there is no code path that could set one without the other, and no call site
+ * has to remember. It yields NULL when the actor is not a member, which is the honest answer
+ * for `system` (the room speaking) and for any string a caller invented.
+ *
+ * `$N` is the same parameter the row's `actor_id` uses; each call site passes its own index.
+ */
+const ACTOR_MEMBER = (n: number) => `(SELECT id FROM members WHERE id = $${n})`;
+
 // Build a wire event from a DB row. The stored JSONB payload is the wire payload,
 // so we validate the whole thing against the ServerEvent union (never cast).
 function rowToServerEvent(row: EventRow): ServerEvent {
@@ -40,6 +52,23 @@ export async function createRoom(pool: Pool, id: string, title: string): Promise
      ON CONFLICT (id) DO NOTHING
      RETURNING id, title, created_at`,
     [id, title],
+  );
+  // A NEW ROOM GETS EVERY CURRENT MEMBER.
+  //
+  // Not a policy choice — it is what already happens, written down. Every room could
+  // already address every member and every actor could already post anywhere; migration
+  // 008 recorded that for existing rooms and this keeps it true for new ones, so nothing
+  // about the film's room changes.
+  //
+  // Narrowing it needs a way to express exceptions, which is invites, which needs an
+  // authenticated inviter (S1.2). The interesting case still arrives without any of that:
+  // a member enabled AFTER a room is created is not in that room, and the roster rules then
+  // have something real to refuse.
+  await pool.query(
+    `INSERT INTO room_members (room_id, member_id)
+     SELECT $1, m.id FROM members AS m
+     ON CONFLICT DO NOTHING`,
+    [id],
   );
   if (inserted.rows[0]) return inserted.rows[0];
   const existing = await pool.query<RoomRow>(
@@ -109,8 +138,8 @@ export async function appendMessage(
   body: string,
 ): Promise<ServerEvent> {
   const inserted = await pool.query<EventRow>(
-    `INSERT INTO events (room_id, actor_id, event_type, client_msg_id, payload)
-     VALUES ($1, $2, 'message', $3, $4)
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, client_msg_id, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'message', $3, $4)
      ON CONFLICT (room_id, client_msg_id) DO NOTHING
      RETURNING ${EVENT_COLS}`,
     [roomId, actorId, clientMsgId, JSON.stringify({ body })],
@@ -152,8 +181,8 @@ export async function appendDecision(
   payload: DecisionPayload,
 ): Promise<ServerEvent> {
   const { rows } = await pool.query<EventRow>(
-    `INSERT INTO events (room_id, actor_id, event_type, payload)
-     VALUES ($1, $2, 'decision', $3)
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'decision', $3)
      RETURNING ${EVENT_COLS}`,
     [roomId, actorId, JSON.stringify(payload)],
   );
@@ -201,8 +230,8 @@ export async function appendSummon(
   },
 ): Promise<ServerEvent | null> {
   const { rows } = await pool.query<EventRow>(
-    `INSERT INTO events (room_id, actor_id, event_type, payload, summon_id, root_is_human)
-     VALUES ($1, $2, 'summon', $3, $4, $5)
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload, summon_id, root_is_human)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'summon', $3, $4, $5)
      ON CONFLICT (room_id, (payload ->> 'cause_seq'), (payload ->> 'member'))
        WHERE event_type = 'summon'
        DO NOTHING
@@ -261,9 +290,9 @@ export async function appendAgentEvent(
   };
   const { rows } = await pool.query<EventRow>(
     `INSERT INTO events
-       (room_id, actor_id, event_type, payload, summon_id,
+       (room_id, actor_id, actor_member_id, event_type, payload, summon_id,
         adapter_id, tokens_in, tokens_out, cost_usd, latency_ms, prompt_hash, success, error_class, timings)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING ${EVENT_COLS}`,
     [
       roomId,

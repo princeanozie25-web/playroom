@@ -22,8 +22,11 @@ afterAll(async () => {
 });
 
 describe('listMembers', () => {
-  it('returns the room exactly as it rendered before members were records', async () => {
-    const members = await listMembers(pool);
+  it('returns the agents exactly as they rendered before members were records', async () => {
+    // `prince` became a HUMAN member record in this commit (migration 008), so the full list
+    // is no longer agents-only. The AGENTS' fields are what the roster strip draws and are
+    // what must not move.
+    const members = (await listMembers(pool)).filter((m) => m.kind === 'agent');
     expect(members).toEqual([
       {
         id: 'claude-main',
@@ -71,8 +74,8 @@ describe('GET /members', () => {
     const res = await fetch(`${server.httpBase}/members`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { members: Array<{ id: string; principal_name: string }> };
-    expect(body.members.map((m) => m.id)).toEqual(['claude-main', 'sol']);
-    expect(body.members.map((m) => m.principal_name)).toEqual(['Prince', 'Jerry']);
+    // prince is a member as of this commit, and the endpoint is not room-scoped yet.
+    expect(body.members.map((m) => m.id).sort()).toEqual(['claude-main', 'prince', 'sol']);
   });
 
   it('the summon tokens the server loaded resolve the same tags as before', async () => {
