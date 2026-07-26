@@ -148,6 +148,22 @@ export async function listRoomMembers(pool: Pool, roomId: string): Promise<Membe
 }
 
 /**
+ * Is this member in this room?
+ *
+ * One indexed read against `room_members`' primary key. Deliberately NOT expressed as
+ * `listRoomMembers(...).some(...)`: that reads every member and runs every mandate validation
+ * to answer a yes/no, and an authorisation check that gets slower as the roster grows is one
+ * that eventually gets moved somewhere cheaper and less careful.
+ */
+export async function isRoomMember(pool: Pool, roomId: string, memberId: string): Promise<boolean> {
+  const { rows } = await pool.query(
+    'SELECT 1 FROM room_members WHERE room_id = $1 AND member_id = $2',
+    [roomId, memberId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * Install the summon tokens for a room, from that room's current membership.
  *
  * Called on the send path before the activation boundary rules, so a tag resolves against

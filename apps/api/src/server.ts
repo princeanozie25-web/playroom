@@ -23,7 +23,7 @@ import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
 import { authenticate, type AuthFailure, type AuthResult } from './credentials.js';
-import { listMembers, listRoomMembers } from './members.js';
+import { isRoomMember, listMembers, listRoomMembers } from './members.js';
 import { setKnownMemberTokens } from './agent.js';
 
 export interface BuildOptions {
@@ -147,6 +147,21 @@ function credentialRefusal(failure: AuthFailure, roomId: string): ServerErrorFra
 class UnrecognisedFrame extends Error {}
 
 /**
+ * The credential on an HTTP request: `Authorization: Bearer <token>`.
+ *
+ * A HEADER, NOT A QUERY PARAMETER, unlike the WebSocket handshake. A secret in a URL is
+ * written to every access log, proxy log and browser history along the way, and `?token=` on
+ * the socket is a concession to the browser WebSocket API being unable to set headers — not a
+ * pattern to copy where headers are available.
+ */
+function bearerToken(req: { headers: Record<string, unknown> }): string | undefined {
+  const raw = req.headers['authorization'];
+  if (typeof raw !== 'string') return undefined;
+  const match = /^Bearer\s+(.+)$/i.exec(raw.trim());
+  return match?.[1];
+}
+
+/**
  * The two send-path refusals.
  *
  * `ClientFrame` accepts `send` and `request_action`. THERE IS NO FRAME THAT STARTS AN AGENT
@@ -245,16 +260,44 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // comment and a lucky type-only import, because there is no filesystem read left in that
     // path to leak `node:fs` into a browser bundle.
     //
-    // Read-only, no principal-scoped data, and it names no provider (§6).
-    // Scoped to a room. S11a-N1 shipped an unauthenticated roster of EVERY member; a room's
-    // roster is narrower and is what the web tier actually needs. The CAPABILITY to scope
-    // arrives here because a roster cannot be scoped to a room until rooms have one.
+    // Read-only, and it names no provider (§6).
     //
-    // WHO MAY ASK IS STILL NOT ENFORCED — that is S1.2's, and RT-005 records the acceptance
-    // along with why it is worse than it looks next to M-N1.
+    // NOW SCOPED TO WHO IS ASKING, which is what S11a-N1 was waiting for. That finding shipped
+    // an unauthenticated roster of EVERY member; S1.1b narrowed the ROWS to one room and said
+    // plainly that who may ask was still not enforced. It is enforced here: a credential, and
+    // then membership of the room being read.
+    //
+    // It is not a small thing to have left open. A roster is not a room id — it names people,
+    // the principals they act for, and the actions each of them has been fenced from. That is
+    // the shape of an organisation, readable by anyone who could reach the port.
     fastify.get('/rooms/:id/members', async (req, reply) => {
       const { id } = req.params as { id: string };
-      if (!(await getRoom(db(), id))) {
+
+      // IDENTITY FIRST, then existence, then membership — the same order as the handshake.
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        app.log.warn({ room_id: id, code: auth.failure }, 'roster refused: no usable credential');
+        reply.code(401);
+        return credentialRefusal(auth.failure, id);
+      }
+
+      // A ROOM THE CALLER IS NOT IN ANSWERS EXACTLY AS A ROOM THAT DOES NOT EXIST.
+      //
+      // Deliberate, and it is the one place this codebase does NOT distinguish two mistakes in
+      // its reply. `Jerry's agent` is a legitimate holder of a credential; if a non-member got
+      // "you are not in this room" it could enumerate Prince's room ids by trying, and
+      // cross-principal leakage is the thing the product exists to prevent. A roster is not a
+      // room id: it names people, their principals and their protected actions.
+      //
+      // The distinction is not lost, it is MOVED: the log below says which of the two it was,
+      // server-side, where the caller cannot read it. An operator debugging a 404 has the
+      // answer; a caller probing for rooms does not.
+      const exists = await getRoom(db(), id);
+      if (!exists || !(await isRoomMember(db(), id, auth.auth.member_id))) {
+        app.log.warn(
+          { room_id: id, member: auth.auth.member_id, reason: exists ? 'not_in_room' : 'no_room' },
+          'roster refused',
+        );
         reply.code(404);
         return roomNotFound(id);
       }

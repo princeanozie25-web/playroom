@@ -22,7 +22,9 @@ Severity is about the trust boundary, not user annoyance:
 | RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001      | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                             | accepted until **S1.1**                  | —         |
 | RT-003 | 26 Jul 2026 | high     | property test, S0.5a              | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                         | fixed                                    | `01ae2e8` |
 | RT-004 | 26 Jul 2026 | high     | S0.5b activation-boundary review  | model output is DATA; a summon token in generated text would convert injection into cross-principal action                  | guarded, one gap accepted until **S1.7** | `fe642c0` |
-| RT-005 | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b     | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member | accepted until **S1.2**                  | —         |
+| RT-005 | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b     | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member | fixed                                    | `7fc279a` |
+| M-N1   | 25 Jul 2026 | critical | logged at the mandate slice       | identity must be stamped by the boundary, not asserted by the caller; `actor_id` arrived from the wire as a free string     | fixed                                    | `7fc279a` |
+| S04-N2 | 25 Jul 2026 | high     | logged at the mandate slice       | a mandate is an unsigned file, so _this principal granted this authority_ is asserted by the document, not proven           | open, narrowed — trigger **S2.6**        | —         |
 
 ## RT-001 — a refused write was indistinguishable from an accepted one
 
@@ -196,6 +198,12 @@ roster is now an HTTP GET. **This raises M-N1's severity rather than sitting bes
 M-N1 was logged as a gap in identity stamping, and it should be read from here on as the
 second half of a two-step with a published first half.
 
+**FIXED IN S1.2.** `7fc279a` deleted the impersonation half; the roster half lands in the same
+slice's third commit. Both steps of the two-step are gone: the wire can no longer express _I am
+this member_, and the roster read requires a credential and membership of the room being read.
+The original disposition is kept below exactly as it was written — a log that edits its own
+reasoning once the answer is known cannot be audited.
+
 **Accepted until S1.2**, which stamps identity at the gateway. Fixing it earlier means
 inventing an authentication model in the wrong slice and replacing it, and there is nothing
 to scope a read _to_ until a caller has a verified identity.
@@ -236,3 +244,121 @@ Earlier candidates that also end it, in the order they are likely to arrive: any
 email or webhook; any write to a repository, tracker or calendar; any payment. If a slice adds
 one of those before S1.2 lands, RT-005 escalates from _accepted_ to _blocking_ and M-N1 with
 it.
+
+---
+
+## What S1.2 closed, and what it did not
+
+Each finding individually, because "identity is stamped now" is the kind of sentence that closes
+four findings by association and leaves the fifth quietly open.
+
+### FIXED — M-N1: `actor_id` arrived from the wire as a free string
+
+`ClientSend.author` is **deleted**. The frame has no field for it, so this is not validation of a
+claim — there is nothing left to claim. The actor is resolved once at the handshake from a
+credential and held in the socket's closure; `accepted` resolves the identity rather than a
+boolean, so no code path handles a frame without an authenticated member in hand.
+
+Asserted by `apps/api/test/identity.test.ts`: a frame smuggling `author: 'sol'` is written as
+`prince`, and nothing anywhere in the room is attributed to `sol`.
+
+`7fc279a`.
+
+### FIXED — RT-005: the roster read, and what it was the first step of
+
+Both halves. The rows were scoped to one room in S1.1b; the READER is scoped now — a credential,
+then membership of the room being read.
+
+An authenticated non-member receives **byte-identical bytes to a room that does not exist**,
+deliberately. `sol` is a legitimate credential holder, and "you are not in this room" would let
+Jerry's agent enumerate Prince's room ids by trying. This is the one place in the codebase where a
+refusal does not distinguish two mistakes _to the caller_ — the distinction is not lost, it is
+moved to the server's log, where the caller cannot read it. The reason is written at the route so
+it cannot be tidied away later.
+
+### FIXED for every write from here on — S11a-N3's authenticated half
+
+Migration 008 made `actor_member_id` a nullable column with a real foreign key: when an event
+named a member, that member existed. It could not say every event names one, because rejecting an
+unrecognised actor required knowing who the caller was.
+
+Migration 010 tightens it: `CHECK (actor_member_id IS NOT NULL OR actor_id = 'system')`.
+
+- **Not `NOT NULL`.** `system` authors the room's own notices — the in-flight refusal, the
+  unknown-member sentence. It is the room speaking, it has no principal, and seeding a `system`
+  member to satisfy a constraint would be fabricating a record to make a check pass.
+- **`NOT VALID`, deliberately.** The log holds rows written before authentication existed
+  (`Fable`, `nobody-in-particular`) and it is **append-only**. Validating retroactively means
+  rewriting history so that a new rule appears to have always held. The constraint governs every
+  write from here on; the historical rows stay visibly historical.
+
+So the honest sentence is not "every event names a real member". It is "every event written after
+010 names a real member or is the room speaking" — a different claim, and the true one.
+
+### STILL OPEN, NARROWED — S04-N2: a mandate is an unsigned file
+
+The credential proves that the holder of a token is the member it was issued to, and a member is
+bound to a principal. So **`Sol speaks for Jerry` is enforced at the connection** as of this slice.
+
+**`Jerry granted this mandate` is still not proven.** The mandate is a YAML file in the repository;
+the credential is not Jerry's key. Anyone who can commit to `mandates/` can widen a scope, and the
+room will render the widened authority truthfully — because the room is truthful about the
+document, and it is the document that is unproven.
+
+A token in an environment variable authenticates a **process acting as a member**: exactly what an
+agent gateway is, and only approximately what a browser session is. No login, no second factor, no
+per-human key. Nothing here identifies a **person**.
+
+Narrower than it was, and not closed. What closes it: signed mandates, or an identity provider that
+authenticates humans. It inherits the acceptance condition below, and with it the **S2.6** trigger.
+
+### NEW — S12-N1: `GET /rooms/:id` is still an existence oracle
+
+The roster route is carefully not an oracle. Its neighbour is. `GET /rooms/:id` takes no credential
+and returns the room row, so an unauthenticated caller can still probe whether a room id exists —
+which means the handshake's deliberate "identity before existence" ordering is undermined by a
+sibling route answering the same question for free.
+
+Severity **low**: existence only. No roster, no principals, no mandates, no events, and room ids
+are not secrets in any current deployment. Logged rather than fixed because authenticating the room
+read is a different shape of change — every HTTP route, plus the web tier's room page — and
+inventing it inside S1.2 would be the same mistake as inventing authentication inside S1.1a.
+
+**Trigger:** exposing the api beyond localhost, or the first slice that authenticates HTTP routes
+generally — whichever comes first.
+
+### NEW — S12-N2: `subject` on `request_action` is still a claim
+
+The REQUESTER is authenticated. The SUBJECT is not, and that part is deliberate: a host sidecar asks
+on its member's behalf — beat 5 of the P0 film is exactly that shape — so requester and subject are
+different parties, and only one of them is now proven.
+
+What it permits today: any authenticated member may request an action naming **any other member** as
+the subject, and the room records a decision evaluated against that member's mandate. `prince` can
+cause a `CO_SIGN` card naming Jerry's principal as the required signer for an action Sol never asked
+to take. The verdict is correct — the mandate evaluated is genuinely Sol's — but the room implies
+Sol asked.
+
+Severity **medium**: it misrepresents who initiated a governed action, and it cannot escalate
+authority, because the subject's own mandate is what gets evaluated. Recorded at the schema rather
+than left implicit.
+
+What closes it: a delegation record saying which members a requester may act for. **Trigger: S1.3**,
+which introduces the handoff object and is the first slice with a reason to express one.
+
+### CONFIRMED — RT-005's acceptance condition survives, and is now S04-N2's
+
+> **NO ALLOW CAUSES ANY EXTERNAL SIDE EFFECT ANYWHERE IN THE SYSTEM.**
+
+Still true after S1.2. An `ALLOW` returns a verdict; nothing merges, deploys, posts or sends, and
+nothing is written outside Playroom's own event log. Checked against this slice's own additions: the
+credential path reads, the roster route reads, the stamp reads, and the two frame refusals write
+nothing at all.
+
+The sentence outlives RT-005 because it was never only RT-005's. RT-005 is fixed; the condition now
+carries **S04-N2** and **S12-N2**, which are survivable for the same reason and in the same way — a
+claim that cannot cause an effect outside the log is a claim about a picture, not about the world.
+
+**S2.6, the GitHub bridge, is still the slice that ends it.** The moment an `ALLOW` causes a comment
+to be posted or a branch to be pushed, an unproven mandate and an unverified subject stop being
+survivable. Whoever builds S2.6 must find this line before they merge it.

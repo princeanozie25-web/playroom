@@ -76,9 +76,21 @@ interface ApiMember {
  * That is RT-001's shape at the page level, and silence is exactly what it must not be.
  */
 async function fetchMembers(roomId: string): Promise<ApiMember[]> {
+  // THE CREDENTIAL, in a header. The roster is scoped to members of the room as of S1.2, so
+  // this call now carries an identity like every other — the web tier reads the roster AS
+  // `prince`, not as nobody in particular.
+  //
+  // Server-side only: this module is imported by a server component, so the token is never
+  // shipped to a browser. It is read here rather than threaded down from the page because a
+  // credential passed through props is a credential that can end up serialised into HTML.
+  const token = process.env.PLAYROOM_WEB_TOKEN ?? '';
   const res = await fetch(`${API_URL}/rooms/${encodeURIComponent(roomId)}/members`, {
     cache: 'no-store',
+    headers: token ? { authorization: `Bearer ${token}` } : {},
   });
+  // A 401 and a 404 both land here, deliberately un-distinguished at this layer: the room does
+  // not render either way, and the API's log already says which it was. What must not happen is
+  // a room drawn with an empty roster (see above).
   if (!res.ok) throw new Error(`GET /rooms/${roomId}/members failed: ${res.status}`);
   const body: unknown = await res.json();
   if (typeof body !== 'object' || body === null || !Array.isArray((body as never)['members'])) {

@@ -1,5 +1,11 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { httpCreateRoom, startTestServer, testPool, type TestServer } from './support.js';
+import {
+  httpCreateRoom,
+  issueTestCredential,
+  startTestServer,
+  testPool,
+  type TestServer,
+} from './support.js';
 import { listMembers, listRoomMembers, loadRoomTokens } from '../src/members.js';
 
 // THE ROSTER, AS RECORDS AND AS THE ROOM SEES IT.
@@ -85,13 +91,17 @@ describe('a room roster, scoped', () => {
     const room = `members-scope-${Date.now()}`;
     expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
 
-    const res = await fetch(`${server.httpBase}/rooms/${room}/members`);
+    const res = await fetch(`${server.httpBase}/rooms/${room}/members`, {
+      headers: { authorization: `Bearer ${server.token}` },
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { members: Array<{ id: string; principal_name: string }> };
     // A new room gets every current member — today's behaviour, recorded rather than narrowed.
     expect(body.members.map((m) => m.id).sort()).toEqual(['claude-main', 'prince', 'sol']);
 
-    const ghost = await fetch(`${server.httpBase}/rooms/no-such-room-here/members`);
+    const ghost = await fetch(`${server.httpBase}/rooms/no-such-room-here/members`, {
+      headers: { authorization: `Bearer ${server.token}` },
+    });
     expect(ghost.status).toBe(404);
 
     await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
@@ -137,6 +147,72 @@ describe('a room roster, scoped', () => {
     expect(ruling.rule).toBe('ACTIVATED');
     expect(ruling.members).toEqual(['claude-main', 'sol']);
 
+    await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
+  });
+});
+
+describe('who may read a roster (S1.2)', () => {
+  it('REFUSES an unauthenticated read — 401, and the two credential codes stay apart', async () => {
+    // S11a-N1's other half. The rows were scoped to a room in S1.1b and who may ask was left
+    // open, with the finding saying so. A roster is not a room id: it names people, the
+    // principals they act for, and the actions each of them has been fenced from.
+    const room = `roster-auth-${Date.now()}`;
+    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+
+    const none = await fetch(`${server.httpBase}/rooms/${room}/members`);
+    expect(none.status).toBe(401);
+    expect(await none.json()).toMatchObject({ type: 'error', code: 'credential_required' });
+
+    const bad = await fetch(`${server.httpBase}/rooms/${room}/members`, {
+      headers: { authorization: 'Bearer prm_nonsense' },
+    });
+    expect(bad.status).toBe(401);
+    expect(await bad.json()).toMatchObject({ type: 'error', code: 'credential_invalid' });
+
+    // A token in the wrong PLACE is not a credential. Accepting `?token=` here would put a
+    // secret into every access log and browser history on the way — the socket does it only
+    // because the browser WebSocket API cannot set headers.
+    const inUrl = await fetch(`${server.httpBase}/rooms/${room}/members?token=${server.token}`);
+    expect(inUrl.status).toBe(401);
+
+    await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
+  });
+
+  it('a caller who is NOT IN THE ROOM gets exactly what a non-existent room gives', async () => {
+    // The one place a refusal deliberately does NOT distinguish two mistakes. `sol` holds a
+    // legitimate credential; if a non-member were told "you are not in this room" it could
+    // enumerate room ids by trying, and cross-principal leakage is what the product exists to
+    // prevent. The distinction is moved to the server's log, not lost.
+    const room = `roster-outsider-${Date.now()}`;
+    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+    await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
+      room,
+      'sol',
+    ]);
+    const solToken = await issueTestCredential('sol', 'roster-outsider');
+
+    const outsider = await fetch(`${server.httpBase}/rooms/${room}/members`, {
+      headers: { authorization: `Bearer ${solToken}` },
+    });
+    const ghost = await fetch(`${server.httpBase}/rooms/definitely-not-a-room/members`, {
+      headers: { authorization: `Bearer ${solToken}` },
+    });
+    expect(outsider.status).toBe(404);
+    expect(ghost.status).toBe(404);
+    // Byte-identical bodies, not merely the same status — a different sentence would be the
+    // same oracle with extra steps.
+    const normalise = (body: string, id: string): string => body.replaceAll(id, '<room>');
+    expect(normalise(await outsider.text(), room)).toBe(
+      normalise(await ghost.text(), 'definitely-not-a-room'),
+    );
+
+    // And a member who IS in the room still reads it. The scoping must not be a wall.
+    const insider = await fetch(`${server.httpBase}/rooms/${room}/members`, {
+      headers: { authorization: `Bearer ${server.token}` },
+    });
+    expect(insider.status).toBe(200);
+
+    await pool.query("DELETE FROM member_credentials WHERE label = 'roster-outsider'");
     await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
   });
 });
