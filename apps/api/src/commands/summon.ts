@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isAgentActor } from '../agent.js';
-import { appendSummon } from '../events.js';
+import { appendMessage, appendRouteSelected, appendSummon } from '../events.js';
+import { selectRoute } from '../routes.js';
 import type { CommandContext, CommandDeps, TurnSpans } from './context.js';
 
 /**
@@ -59,6 +60,40 @@ export async function summonCommand(
     return;
   }
 
+  // ── IS THIS MEMBER REACHABLE? ─────────────────────────────────────────────────────────
+  //
+  // A member record says they EXIST; a route says they are REACHABLE. Checked HERE rather than
+  // in the activation boundary because it is operational state, not a property of the text: a
+  // provider going down does not change what a member's message said. The boundary stays pure
+  // and its guards are untouched.
+  //
+  // §6.2's failure rule: a member with no usable route names the FAILED CONSTRAINT. Never a
+  // silent downgrade and never a silent nothing — the room gets a sentence, and no summon is
+  // written, so nothing downstream believes a turn was asked for.
+  const selection = await selectRoute(deps.pool, input.member);
+  if (!selection.route) {
+    deps.log.warn(
+      {
+        room_id: input.roomId,
+        member: input.member,
+        reason: selection.reason,
+        failed_constraint: selection.failed_constraint,
+      },
+      'summon refused: no usable route',
+    );
+    // The room says which constraint failed, keyed to the causing event so a replayed frame
+    // resolves to the same notice rather than repeating it.
+    const notice = await appendMessage(
+      deps.pool,
+      input.roomId,
+      'system',
+      `sys-noroute-${input.causeSeq}-${input.member}`,
+      `${input.member} cannot be reached: ${selection.failed_constraint}.`,
+    );
+    deps.bus.publish(input.roomId, notice);
+    return;
+  }
+
   const summonId = `sum_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const summon = await appendSummon(deps.pool, input.roomId, {
     summon_id: summonId,
@@ -85,6 +120,19 @@ export async function summonCommand(
     return;
   }
   deps.bus.publish(input.roomId, summon);
+
+  // WHICH ROUTE, AND WHY — Bible §6.2. Written after the summon so it can reference it, and
+  // before the turn is triggered so the log reads in the order the decisions were made.
+  deps.bus.publish(
+    input.roomId,
+    await appendRouteSelected(deps.pool, input.roomId, {
+      summon_id: summonId,
+      member: input.member,
+      route_id: selection.route.id,
+      route_type: selection.route.type,
+      reason: selection.reason,
+    }),
+  );
 
   void deps
     .execute(

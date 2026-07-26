@@ -250,6 +250,33 @@ export async function appendSummon(
   return rows[0] ? rowToServerEvent(rows[0]) : null;
 }
 
+/**
+ * Record which route a member's turn will run on, and why — Bible §6.2.
+ *
+ * Written from `selectRoute`'s result at the summon construction site, so a route selection
+ * cannot exist without a selection having happened. Same discipline as `appendDecision` taking
+ * a Verdict.
+ */
+export async function appendRouteSelected(
+  pool: Pool,
+  roomId: string,
+  payload: {
+    summon_id: string;
+    member: string;
+    route_id: string;
+    route_type: string;
+    reason: string;
+  },
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload, summon_id)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'route.selected', $3, $4)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, payload.member, JSON.stringify(payload), payload.summon_id],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
 // §17 telemetry written on an agent.turn.completed row.
 export interface AgentTelemetry {
   adapter_id: string;

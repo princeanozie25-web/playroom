@@ -50,6 +50,14 @@ type AgentItem = {
 type DecisionItem = { kind: 'decision'; key: string; event: DecisionEvent };
 type Item = MessageItem | AgentItem | DecisionItem;
 
+/**
+ * Group the event log into renderable items.
+ *
+ * AN ALLOWLIST, with no fallthrough: an event type this chain does not name produces no item.
+ * That is deliberate and it is what keeps the transcript honest as the log grows — `summon`
+ * and `route.selected` are records of how a turn came to happen, not things a member said, and
+ * an `else` branch would have rendered them as agent bubbles the moment they were added.
+ */
 function buildItems(events: ServerEvent[]): Item[] {
   const turns = new Map<string, AgentItem>();
   const order: Item[] = [];

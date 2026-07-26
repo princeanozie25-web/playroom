@@ -143,8 +143,37 @@ export const SummonEvent = z.object({
 });
 export type SummonEvent = z.infer<typeof SummonEvent>;
 
+/**
+ * A route was selected for a member's turn — Bible §6.2: "record which route was selected and
+ * why".
+ *
+ * A NEW EVENT TYPE, not a field on `summon`, because it is a different fact with a different
+ * lifetime: a summon says a member was ASKED, a route selection says HOW they were reached.
+ * When a member has two routes and the first fails, there will be two selections for one
+ * summon, and a field could not carry that.
+ *
+ * `reason` is an open string (CONTRIBUTING: open strings for taxonomies that grow) and today
+ * it is trivially `only_available_route` — there is one route per member, so selection is not
+ * a decision. That is honest, and the value is the record rather than the sophistication: when
+ * a second route exists the reason stops being trivial and nothing else has to move.
+ */
+export const RouteSelectedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('route.selected'),
+  payload: z.object({
+    summon_id: z.string(),
+    member: z.string(),
+    route_id: z.string(),
+    /** `hosted` | `connected` | `bridged`. Never a provider name — §6. */
+    route_type: z.string(),
+    reason: z.string(),
+  }),
+});
+export type RouteSelectedEvent = z.infer<typeof RouteSelectedEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
+  RouteSelectedEvent,
   MessageEvent,
   AgentTurnStarted,
   AgentTurnDelta,

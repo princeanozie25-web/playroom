@@ -212,6 +212,27 @@ localhost, any pilot traffic, or any slice that makes an ALLOW verdict cause a r
 side effect before S1.2 lands. The third is the one to watch — today no ALLOW does anything,
 which is most of why this is survivable.
 
-S1.1b narrowed the read from every member in the system to the members of one room, which is
-a smaller disclosure and the reason the capability was built here. Who may ask is still not
+S1.1b narrowed the read from every member in the system to the members of one room, which is a
+smaller disclosure and the reason the capability was built here. Who may ask is still not
 enforced.
+
+### RT-005's acceptance condition — the one line to check
+
+> **NO ALLOW CAUSES ANY EXTERNAL SIDE EFFECT ANYWHERE IN THE SYSTEM.**
+
+That sentence is the whole acceptance, and it is checkable rather than a judgement. Today an
+`ALLOW` verdict returns a verdict: nothing merges, nothing deploys, nothing is sent, nothing
+is written outside Playroom's own event log. So a caller who impersonates `claude-main` gains
+claude-main's mandate and **nothing that mandate permits actually happens**. The disclosure
+widens who can aim; it does not widen what the aim achieves.
+
+**The slice that ends this is S2.6, the GitHub bridge.** The moment an `ALLOW` causes a comment
+to be posted, a branch to be pushed or a pull request to be touched, impersonation stops being
+survivable and this entry stops being acceptable. **Whoever builds S2.6 must find this line
+before they merge it** — that is what a trigger is for, and it is why the condition is written
+as a sentence about the system rather than a paragraph about the risk.
+
+Earlier candidates that also end it, in the order they are likely to arrive: any outbound
+email or webhook; any write to a repository, tracker or calendar; any payment. If a slice adds
+one of those before S1.2 lands, RT-005 escalates from _accepted_ to _blocking_ and M-N1 with
+it.

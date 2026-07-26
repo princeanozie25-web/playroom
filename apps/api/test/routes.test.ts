@@ -1,5 +1,13 @@
-import { afterAll, describe, expect, it } from 'vitest';
-import { testPool } from './support.js';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  Client,
+  httpCreateRoom,
+  scriptedAdapter,
+  startTestServer,
+  testPool,
+  uniqueRoomId,
+  type TestServer,
+} from './support.js';
 import { listRoutes, selectRoute } from '../src/routes.js';
 
 // ROUTES: HOW A MEMBER IS REACHABLE (Bible §6.1, §6.2).
@@ -9,13 +17,42 @@ import { listRoutes, selectRoute } from '../src/routes.js';
 // complaint, and a missing provider key surfaced only as a failed turn. So a member who could
 // not possibly answer looked identical — in the roster and in the database — to one that works.
 // You found out by summoning them and watching the turn fail.
+//
+// Three refusals now exist for three different situations, and keeping them apart is the point:
+//   UNKNOWN_MEMBER  nobody is called that
+//   NOT_IN_ROOM     they exist, but not here
+//   no usable route they are here, and cannot be reached
+// Each has a different remedy, so each gets its own sentence.
 
 const pool = testPool();
+let server: TestServer;
+const rooms: string[] = [];
+
+function room(prefix: string): string {
+  const id = uniqueRoomId(prefix);
+  rooms.push(id);
+  return id;
+}
+
+beforeAll(async () => {
+  server = await startTestServer({
+    adapterFactory: (id) =>
+      scriptedAdapter(id, [
+        { kind: 'text_delta', text: `${id} here` },
+        { kind: 'done', tokens_in: 4, tokens_out: 2, stop_reason: 'end_turn' },
+      ]),
+  });
+});
 
 afterAll(async () => {
-  // Only routes this file added; the two seeded ones are left alone.
+  for (const id of rooms) {
+    await pool.query('DELETE FROM events WHERE room_id = $1', [id]);
+    await pool.query('DELETE FROM rooms WHERE id = $1', [id]);
+  }
+  // Any route this file added; the two seeded ones are left alone.
   await pool.query("DELETE FROM routes WHERE id LIKE 'rt_test_%'");
   await pool.end();
+  await server.close();
 });
 
 describe('route records', () => {
@@ -104,5 +141,114 @@ describe('selectRoute', () => {
     expect(s.route?.id).toBe('rt_test_slow');
     expect(s.reason).toBe('only_available_route');
     await pool.query("DELETE FROM routes WHERE id = 'rt_test_slow'");
+  });
+});
+
+describe('route.selected is recorded (§6.2)', () => {
+  it('emits which route, for which member, and why — alongside the summon', async () => {
+    const id = room('route-selected');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    await c.open();
+
+    c.send('@sol hello', 'rs-1', 'prince');
+    await c.waitForType('agent.turn.completed');
+
+    const selected = c.ofType('route.selected');
+    expect(selected).toHaveLength(1);
+    const ev = selected[0];
+    if (ev.event_type !== 'route.selected') throw new Error('narrowing');
+    expect(ev.payload).toMatchObject({
+      member: 'sol',
+      route_id: 'rt_sol',
+      route_type: 'hosted',
+      reason: 'only_available_route',
+    });
+    // It references the summon it belongs to, so the log says how THAT ask was routed.
+    expect(ev.payload.summon_id).toBe(
+      (c.ofType('summon')[0] as { payload: { summon_id: string } }).payload.summon_id,
+    );
+    // And it names no provider — §6 survives the route becoming a record on the wire.
+    expect(JSON.stringify(ev.payload)).not.toMatch(/anthropic|openai|gpt-/i);
+    c.close();
+  });
+
+  it('renders NOTHING in the transcript — it is a record, not something a member said', async () => {
+    // buildItems is an allowlist with no fallthrough, so a new event type cannot become an
+    // agent bubble by accident. Asserted at the event level: the room received it and the
+    // message list is unchanged by it.
+    const id = room('route-quiet');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+    await c.open();
+    c.send('@sol hello', 'rq-1', 'prince');
+    await c.waitForType('route.selected');
+    // One human message, and no system notice — the route record is silent on screen.
+    expect(c.bodies()).toEqual(['@sol hello']);
+    c.close();
+  });
+});
+
+describe('a member with no usable route', () => {
+  it('is REFUSED, names the failed constraint, and no summon is written', async () => {
+    // §6.2's failure rule. Never a silent downgrade and never a silent nothing: the room says
+    // which constraint failed, and because no summon exists nothing downstream believes a turn
+    // was asked for.
+    const id = room('route-none');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    await pool.query("UPDATE routes SET status = 'unavailable' WHERE member_id = 'sol'");
+    try {
+      const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+      await c.open();
+      c.send('@sol are you there?', 'rn-1', 'prince');
+      await c.waitForEvents(2);
+      await new Promise((r) => setTimeout(r, 900));
+
+      const bodies = c.bodies();
+      expect(bodies[1]).toMatch(/^sol cannot be reached: every route is unavailable/);
+      expect(c.ofType('summon')).toHaveLength(0);
+      expect(c.ofType('route.selected')).toHaveLength(0);
+      expect(c.ofType('agent.turn.started')).toHaveLength(0);
+      c.close();
+    } finally {
+      await pool.query("UPDATE routes SET status = 'available' WHERE member_id = 'sol'");
+    }
+  });
+
+  it('is a DIFFERENT sentence from not-in-room and from unknown', async () => {
+    // Three situations, three remedies, three sentences. This is the assertion that stops them
+    // collapsing into one unhelpful refusal as the code grows.
+    const id = room('route-distinct');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
+      id,
+      'claude-main',
+    ]);
+    await pool.query("UPDATE routes SET status = 'unavailable' WHERE member_id = 'sol'");
+    try {
+      const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`);
+      await c.open();
+
+      c.send('@nobody', 'd-1', 'prince');
+      await c.waitForEvents(2);
+      c.send('@claude', 'd-2', 'prince');
+      await new Promise((r) => setTimeout(r, 900));
+      c.send('@sol', 'd-3', 'prince');
+      await new Promise((r) => setTimeout(r, 1200));
+
+      // Filtered by AUTHOR, not by text. A first attempt filtered out anything starting with
+      // '@' and silently dropped "@claude is not in this room." — the room's own sentence
+      // begins with the token it is refusing.
+      const notices = c.events
+        .filter((e) => e.event_type === 'message' && e.actor_id === 'system')
+        .map((e) => (e as { payload: { body: string } }).payload.body);
+      expect(notices).toContain('No member of this room is called @nobody.');
+      expect(notices).toContain('@claude is not in this room.');
+      expect(notices.some((n) => n.startsWith('sol cannot be reached'))).toBe(true);
+      expect(new Set(notices).size).toBe(3); // three distinct sentences
+      c.close();
+    } finally {
+      await pool.query("UPDATE routes SET status = 'available' WHERE member_id = 'sol'");
+    }
   });
 });
