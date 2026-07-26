@@ -54,7 +54,23 @@ export interface Verdict {
  * RT-001 mistake at the policy layer. Their position is held by the comments below so S2.1
  * inserts rather than reorders.
  *
- * `counterparties` was the third of those until S1.1b gave rooms a roster — see branch 5.
+ * `counterparties` was the third of those until S1.1b gave rooms a roster — see branch 3.
+ *
+ * ── THE ORDER IS NOT ARBITRARY (RA-007) ──
+ *
+ * ESTABLISH STANDING BEFORE EVALUATING THE REQUEST. Expiry, scope and roster all answer
+ * *may this member act here at all*; protection and limits answer *what does this particular
+ * action need*. NEVER ASK A HUMAN TO APPROVE SOMETHING THAT SHOULD HAVE BEEN REFUSED
+ * OUTRIGHT.
+ *
+ * That is why scope precedes protected — a protected action absent from scope is BLOCK, not
+ * CO_SIGN — and, from S1.1c, why the roster check precedes it too. `counterparties` sat at
+ * position 5 in Bible §9.2, behind protected actions, which meant a protected action asked
+ * for a member who was not in the room returned CO_SIGN: a human invited to sign for an
+ * absent member, on the surface that carries the most credibility in the product. Fail-closed
+ * and the wrong question.
+ *
+ * A later slice reordering these branches should reread the principle, not the numbers.
  *
  * @param mandate the member's mandate, or `undefined` if they have none
  * @param roomRoster the ids of the members enrolled in the room the action was requested in,
@@ -105,21 +121,8 @@ export function evaluate(
     return { decision: 'BLOCK', reason_code: 'OUT_OF_SCOPE', required_signer: null, ...base };
   }
 
-  // 3. (S2.1) replay protection — `if replayed(nonce, resource_hash) return BLOCK`.
-
-  // 4. Protected actions pause for a human. The signer comes from the mandate's own
-  // co_sign block, never from a default: `by: "principal"` resolves to the mandate's
-  // principal, which is the person who granted the authority in the first place.
-  if (m.protected_actions.includes(action.type)) {
-    return {
-      decision: 'CO_SIGN',
-      reason_code: 'PROTECTED_ACTION',
-      required_signer: m.co_sign.by === 'principal' ? m.principal : m.co_sign.by,
-      ...base,
-    };
-  }
-
-  // 5. COUNTERPARTIES. `roster_only` means this member may only deal with the room's own
+  // 3. COUNTERPARTIES — a STANDING question, and therefore checked BEFORE protected
+  // actions (RA-007). `roster_only` means this member may only deal with the room's own
   // members — and until S1.1b there was no roster, so this branch was NEVER WRITTEN. Not
   // dead code, not a branch that always passed: absent, with a comment holding its place.
   // The field sat in both mandate documents claiming a restriction nothing could enforce,
@@ -142,6 +145,20 @@ export function evaluate(
     if (!roomRoster.includes(member)) {
       return { decision: 'BLOCK', reason_code: 'ROSTER_VIOLATION', required_signer: null, ...base };
     }
+  }
+
+  // 4. (S2.1) replay protection — `if replayed(nonce, resource_hash) return BLOCK`.
+
+  // 5. Protected actions pause for a human. The signer comes from the mandate's own
+  // co_sign block, never from a default: `by: "principal"` resolves to the mandate's
+  // principal, which is the person who granted the authority in the first place.
+  if (m.protected_actions.includes(action.type)) {
+    return {
+      decision: 'CO_SIGN',
+      reason_code: 'PROTECTED_ACTION',
+      required_signer: m.co_sign.by === 'principal' ? m.principal : m.co_sign.by,
+      ...base,
+    };
   }
 
   // 6. (S2.7) limits — needs per-day usage counters.

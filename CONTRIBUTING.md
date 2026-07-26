@@ -11,6 +11,27 @@ advice — it is how the repo stays trustworthy from commit one.
   hand-editing, the slice was shaped wrong.
 - **In-hook green commits — never bypass with `--no-verify`.** The pre-commit hook runs
   `pnpm verify`; a red tree does not get committed.
+
+  **The hook has one blind spot, and it has cost a broken commit.** `pnpm verify` reads the
+  **working tree**, not the index. So `git add <subset>` followed by a commit proves nothing
+  about the commit: the hook happily verifies changes you did not stage. S1.1b shipped a
+  commit whose migration added a member while the test asserting the old member count stayed
+  in the _next_ commit — verify was green locally and CI failed on that commit in isolation.
+
+  If you stage a subset, verify what you actually staged:
+
+  ```bash
+  git stash -k          # set the unstaged changes aside
+  pnpm verify           # now verifying the staged tree
+  git stash pop         # and put them back
+  ```
+
+  Or check the commits afterwards, which is what caught it:
+
+  ```bash
+  for c in $(git rev-list HEAD~3..HEAD); do git checkout -q $c && pnpm verify || echo "$c RED"; done
+  ```
+
 - **Typecheck coverage is total — `tsc -b` sees every `.ts`/`.tsx`, tests included.** App
   code, packages, and test suites are all reachable from the root `tsconfig.json`
   references. A source area the root build can't reach (a new app, a test tree outside a

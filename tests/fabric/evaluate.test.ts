@@ -388,9 +388,40 @@ describe('counterparties — roster_only', () => {
     expect(v.reason_code).toBe('ALLOWED_IN_SCOPE');
   });
 
-  it('is checked AFTER scope — an unknown action is unknown wherever it is asked', () => {
-    // Order matters and it is the Bible's. A member outside the room asking for something
-    // they were never granted should hear the more fundamental refusal.
+  it('is checked BEFORE protected actions — standing before the request (RA-007)', () => {
+    // THIS TEST PREVIOUSLY ASSERTED THE OPPOSITE, and it was encoding a bug rather than a
+    // behaviour. Bible §9.2 put `counterparties` at 5, behind `protected_actions` at 4, so a
+    // protected action requested for a member who is NOT in the room returned CO_SIGN — the
+    // system asking a human to sign for an absent member, on the DECISION card, which is the
+    // surface carrying the most credibility in the product. Fail-closed, and the wrong
+    // question. Logged as S11b-N1 by the version of this test that documented it; ruled on by
+    // the owner and amended in RA-007.
+    //
+    // THE PRINCIPLE, not the line: establish standing before evaluating the request. Expiry,
+    // scope and roster answer "may this member act here at all"; protection and limits answer
+    // "what does this particular action need". Never ask a human to approve something that
+    // should have been refused outright — which is the same reasoning that already put scope
+    // ahead of protected (case 11 above).
+    const m = loaded({ scope: ['pr.review', 'pr.comment', 'pr.merge'] });
+    const merge = { type: 'pr.merge', resource: 'repo:x#1' };
+
+    // In the room: the protected action still pauses for a human, exactly as the film shows.
+    const inRoom = evaluate(merge, 'claude-main', m, NOW, ['claude-main', 'prince']);
+    expect(inRoom.decision).toBe('CO_SIGN');
+    expect(inRoom.reason_code).toBe('PROTECTED_ACTION');
+    expect(inRoom.required_signer).toBe('principal:prince');
+
+    // NOT in the room: refused outright, and NO signer is named — nobody is asked to sign
+    // for a member who is not there.
+    const outOfRoom = evaluate(merge, 'claude-main', m, NOW, ['sol']);
+    expect(outOfRoom.decision).toBe('BLOCK');
+    expect(outOfRoom.reason_code).toBe('ROSTER_VIOLATION');
+    expect(outOfRoom.required_signer).toBeNull();
+  });
+
+  it('still lets the more fundamental refusal win — scope outranks roster', () => {
+    // Standing questions are ordered among themselves too: an action the mandate never
+    // granted is out of scope wherever it is asked from.
     const v = evaluate(
       { type: 'totally.made.up', resource: 'repo:x#1' },
       'claude-main',
@@ -399,31 +430,6 @@ describe('counterparties — roster_only', () => {
       ['sol'],
     );
     expect(v.reason_code).toBe('OUT_OF_SCOPE');
-  });
-
-  it('is checked AFTER protected actions, per the Bible order — and that has a consequence', () => {
-    // Bible §9.2 numbers the branches: 1 expiry, 2 scope, 3 replay, 4 protected,
-    // 5 counterparties, 6 limits. The order is the Bible's and this file does not reorder it.
-    //
-    // THE CONSEQUENCE, ASSERTED RATHER THAN LEFT TO BE DISCOVERED: a protected action asked
-    // under a member who is NOT in the room returns CO_SIGN, not ROSTER_VIOLATION. A human is
-    // invited to sign for a member who is not even in the room. It stays fail-closed — nothing
-    // executes without that signature — but it asks the wrong question first, and the roster
-    // refusal is the more fundamental one.
-    //
-    // Recorded as S11b-N1 rather than fixed here: reordering the Bible's evaluation sequence
-    // is an owner ruling, not an implementation detail. The same reasoning that put scope
-    // before protected — so an ungranted protected action is BLOCK and not CO_SIGN — argues
-    // for putting the roster check before it too.
-    const m = loaded({ scope: ['pr.review', 'pr.comment', 'pr.merge'] });
-    const merge = { type: 'pr.merge', resource: 'repo:x#1' };
-    expect(evaluate(merge, 'claude-main', m, NOW, ['claude-main']).reason_code).toBe(
-      'PROTECTED_ACTION',
-    );
-    expect(evaluate(merge, 'claude-main', m, NOW, ['sol']).reason_code).toBe('PROTECTED_ACTION');
-
-    // Where the roster refusal DOES win: in scope, and not protected.
-    expect(evaluate(review, 'claude-main', m, NOW, ['sol']).reason_code).toBe('ROSTER_VIOLATION');
   });
 
   it('is SKIPPED when the caller has no room context, rather than inventing a verdict', () => {
