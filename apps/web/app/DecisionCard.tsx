@@ -6,12 +6,24 @@ import type { RosterMember } from './roster';
 // stopped, who attempted it, why it was stopped, and who has to sign.
 //
 // ITS ONLY INPUT IS A `decision` EVENT FROM THE LOG. There is no prop for "show a
-// pretend one", no default payload, and no branch that fabricates a field. The api
-// does not emit `decision` yet — S2.1 decides and S2.2 signs — so today this card
-// cannot appear in a real room at all, and that is correct. A surface that can
-// display a block the fabric did not produce is the one thing this slice may not
-// ship. The fixture route at /dev/decision-card exists so the layout can be
+// pretend one", no default payload, and no branch that fabricates a field. A surface
+// that can display a block the fabric did not produce is the one thing this slice may
+// not ship. The fixture route at /dev/decision-card exists so the layout can be
 // iterated without inventing an event in a room; it is dev-only and never filmed.
+//
+// The api DOES emit `decision` now — M-3's commands/requestAction.ts is the only
+// construction site, and S0.6 filmed this card rendering from a real row in a real room.
+// (This comment previously said the card "cannot appear in a real room at all", which
+// stopped being true the moment requestAction landed. Corrected here rather than left to
+// mislead the next reader of the file that renders the film's central claim.)
+//
+// FINDING S06-N3, not fixed here: "Attempted by" asserts agency the product does not
+// have. Nothing lets an agent initiate a structured action — `AgentTurnChunk` is
+// text_delta | done | error, with no tool-call channel — so the request is always issued
+// ON a member's behalf by a caller. The evaluation is real and server-side; the intent is
+// not demonstrated. See docs/demo/p0-claims.md, which tells anyone cutting the film not
+// to narrate it as an attempt. Trigger: the slice that gives adapters tool calls (S1.3's
+// handoff object), which is the first point at which the label could become true.
 //
 // Approve / deny are DISABLED and labelled S2.2. They are not wired to anything and
 // must not be: acting on a decision is the co-sign flow, and pretending to sign one
