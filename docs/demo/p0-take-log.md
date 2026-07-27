@@ -216,3 +216,32 @@ Warm-up 762ms (database 104ms, claude-main 228ms, sol 760ms). Beat 1 opened with
 `269→191 tok · $0.00122` for Claude, `299→265 tok · $0.0002` for Sol — the same prompt as S1.3b, so
 the difference is the models answering at different lengths, which is what two takes of one script
 look like. No selector edited; the handshake changed underneath and the hooks did not move.
+
+### S1.4 — the 2× recapture — 27 Jul 2026
+
+| take   | scale | resolution | clip   | size  | fps  | sha256 (first 16)  | frames | note                     |
+| ------ | ----- | ---------- | ------ | ----- | ---- | ------------------ | ------ | ------------------------ |
+| 10     | 1×    | 1280×800   | 56.64s | 3941K | 25.0 | `157c44ac108fae27` | 3/3    | previous asset, retained |
+| **12** | 2×    | 2560×1600  | 55.64s | 6069K | 25.0 | `87e72a36792b9635` | 3/3    | **THE P0 ASSET**         |
+
+**Supersampled, not upscaled.** `deviceScaleFactor: 2` renders the page at 2560×1600 into the same
+1280×800 CSS viewport and records at that size, so every glyph is drawn with four times the pixels
+and captured as drawn. That is capturing higher. Enlarging the 1× clip afterwards would invent
+pixels that were never rendered, and this film's value is a mandate hash, exact token counts and a
+reason code that a viewer is invited to READ.
+
+**No AI upscaling and no frame interpolation, ever.** Anything that resynthesizes pixels can alter
+a character, and a hash smoothed into a different hash turns the proof shot into a fake-looking
+proof shot. The one thing worse than a soft frame is a sharp frame that is wrong. Written at the
+capture options so the next person reaching for a "make it crisper" filter reads the reason first.
+
+**It cost nothing but bytes.** 25.0 fps effective at both scales — 1391 packets over 55.64s at 2×,
+1416 over 56.64s at 1× — so no frames were dropped and there is no stutter to report. The clip is
+54% larger. The one-second difference is the models answering at slightly different lengths, which
+is what two takes of one script look like.
+
+Warm-up 1796ms (claude-main cold at 1795ms, which the warm-up exists to absorb — beat one still
+opened with no stall). `269→176 tok · $0.00115` for Claude, `299→272 tok · $0.00021` for Sol. Five
+beats; no beat was added for interrupts. No selector edited.
+
+Take 10 is retained as the 1× fallback, per the rule that nothing is deleted.

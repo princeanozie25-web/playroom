@@ -12,7 +12,9 @@ the DECISION card has exactly one possible input, `appendAgentEvent` will not co
 without a summon, the co-sign buttons are inert by construction. A caption can undo all of
 it in ninety seconds, and no test will catch that.
 
-Recorded take: **take 10**, 56.64s, five beats, one continuous take, production build — re-shot
+Recorded take: **take 12**, 55.64s, five beats, one continuous take, production build, captured
+at 2× device scale (2560×1600, supersampled — never upscaled). Take 10 is the retained 1× fallback.
+Re-shot
 after S1.3c on 27 Jul 2026, through a front door that checks room membership and a socket that
 authenticates with a single-use ticket. **Take 11 is a six-beat variant** (61.60s) that adds the handoff; it is
 kept and it is not the asset, because the sixth beat costs 8.8 seconds and the only way to fit it
