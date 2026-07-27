@@ -26,7 +26,7 @@ import { appendTaskEvent } from './events.js';
  */
 
 /** The four states, as a type. Adding one is a decision at this line and at migration 011. */
-export type TaskState = 'working' | 'input-required' | 'held' | 'done';
+export type TaskState = 'submitted' | 'working' | 'input-required' | 'held' | 'done';
 
 export interface TaskRow {
   id: string;
@@ -172,6 +172,44 @@ export async function transitionTask(
 }
 
 /**
+ * Move a task to another member — Bible §21.3, and the record S13-3 requires.
+ *
+ * Event first, row second, like every other transition here.
+ *
+ * THE STATE BECOMES `submitted`: received and not started. A handoff does not trigger a turn (an
+ * agent cannot ask for work, and a handoff is not a summon), so `working` would be the room
+ * claiming activity it does not have — see migration 012, which is where the state arrives.
+ *
+ * `mandateHash` is the RECEIVER's, resolved by the caller from the receiver's own mandate. There
+ * is no parameter here for the sender's authority, and there must never be one: a handoff
+ * narrows or refuses, it never widens.
+ */
+export async function handoffTask(
+  pool: Pool,
+  task: TaskRow,
+  move: { toMember: string; action: string; mandateHash: string | null; actorId: string },
+): Promise<ServerEvent> {
+  const event = await appendTaskEvent(pool, task.room_id, move.actorId, task.id, 'task.handoff', {
+    task_id: task.id,
+    from_member: task.assignee_member_id,
+    to_member: move.toMember,
+    action: move.action,
+    mandate_hash: move.mandateHash,
+    state: 'submitted',
+  });
+  await pool.query(
+    `UPDATE tasks SET assignee_member_id = $1, action = $2, state = 'submitted', updated_at = now()
+      WHERE id = $3`,
+    [move.toMember, move.action, task.id],
+  );
+  // The caller's copy is a projection too — keep it from being read as the pre-move truth.
+  task.assignee_member_id = move.toMember;
+  task.action = move.action;
+  task.state = 'submitted';
+  return event;
+}
+
+/**
  * Fold a task's events into the state they imply.
  *
  * THE FUNCTION THAT MAKES "THE LOG IS THE SOURCE OF TRUTH" A STATEMENT ABOUT CODE. If this
@@ -185,7 +223,11 @@ export async function transitionTask(
 export function rebuild(events: readonly ServerEvent[]): TaskState | null {
   let state: TaskState | null = null;
   for (const ev of events) {
-    if (ev.event_type === 'task.created' || ev.event_type === 'task.state') {
+    if (
+      ev.event_type === 'task.created' ||
+      ev.event_type === 'task.state' ||
+      ev.event_type === 'task.handoff'
+    ) {
       state = ev.payload.state as TaskState;
     }
   }

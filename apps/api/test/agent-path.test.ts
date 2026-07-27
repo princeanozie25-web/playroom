@@ -119,12 +119,18 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     expect(dispatchers).toEqual(['commands/summon.ts']);
   });
 
-  it('NO CLIENT FRAME can start a turn — the wire admits exactly two', () => {
+  it('NO CLIENT FRAME can start a turn — the wire admits exactly three', () => {
     // Read off the schema at runtime rather than grepped, so this cannot pass against a stale
-    // build or a comment. A third frame type makes this test fail, which is the point: adding
-    // one is then a decision about the activation boundary rather than an addition to a union.
+    // build or a comment. A new frame type makes this test fail, which is the point: adding one
+    // is then a decision about the activation boundary rather than an addition to a union.
+    //
+    // IT FIRED. S1.3 added `handoff` and this line failed, which is exactly the conversation the
+    // assertion exists to force: does a handoff start a turn? It does NOT — see the case below,
+    // and commands/handoff.ts, which says why. An agent cannot ask for work (there is no
+    // tool-call channel), so a transfer that triggered a turn would be the first path where
+    // something other than a human summon put an agent to work.
     const types = ClientFrame.options.map((o) => o.shape.type.value).sort();
-    expect(types).toEqual(['request_action', 'send']);
+    expect(types).toEqual(['handoff', 'request_action', 'send']);
   });
 });
 
@@ -165,6 +171,39 @@ describe('and it holds against a client that tries', () => {
     const { rows } = await pool.query<{ n: string }>(
       `SELECT count(*) AS n FROM events
         WHERE room_id = $1 AND (event_type LIKE 'agent.turn.%' OR event_type = 'summon')`,
+      [id],
+    );
+    expect(Number(rows[0].n)).toBe(0);
+    c.close();
+  });
+
+  it('a HANDOFF moves work and starts NO TURN — the new frame does not open the path', async () => {
+    // The substantive half of the assertion above. A handoff changes who holds a task; it does
+    // not put anyone to work, because being given work and being asked to do it are different
+    // events and only the second one is a summon. If this ever changes, every agent turn tracing
+    // to a human summon stops being true — and that invariant is asserted globally, over the
+    // whole database, in summon-provenance.
+    const id = room('handoff-no-turn');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
+    await c.open();
+    c.send('@claude take a first look', 'h-1');
+    await c.waitForType('agent.turn.completed');
+
+    const { rows: taskRows } = await pool.query<{ id: string }>(
+      'SELECT id FROM tasks WHERE room_id = $1',
+      [id],
+    );
+    const before = c.ofType('agent.turn.started').length;
+    c.handoff(taskRows[0].id, 'sol', 'pr.review');
+    await c.waitForType('task.handoff');
+    await new Promise((r) => setTimeout(r, 1200)); // long enough for a turn to have started
+
+    expect(c.ofType('agent.turn.started')).toHaveLength(before);
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM events
+        WHERE room_id = $1 AND event_type IN ('summon', 'agent.turn.started')
+          AND seq > (SELECT MIN(seq) FROM events WHERE room_id = $1 AND event_type = 'task.handoff')`,
       [id],
     );
     expect(Number(rows[0].n)).toBe(0);

@@ -487,6 +487,38 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
               );
               return;
             }
+            if (msg.type === 'handoff') {
+              // A TASK TRANSFER — Bible §21.3. The actor is the authenticated member, which is
+              // the field that makes this a record of a delegation rather than a state change
+              // nobody is accountable for.
+              const result = await executeCommand(
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+                {
+                  kind: 'handoff',
+                  roomId,
+                  taskId: msg.task_id,
+                  toMember: msg.to_member,
+                  action: msg.action,
+                },
+                deps,
+              );
+              // REFUSED TO THE CALLER, in the same shape as every other refusal: typed frame,
+              // its own code, a sentence naming the constraint. The socket stays open — this is
+              // one request refused, not an identity problem.
+              if (!result.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: result.refusal.code,
+                      message: result.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
+              return;
+            }
             // THE STAMPED ACTOR, not a claim from the frame.
             await executeCommand(
               { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },

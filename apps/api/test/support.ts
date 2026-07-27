@@ -235,6 +235,24 @@ export class Client {
     this.ws.send(JSON.stringify({ type: 'send', client_msg_id: clientMsgId, body }));
   }
 
+  /**
+   * Hand a task to another member (S1.3).
+   *
+   * The frame a host sidecar sends. There is no UI for it — the composer only sends chat — so
+   * this is the same standing-in the film's harness does for `request_action`.
+   */
+  handoff(taskId: string, toMember: string, action: string, clientMsgId = `ho-${taskId}`): void {
+    this.ws.send(
+      JSON.stringify({
+        type: 'handoff',
+        client_msg_id: clientMsgId,
+        task_id: taskId,
+        to_member: toMember,
+        action,
+      }),
+    );
+  }
+
   seqs(): number[] {
     return this.events.map((e) => e.seq);
   }

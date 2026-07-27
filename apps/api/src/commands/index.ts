@@ -11,6 +11,7 @@ import { createRoomCommand } from './createRoom.js';
 import { postMessageCommand } from './postMessage.js';
 import { summonCommand } from './summon.js';
 import { triggerAgentTurnCommand } from './triggerAgentTurn.js';
+import { handoffCommand, type HandoffResult } from './handoff.js';
 import { requestActionCommand } from './requestAction.js';
 
 export * from './context.js';
@@ -56,6 +57,11 @@ export function executeCommand(
 ): Promise<void>;
 export function executeCommand(
   ctx: CommandContext,
+  command: { kind: 'handoff'; roomId: string; taskId: string; toMember: string; action: string },
+  deps: CommandDeps,
+): Promise<HandoffResult>;
+export function executeCommand(
+  ctx: CommandContext,
   command: {
     kind: 'requestAction';
     roomId: string;
@@ -89,6 +95,8 @@ export function executeCommand(
       return summonCommand(deps, ctx, command);
     case 'triggerAgentTurn':
       return triggerAgentTurnCommand(deps, ctx, command);
+    case 'handoff':
+      return handoffCommand(deps, ctx, command);
     case 'requestAction':
       return requestActionCommand(deps, ctx, command);
   }

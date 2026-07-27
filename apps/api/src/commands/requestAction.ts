@@ -1,6 +1,9 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { evaluate, loadMandates, type LoadedMandate } from '@playroom/fabric';
+import { evaluate } from '@playroom/fabric';
+// The process-wide mandate cache, shared with the handoff and the turn stamp (S1.3). It used to
+// live here as a module-local `let`, which meant every new reader grew its own.
+import { mandateFor } from '../mandates.js';
 import { appendDecision } from '../events.js';
 import { listRoomMembers } from '../members.js';
 import type { CommandContext, CommandDeps } from './context.js';
@@ -17,15 +20,6 @@ import type { CommandContext, CommandDeps } from './context.js';
 // Bible §8: no commitment-bearing action reaches an external system without traversing
 // the fabric. Bible §9.2: every outcome is audited with the mandate hash.
 // ============================================================================
-
-// Mandates are loaded once per process and cached, exactly like the adapter registry.
-// Reloading per evaluation would put file I/O inside the §11 <10 ms budget for no gain:
-// mandates are code (Bible §9.5) and change by deploy, not at runtime.
-let cache: Map<string, LoadedMandate> | undefined;
-function mandateFor(member: string): LoadedMandate | undefined {
-  const loaded = (cache ??= loadMandates());
-  return loaded.get(member);
-}
 
 function argumentsHash(args: Record<string, unknown>): string {
   const canonical = JSON.stringify(args, Object.keys(args).sort());

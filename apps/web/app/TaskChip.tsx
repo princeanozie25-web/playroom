@@ -19,6 +19,10 @@ import { HOOK, pr } from './hooks';
 
 /** The four states, as words a person would use. Unknown states render verbatim. */
 const STATE_WORDS: Record<string, string> = {
+  // Received and not started. `assigned` rather than `submitted`, because the state name is
+  // A2A's vocabulary and this is a sentence in a room — and because nothing is queued anywhere,
+  // which is what `submitted` would suggest to a reader who knows the spec.
+  submitted: 'assigned',
   working: 'working',
   'input-required': 'needs input',
   held: 'held',

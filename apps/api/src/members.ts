@@ -148,6 +148,25 @@ export async function listRoomMembers(pool: Pool, roomId: string): Promise<Membe
 }
 
 /**
+ * One member row, or null.
+ *
+ * The `kind` is what callers need: a handoff checks a mandate only for an AGENT, because mandates
+ * bind agents to the principals who grant them and a human acts as a principal rather than under
+ * one. Narrow on purpose — `listMembers` runs every mandate validation to build its shape, which
+ * is the wrong cost for a one-field question.
+ */
+export async function memberRecord(
+  pool: Pool,
+  id: string,
+): Promise<{ id: string; kind: 'human' | 'agent'; display_name: string } | null> {
+  const { rows } = await pool.query<{ id: string; kind: 'human' | 'agent'; display_name: string }>(
+    'SELECT id, kind, display_name FROM members WHERE id = $1',
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+/**
  * Is this member in this room?
  *
  * One indexed read against `room_members`' primary key. Deliberately NOT expressed as

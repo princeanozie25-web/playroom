@@ -53,8 +53,44 @@ export const ClientRequestAction = z.object({
 });
 export type ClientRequestAction = z.infer<typeof ClientRequestAction>;
 
+/**
+ * Client → server: hand a task to another member — Bible §21.3.
+ *
+ * "@Sol take review" is a TASK TRANSFER, not a mention, and this is the frame that carries it.
+ * No UI sends one yet: like `request_action`, this is the wire contract a host sidecar speaks,
+ * and the composer only sends chat. The film's harness stands in for the sidecar exactly as it
+ * does for beat 5.
+ *
+ * ── `action` IS REQUIRED, AND THAT IS THE POINT ──
+ *
+ * A handoff must say WHAT WORK is being handed over, because the receiving member's mandate is
+ * checked against it. Optional, it would make that check vacuous for every task created by
+ * tagging a member in chat (whose action is null), and the refusal "their mandate does not admit
+ * this work" would quietly never fire.
+ *
+ * ── A HANDOFF CONFERS NO AUTHORITY ──
+ *
+ * The receiving member acts under THEIR OWN mandate. Nothing in this frame can widen it, and
+ * there is deliberately no field that could: no scope, no mandate reference, no signer. In most
+ * systems delegation passes permissions along; here it must not, and the absence of a field is
+ * the strongest way to say so. See commands/handoff.ts.
+ */
+export const ClientHandoff = z.object({
+  type: z.literal('handoff'),
+  client_msg_id: z.string().min(1),
+  task_id: z.string().min(1),
+  to_member: z.string().min(1),
+  /** The work being handed over, as an action type. Checked against the RECEIVER's mandate. */
+  action: z.string().min(1),
+});
+export type ClientHandoff = z.infer<typeof ClientHandoff>;
+
 /** Every frame a client may send. Parsed as a union; an unknown `type` is dropped. */
-export const ClientFrame = z.discriminatedUnion('type', [ClientSend, ClientRequestAction]);
+export const ClientFrame = z.discriminatedUnion('type', [
+  ClientSend,
+  ClientRequestAction,
+  ClientHandoff,
+]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
 // Server → client: a persisted event, replayed on resume and tailed live.
@@ -258,6 +294,39 @@ export const TaskStateEvent = z.object({
 });
 export type TaskStateEvent = z.infer<typeof TaskStateEvent>;
 
+/**
+ * A task moved from one member to another — Bible §21.3's exit criterion, as a record.
+ *
+ * "moves the task with state and mandate reference, logged" is this event: `from_member` and
+ * `to_member` are the move, `state` is where the task now stands, `mandate_hash` is the document
+ * the RECEIVING member acts under, and `actor_id` on the event is the authenticated member who
+ * performed the transfer.
+ *
+ * THE ACTOR IS THE ADDITION THAT CLOSES S12-N2. Bible §21.3 names state, mandate reference and
+ * logging; it does not name who did it. Without that, a task could move and nothing would record
+ * which member decided it should — and the whole reason a handoff exists in this slice is to be
+ * the record that makes acting-for-another legitimate. A record of a delegation that cannot say
+ * who delegated is not a record of a delegation.
+ *
+ * `mandate_hash` identifies WHICH document was in force. It does not prove anyone authorised it —
+ * the mandate is still an unsigned file (S04-N2), and S2.1 is what changes that.
+ */
+export const TaskHandoffEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('task.handoff'),
+  payload: z.object({
+    task_id: z.string(),
+    from_member: z.string(),
+    to_member: z.string(),
+    /** The work handed over. Never null on a handoff — a transfer must say what it transfers. */
+    action: z.string(),
+    /** The receiving member's mandate, by hash. Null only if they hold none. */
+    mandate_hash: z.string().nullable(),
+    state: z.string(),
+  }),
+});
+export type TaskHandoffEvent = z.infer<typeof TaskHandoffEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -268,6 +337,7 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   DecisionEvent,
   TaskCreatedEvent,
   TaskStateEvent,
+  TaskHandoffEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;
@@ -304,6 +374,22 @@ export const ERROR_CREDENTIAL_REQUIRED = 'credential_required';
 export const ERROR_CREDENTIAL_INVALID = 'credential_invalid';
 /** The bytes were not JSON. A broken client or a corrupted frame, not a rejected request. */
 export const ERROR_FRAME_MALFORMED = 'frame_malformed';
+/**
+ * THE FOUR HANDOFF REFUSALS, kept apart because they are four different mistakes.
+ *
+ * Collapsing them into one "handoff refused" would be correct and useless — the standing rule
+ * since `NOT_IN_ROOM` was split from `UNKNOWN_MEMBER`: a refusal that does not say which
+ * constraint failed sends someone to check the wrong thing.
+ */
+/** No such task in this room. A client bug, or a task id from another room. */
+export const ERROR_UNKNOWN_TASK = 'unknown_task';
+/** The caller is neither the task's creator nor the member currently holding it. */
+export const ERROR_NOT_YOUR_TASK = 'not_your_task';
+/** One of the two members is not in this room — the roster rule (§9.2 counterparties). */
+export const ERROR_HANDOFF_ROSTER = 'handoff_roster_violation';
+/** The receiving member's mandate does not admit the work. They would BLOCK on arrival. */
+export const ERROR_HANDOFF_MANDATE = 'handoff_mandate_does_not_admit';
+
 /**
  * Valid JSON, and not a frame this server accepts.
  *

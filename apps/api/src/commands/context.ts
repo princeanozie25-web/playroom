@@ -42,6 +42,9 @@ export type Command =
       taskId: string;
       spans?: TurnSpans;
     }
+  // Hand a task to another member (S1.3). Returns a refusal rather than throwing: four
+  // preconditions, four reasons, and the caller turns them into typed frames.
+  | { kind: 'handoff'; roomId: string; taskId: string; toMember: string; action: string }
   // A governed action request. Traverses the mandate evaluator; nothing executes.
   | {
       kind: 'requestAction';

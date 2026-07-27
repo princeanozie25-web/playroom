@@ -97,6 +97,17 @@ function buildItems(events: ServerEvent[]): Item[] {
         view.state = ev.payload.state;
         view.assignee = ev.payload.assignee;
       }
+    } else if (ev.event_type === 'task.handoff') {
+      // THE CHIP MOVES. Same chip, new holder — the transfer is a change to the work, not a
+      // second piece of work, and the log keeps every previous holder.
+      const view = tasks.get(ev.payload.task_id);
+      if (view) {
+        view.state = ev.payload.state;
+        view.assignee = ev.payload.to_member;
+        view.action = ev.payload.action;
+        view.mandate_hash = ev.payload.mandate_hash;
+        view.handed_by = ev.actor_id;
+      }
     } else if (ev.event_type === 'agent.turn.started') {
       const turn: AgentItem = {
         kind: 'agent',

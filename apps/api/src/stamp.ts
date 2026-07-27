@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { loadMandates } from '@playroom/fabric';
+import { mandateFor } from './mandates.js';
 
 /**
  * THE STAMP A TURN CARRIES — Bible §4.1, §8.1.
@@ -58,6 +58,9 @@ export async function stampFor(pool: Pool, memberId: string): Promise<MemberStam
   return {
     member_id: memberId,
     principal_id: row.principal_id,
-    mandate_hash: loadMandates().get(memberId)?.hash ?? null,
+    // Through the shared cache. This called `loadMandates()` directly until S1.3, re-reading the
+    // mandate directory from disk on EVERY TURN — invisible next to provider latency, and wrong
+    // for the same reason a per-request `readFileSync` is always wrong.
+    mandate_hash: mandateFor(memberId)?.hash ?? null,
   };
 }
