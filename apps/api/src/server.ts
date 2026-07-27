@@ -28,6 +28,7 @@ import { warmUp } from './warmup.js';
 import { authenticate, type AuthFailure } from './credentials.js';
 import { downgradeInterrupt } from './interrupts.js';
 import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
+import { RedeemRefused, redeemRoomCode } from './room-codes.js';
 import { listMembers, listRoomMembers, roomAccess } from './members.js';
 import { setKnownMemberTokens } from './agent.js';
 
@@ -374,6 +375,59 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         'ticket issued',
       );
       return issued;
+    });
+
+    // POST /redeem → a room code becomes a credential and a seat.
+    //
+    // ── THE ONLY UNAUTHENTICATED WRITE IN THE API, AND THAT IS THE POINT ──
+    //
+    // RT-002 closed the last one in S1.3c by putting `POST /rooms` behind a credential, and this
+    // deliberately opens a new one — because it is the endpoint whose entire job is to give a
+    // credential to someone who has none. A code cannot be redeemed into anything but a guest seat
+    // (`mintRoomCode` refuses a non-guest principal), it is single-use, it expires, and it grants
+    // membership of exactly the one room it was minted for.
+    //
+    // ONE REFUSAL OUTWARD. Wrong code, expired code and already-spent code are all 404 with the
+    // same body: distinguishing them tells someone holding a guessed string that they guessed a
+    // real one. The operator's version is in the log line and in the row.
+    //
+    // NOT RATE LIMITED, AND THAT IS A GAP. A four-character code from a 30-character alphabet is
+    // ~810,000 possibilities and nothing here slows a script down. Logged as a finding rather than
+    // half-solved: the mitigations that matter today are that a hit costs the attacker a seat which
+    // then visibly cannot be claimed, only two seats exist, and this is not yet on a public URL.
+    fastify.post('/redeem', async (req, reply) => {
+      const body = (req.body ?? {}) as { code?: unknown; display_name?: unknown };
+      if (typeof body.code !== 'string' || typeof body.display_name !== 'string') {
+        reply.code(400);
+        return { error: 'code and display_name are required' };
+      }
+      try {
+        const redemption = await redeemRoomCode(db(), body.code, body.display_name);
+        app.log.info(
+          {
+            room_id: redemption.room_id,
+            member: redemption.member_id,
+            agent: redemption.agent_id,
+            expires_at: redemption.expires_at,
+          },
+          'room code redeemed',
+        );
+        // The plaintext credential, once. The caller is the web tier's BFF, which puts it straight
+        // into an httpOnly cookie — it is NOT logged, for the same reason a ticket is not.
+        return redemption;
+      } catch (err) {
+        if (err instanceof RedeemRefused) {
+          app.log.warn({ reason: err.reason }, 'room code refused');
+          reply.code(err.reason === 'name_required' ? 400 : 404);
+          return {
+            error:
+              err.reason === 'name_required'
+                ? 'a name is required'
+                : 'that code does not work — check it with whoever sent it',
+          };
+        }
+        throw err;
+      }
     });
 
     // POST /internal/warmup → pay the cold connection costs now, and report what it cost.

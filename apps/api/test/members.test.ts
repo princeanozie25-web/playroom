@@ -62,12 +62,19 @@ describe('listMembers', () => {
       // an enumeration is what catches a roster changing by ACCIDENT, so replacing it with
       // "there are some agents" would delete the check to accommodate a deliberate change.
       // Ordinals 2 and 3 exhaust the four-hue accent palette — see migration 017.
+      //
+      // `principal_name` IS OMITTED FOR THESE TWO, AND ONLY THESE TWO. A guest principal's display
+      // name is USER DATA: redemption replaces it with the tester's own name, which is the whole
+      // point of a seat. Pinning it here would assert that no guest has ever redeemed, which is not
+      // an invariant of the roster — it is a fact about the database's current occupancy, and it
+      // made this test fail two files after `room-codes.test.ts` renamed a seat. Claude's and Sol's
+      // names stay pinned because those are fixed.
       {
         id: 'ada',
         kind: 'agent',
         display_name: 'Ada',
         principal_id: 'principal:guest-a',
-        principal_name: 'Guest A',
+        principal_name: expect.any(String),
         principal_ordinal: 2,
         adapter_id: 'ada',
         scope: ['pr.review', 'pr.comment', 'pr.merge'],
@@ -78,7 +85,7 @@ describe('listMembers', () => {
         kind: 'agent',
         display_name: 'Bo',
         principal_id: 'principal:guest-b',
-        principal_name: 'Guest B',
+        principal_name: expect.any(String),
         principal_ordinal: 3,
         adapter_id: 'bo',
         scope: ['pr.review', 'pr.comment', 'pr.merge'],

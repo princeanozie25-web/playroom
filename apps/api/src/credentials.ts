@@ -1,5 +1,16 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+
+/**
+ * A pool OR a client inside a transaction.
+ *
+ * `redeemRoomCode` issues a credential as one of six writes that must all land together, so it needs
+ * to issue on ITS client rather than on the pool — a credential committed by a separate connection
+ * would survive a rolled-back enrolment, leaving a live secret for a room the holder is not in.
+ * Widening the parameter is the honest way to allow that; the alternative was casting a client to a
+ * Pool at the call site, which compiles by asserting something untrue.
+ */
+export type Queryable = Pick<Pool, 'query'> | Pick<PoolClient, 'query'>;
 
 /**
  * MEMBER CREDENTIALS — the smallest thing that makes `speaks for` true rather than asserted.
@@ -68,14 +79,14 @@ export interface IssuedCredential {
  * default here that would silently expire the harness mid-take.
  */
 export async function issueCredential(
-  pool: Pool,
+  db: Queryable,
   memberId: string,
   label: string,
   expiresInHours?: number,
 ): Promise<IssuedCredential> {
   const token = `${TOKEN_PREFIX}${randomBytes(32).toString('hex')}`;
   const id = `cred_${randomBytes(8).toString('hex')}`;
-  const { rows } = await pool.query<{ expires_at: Date | null }>(
+  const { rows } = await db.query<{ expires_at: Date | null }>(
     `INSERT INTO member_credentials (id, member_id, token_hash, label, expires_at)
      VALUES ($1, $2, $3, $4, CASE WHEN $5::numeric IS NULL THEN NULL
                                   ELSE now() + ($5::numeric * interval '1 hour') END)
