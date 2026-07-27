@@ -358,6 +358,42 @@ export async function appendTaskEvent(
   return rowToServerEvent(rows[0]);
 }
 
+/**
+ * Append an interrupt event — `interrupt.raised`, `interrupt.downgraded`.
+ *
+ * No `interrupt_id` COLUMN, unlike `task_id`. The question a task column answers is "everything
+ * that ever happened to this task", including its turns and its summon — rows written by other
+ * paths. An interrupt history is only its own two event types, so a payload filter answers it
+ * without widening the table for one reader.
+ */
+export async function appendInterruptEvent(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  eventType: 'interrupt.raised' | 'interrupt.downgraded',
+  payload: unknown,
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, $3, $4)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, eventType, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+/** Every event written about one interrupt, in order. */
+export async function eventsForInterrupt(pool: Pool, interruptId: string): Promise<ServerEvent[]> {
+  const { rows } = await pool.query<EventRow>(
+    `SELECT ${EVENT_COLS} FROM events
+      WHERE event_type IN ('interrupt.raised', 'interrupt.downgraded')
+        AND payload ->> 'interrupt_id' = $1
+      ORDER BY seq`,
+    [interruptId],
+  );
+  return rows.map(rowToServerEvent);
+}
+
 /** Every event ever written against a task, in order. The history the row is a projection of. */
 export async function eventsForTask(pool: Pool, taskId: string): Promise<ServerEvent[]> {
   const { rows } = await pool.query<EventRow>(

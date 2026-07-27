@@ -167,6 +167,37 @@ export async function memberRecord(
 }
 
 /**
+ * The HUMAN members of a principal, in this room.
+ *
+ * A co-signature is required from a PRINCIPAL (`required_signer` is `principal:prince`), and an
+ * interrupt is addressed to a MEMBER — so the two are bridged here, and the bridge is where the
+ * inherited constraint lives.
+ *
+ * RETURNS A LIST, and the caller raises one interrupt per member in it. Today `principal:prince`
+ * has exactly one human member, so the list has one entry and the film shows one interrupt. When a
+ * second human joins that principal this returns two and the co-sign path raises two — no schema
+ * change and no reshaped record, because nothing assumed one human per principal.
+ *
+ * HUMANS ONLY. An interrupt addressed to an agent would be a notification nothing reads: an agent
+ * acts when summoned and has no inbox, so a claim on its attention is a row with no reader.
+ */
+export async function humanMembersOfPrincipal(
+  pool: Pool,
+  roomId: string,
+  principalId: string,
+): Promise<string[]> {
+  const { rows } = await pool.query<{ id: string }>(
+    `SELECT m.id
+       FROM members AS m
+       JOIN room_members AS rm ON rm.member_id = m.id AND rm.room_id = $1
+      WHERE m.principal_id = $2 AND m.kind = 'human'
+      ORDER BY m.id`,
+    [roomId, principalId],
+  );
+  return rows.map((r) => r.id);
+}
+
+/**
  * CAN THIS MEMBER SEE THIS ROOM? Existence and membership, in ONE query.
  *
  * One round trip rather than two, and that is not an optimisation — it is what makes the two

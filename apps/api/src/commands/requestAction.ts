@@ -1,12 +1,13 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { evaluate } from '@playroom/fabric';
-import { ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
+import { ERROR_INTERRUPT_BUDGET, ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
 // The process-wide mandate cache, shared with the handoff and the turn stamp (S1.3). It used to
 // live here as a module-local `let`, which meant every new reader grew its own.
 import { mandateFor } from '../mandates.js';
 import { appendDecision } from '../events.js';
-import { listRoomMembers } from '../members.js';
+import { humanMembersOfPrincipal, listRoomMembers } from '../members.js';
+import { raiseInterrupt } from '../interrupts.js';
 import { subjectBasis } from '../tasks.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
@@ -158,5 +159,59 @@ export async function requestActionCommand(
 
   // §12 ordering law: persisted before it fans out.
   deps.bus.publish(input.roomId, event);
+
+  // ── A CO_SIGN IS AN INTERRUPT (Bible §12.1) ─────────────────────────────────────────
+  //
+  // "Co-sign requests always arrive as an interrupt." A decision awaiting a signature is a claim
+  // on a specific person's attention by definition — so it goes through THE INTERRUPT RECORD
+  // rather than a parallel notification concept. Two records for one fact would drift, and the
+  // second one would be the one nobody budgeted.
+  //
+  // WHO IS CHARGED: the SUBJECT, whose mandate needs the signature. The work is theirs, so the
+  // claim their work makes on a person is theirs to fund — and it is the answer that makes
+  // `interrupts_per_day` mean something, since the subject is the member the limit belongs to.
+  //
+  // WHO IS ADDRESSED: the human members of the required PRINCIPAL, one interrupt each. A
+  // principal is not a person and may have several members; resolving it here is what keeps the
+  // record member-addressed without assuming one human sits behind it.
+  //
+  // A BUDGET REFUSAL DOES NOT UNDO THE DECISION. The evaluation happened, the card is real, and
+  // the room shows it — what fails is the claim on someone's attention, which is logged and left
+  // for the next raise. Rolling the decision back because a notification was too expensive would
+  // be the tail wagging the dog.
+  if (verdict.decision === 'CO_SIGN' && verdict.required_signer) {
+    for (const human of await humanMembersOfPrincipal(
+      deps.pool,
+      input.roomId,
+      verdict.required_signer,
+    )) {
+      const raised = await raiseInterrupt(deps.pool, {
+        roomId: input.roomId,
+        urgency: 'DECISION',
+        raisedBy: input.subject,
+        addressedTo: human,
+        aboutKind: 'decision',
+        aboutId: event.event_type === 'decision' ? event.payload.decision_id : input.clientMsgId,
+        summary: `${input.action} needs a signature`,
+      });
+      if (!raised.ok) {
+        deps.log.warn(
+          {
+            room_id: input.roomId,
+            raised_by: input.subject,
+            addressed_to: human,
+            spent: raised.budget.spent,
+            limit: raised.budget.limit,
+            code: ERROR_INTERRUPT_BUDGET,
+          },
+          'interrupt refused: no budget left today',
+        );
+        continue;
+      }
+      if (raised.event) deps.bus.publish(input.roomId, raised.event);
+      if (raised.halt) deps.bus.publish(input.roomId, raised.halt);
+    }
+  }
+
   return { ok: true };
 }

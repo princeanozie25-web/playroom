@@ -12,6 +12,7 @@ import {
   ERROR_FRAME_UNRECOGNISED,
   ERROR_TICKET_REQUIRED,
   ERROR_TICKET_INVALID,
+  ERROR_DOWNGRADE_REFUSED,
   WS_CLOSE_ROOM_NOT_FOUND,
   WS_CLOSE_UNAUTHENTICATED,
   type AgentAdapter,
@@ -25,6 +26,7 @@ import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
 import { authenticate, type AuthFailure } from './credentials.js';
+import { downgradeInterrupt } from './interrupts.js';
 import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
 import { listMembers, listRoomMembers, roomAccess } from './members.js';
 import { setKnownMemberTokens } from './agent.js';
@@ -707,6 +709,35 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
                   ),
                 );
               }
+              return;
+            }
+            if (msg.type === 'downgrade') {
+              // ONE TAP, and it costs the raiser (Bible §21.3). The actor is the authenticated
+              // member, which is also the authorisation: only the member an interrupt is
+              // ADDRESSED TO may lower its claim on them.
+              const result = await downgradeInterrupt(db(), msg.interrupt_id, actor.member_id);
+              if (!result.ok) {
+                app.log.warn(
+                  { room_id: roomId, member: actor.member_id, reason: result.failure },
+                  'downgrade refused',
+                );
+                // ONE REFUSAL FOR THREE REASONS. Unknown, not-yours and already-lowest are told
+                // apart in the log and not to the caller: distinguishing them would say whether
+                // an interrupt exists and who it is addressed to, which is a claim about someone
+                // else's attention that a stranger has no business reading.
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: ERROR_DOWNGRADE_REFUSED,
+                      message: 'that interrupt cannot be lowered',
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+                return;
+              }
+              bus.publish(roomId, result.event);
               return;
             }
             // THE STAMPED ACTOR, not a claim from the frame.

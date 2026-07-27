@@ -85,11 +85,29 @@ export const ClientHandoff = z.object({
 });
 export type ClientHandoff = z.infer<typeof ClientHandoff>;
 
+/**
+ * Client → server: lower an interrupt's claim on you by one step (Bible §21.3's one tap).
+ *
+ * THE ONLY INTERRUPT FRAME. There is no raise frame, because nothing a client can do today raises
+ * an interrupt — the co-sign path does, server-side, from a decision the fabric produced. Adding
+ * a raise frame now would be a surface with no caller, and the first thing to reach for the day an
+ * agent gets a tool-call channel, which is the wrong reason to have built it.
+ *
+ * And there is no upgrade frame, deliberately. See `InterruptDowngradedEvent`.
+ */
+export const ClientDowngrade = z.object({
+  type: z.literal('downgrade'),
+  client_msg_id: z.string().min(1),
+  interrupt_id: z.string().min(1),
+});
+export type ClientDowngrade = z.infer<typeof ClientDowngrade>;
+
 /** Every frame a client may send. Parsed as a union; an unknown `type` is dropped. */
 export const ClientFrame = z.discriminatedUnion('type', [
   ClientSend,
   ClientRequestAction,
   ClientHandoff,
+  ClientDowngrade,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
@@ -342,6 +360,55 @@ export const TaskHandoffEvent = z.object({
 });
 export type TaskHandoffEvent = z.infer<typeof TaskHandoffEvent>;
 
+/**
+ * SOMETHING CLAIMS A MEMBER'S ATTENTION — Bible §21.3, §12.1.
+ *
+ * `raised_by` and `addressed_to` are MEMBERS, never people. Per-human identity does not exist
+ * (S04-N2) and this slice does not invent it: a record naming a person would have to be reshaped
+ * the day a second human appears behind a principal, and a record naming a member does not.
+ *
+ * `urgency` is an open string like every other taxonomy here, and the three values differ in
+ * BEHAVIOUR: BLOCKER halts the owning task, DECISION queues, FYI never interrupts.
+ */
+export const InterruptRaisedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('interrupt.raised'),
+  payload: z.object({
+    interrupt_id: z.string(),
+    urgency: z.string(),
+    raised_by: z.string(),
+    addressed_to: z.string(),
+    about_kind: z.string(),
+    about_id: z.string(),
+    /** The sentence the room shows. Written by the raiser, never assembled by the reader. */
+    summary: z.string(),
+  }),
+});
+export type InterruptRaisedEvent = z.infer<typeof InterruptRaisedEvent>;
+
+/**
+ * The recipient lowered the claim, and the RAISER paid for it.
+ *
+ * `raised_by` is carried on the downgrade as well as the raise, so the budget can be counted from
+ * the log without a join — and so the record says, in one row, who was charged.
+ *
+ * There is no `interrupt.upgraded`. A recipient may lower a claim on their attention; nobody may
+ * raise it after the fact, because a second attempt that cost nothing would make the budget a
+ * suggestion.
+ */
+export const InterruptDowngradedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('interrupt.downgraded'),
+  payload: z.object({
+    interrupt_id: z.string(),
+    urgency: z.string(),
+    from_urgency: z.string(),
+    raised_by: z.string(),
+    addressed_to: z.string(),
+  }),
+});
+export type InterruptDowngradedEvent = z.infer<typeof InterruptDowngradedEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -353,6 +420,8 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   TaskCreatedEvent,
   TaskStateEvent,
   TaskHandoffEvent,
+  InterruptRaisedEvent,
+  InterruptDowngradedEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;
@@ -402,6 +471,17 @@ export const ERROR_TICKET_REQUIRED = 'ticket_required';
  * ticket ever existed. The log names the reason; S1.3b's ruling, applied one layer in.
  */
 export const ERROR_TICKET_INVALID = 'ticket_invalid';
+
+/**
+ * The raising member has no interrupt budget left today — `limits.interrupts_per_day` (S1.4).
+ *
+ * ITS OWN CODE, because an exhausted budget is not an out-of-scope action and must not be reported
+ * as one: the member may do this, and has done it too often. Reporting it as OUT_OF_SCOPE would
+ * send someone to edit a mandate scope when the answer is to wait for tomorrow or to raise less.
+ */
+export const ERROR_INTERRUPT_BUDGET = 'interrupt_budget_exhausted';
+/** A downgrade names an interrupt that is not there, is not yours, or is already at the floor. */
+export const ERROR_DOWNGRADE_REFUSED = 'downgrade_refused';
 
 /** The bytes were not JSON. A broken client or a corrupted frame, not a rejected request. */
 export const ERROR_FRAME_MALFORMED = 'frame_malformed';

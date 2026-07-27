@@ -119,7 +119,7 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     expect(dispatchers).toEqual(['commands/summon.ts']);
   });
 
-  it('NO CLIENT FRAME can start a turn — the wire admits exactly three', () => {
+  it('NO CLIENT FRAME can start a turn — the wire admits exactly four', () => {
     // Read off the schema at runtime rather than grepped, so this cannot pass against a stale
     // build or a comment. A new frame type makes this test fail, which is the point: adding one
     // is then a decision about the activation boundary rather than an addition to a union.
@@ -129,8 +129,13 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     // and commands/handoff.ts, which says why. An agent cannot ask for work (there is no
     // tool-call channel), so a transfer that triggered a turn would be the first path where
     // something other than a human summon put an agent to work.
+    //
+    // IT FIRED AGAIN in S1.4, for `downgrade`, and the answer is the same shape as the handoff's:
+    // lowering an interrupt's claim on your attention changes what a member is ASKED to notice,
+    // never what an agent is asked to DO. It cannot summon, and the case below asserts that
+    // rather than trusting the argument.
     const types = ClientFrame.options.map((o) => o.shape.type.value).sort();
-    expect(types).toEqual(['handoff', 'request_action', 'send']);
+    expect(types).toEqual(['downgrade', 'handoff', 'request_action', 'send']);
   });
 });
 
