@@ -105,9 +105,11 @@ not.**
 **S06-N3 is closed, and the underlying limit is not.** The take 6 card read
 **"ATTEMPTED BY Claude"**, which asserted intent the product cannot produce, and this
 document had to spend a paragraph telling an editor to narrate against the screen. UI2-4
-replaced it: the card now reads **"Requested under Claude's mandate."** — true, because the
-request named Claude as its subject and was evaluated against Claude's mandate, and it
-claims nothing about intent. The film harness asserts the word "attempted" appears nowhere
+replaced it with **"Requested under Claude's mandate."** — true, because the request named
+Claude as its subject and was evaluated against Claude's mandate, and it claims nothing about
+intent. S1.3 added the half that was missing: the card now names the requester too,
+**"Requested by Prince under Claude's mandate."**, because the attribution is finally backed by
+a record rather than by the caller's word. The film harness asserts the word "attempted" appears nowhere
 on the card, so it cannot return.
 
 That fixed the WORDING. It did not give any agent the ability to request anything, and this
@@ -128,17 +130,24 @@ screen may be described as _signed_, _notarised_, _tamper-evident_, or _provable
 afterwards_. The event log is append-only Postgres with a monotonic sequence — good, and not
 a chain. S2.3.
 
-**5. The requester is authenticated; the SUBJECT is still a claim.** S1.2 closed half of this.
-The frame arrives on a socket that presented a credential, so the caller is a known member —
-in the film, the harness authenticates as `prince` exactly as a host sidecar would.
+**5. Both parties are now grounded; WHICH task the request is about is not.** S1.2 proved who
+asked. S1.3 grounds the attribution: `request_action` is refused unless a RECORD entitles the
+requester to name that subject — a task they delegated to that member, a handoff they performed
+to them, or acting as themselves. S12-N2 is closed, and the card's sentence changed to match:
+it reads **"Requested by Prince under Claude's mandate."** Both halves are in the record the
+card renders from, so the sentence is one a reader can check.
 
-**The subject it names is not verified.** `request_action` names `claude-main`, and **any
-authenticated member may name any other member as the subject**. The evaluator's verdict is
-sound for the subject it was given — the mandate evaluated is genuinely Claude's — but nothing
-establishes that the requester was entitled to speak for Claude, so the card's sentence
-_Requested under Claude's mandate_ does not prove Claude asked. Deliberate for now: a host
-sidecar legitimately asks on its member's behalf, which is this beat's whole shape. What is
-missing is a delegation record. S12-N2, trigger **S1.3**.
+**What is still unproven, and it is narrower than what it replaced.** The record is
+EXISTENTIAL, not specific: it establishes that Prince delegated work to Claude in this room, not
+that THIS merge request is the work he delegated. Standing does not expire either — a task
+delegated once justifies requests under that member's mandate for as long as the room exists. A
+caption may say _the request is grounded in a delegation on the record_; it may not say _Claude
+was asked to merge this_. Tightening it means the request naming its task, which is S13-N1 with
+**S2.2** as its trigger, because a co-signature has to reference a task anyway.
+
+And the deeper limit under this beat has not moved: **the request is still issued on Claude's
+behalf by a caller**, because no adapter can carry a tool call. Grounding who may ask on whose
+behalf is not the same as an agent asking, and beat 5's caption still may not imply the second.
 
 ---
 
@@ -160,7 +169,7 @@ Other wordings to avoid across the whole cut:
 | "the mandate is authorised", "signed authority" | the mandate is an unsigned file; the hash proves which document, not who granted it (S2.1)   | "the mandate that was evaluated is recorded by hash"                             |
 | "Claude requested the merge"                    | the requester is authenticated, the subject it names is not (S12-N2)                         | "a merge was requested under Claude's mandate"                                   |
 | "the agent was blocked from merging"            | the agent never requested it, and could not                                                  | "a merge request against that member's mandate is refused"                       |
-| "the card shows Claude attempted a merge"       | the card has not said that since UI2-4, and it was never true                                | "the card shows what was requested under Claude's mandate"                       |
+| "the card shows Claude attempted a merge"       | the card has not said that since UI2-4, and it was never true                                | "the card shows who requested what, and under whose mandate"                     |
 | "approve it here"                               | the buttons are inert and labelled S2.2                                                      | "the co-signature step lands in S2.2"                                            |
 | "agents can't be tricked"                       | quoted and imported content still activates (RT-004, S1.7)                                   | "an agent's own output cannot summon another agent"                              |
 | "isolated context per principal"                | one shared 30-message window today (S1.5)                                                    | "one shared room context"                                                        |
@@ -183,10 +192,11 @@ is an owner decision and is recorded here as the open item, not resolved.
 
 ## Findings raised by this slice
 
-| id         | finding                                                                                                                                                                                                                                                                                                 | trigger                                                                                                                                         |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| S06-N1     | the capture harness's selectors rotted silently when S-UI rewrote the room — three stale selectors matched nothing rather than failing, and it lives outside CI                                                                                                                                         | the next UI change to the room, or the next slice that films it                                                                                 |
-| S06-N2     | the room header renders the room **id**; the room's `title` is rendered nowhere, so every frame carries a slug                                                                                                                                                                                          | **S1.1**, when rooms acquire real membership and a name worth showing                                                                           |
-| ~~S06-N3~~ | **CLOSED in UI2-4** — the card's "Attempted by" asserted agency the product does not have; it now reads "requested under … 's mandate". The LIMIT it described is unchanged and is stated in beat 5 above                                                                                               | closed as a wording defect. The limit itself lifts only when adapters carry tool calls (S1.3's handoff object), and beat 5's claim changes then |
-| S12-N2     | `request_action`'s **subject** is a claim: any authenticated member may name any other member, so the card can read _requested under Claude's mandate_ for a request Claude never made. The verdict is still sound and authority cannot be escalated — the subject's own mandate is what gets evaluated | **S1.3**, whose handoff object is the first reason to express delegation                                                                        |
-| S06-N4     | **Bible §11 has no budget row for opening a room** — which is where the database wake now lands (ADR-008) and where a pilot's first action of the day pays it. The film's beat one opened in 454ms only because the harness warmed first; there is no written budget it could have breached             | **S1.1**, when rooms acquire real membership                                                                                                    |
+| id         | finding                                                                                                                                                                                                                                                                                                                                                     | trigger                                                                                                                                         |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| S06-N1     | the capture harness's selectors rotted silently when S-UI rewrote the room — three stale selectors matched nothing rather than failing, and it lives outside CI                                                                                                                                                                                             | the next UI change to the room, or the next slice that films it                                                                                 |
+| S06-N2     | the room header renders the room **id**; the room's `title` is rendered nowhere, so every frame carries a slug                                                                                                                                                                                                                                              | **S1.1**, when rooms acquire real membership and a name worth showing                                                                           |
+| ~~S06-N3~~ | **CLOSED in UI2-4** — the card's "Attempted by" asserted agency the product does not have; it now reads "requested under … 's mandate". The LIMIT it described is unchanged and is stated in beat 5 above                                                                                                                                                   | closed as a wording defect. The limit itself lifts only when adapters carry tool calls (S1.3's handoff object), and beat 5's claim changes then |
+| ~~S12-N2~~ | **CLOSED in S1.3.** A governed request is refused unless a record — a delegated task, a handoff, or acting as oneself — entitles the requester to name that subject. It also closed a hole wider than the finding said: `subject` was never checked to be a MEMBER, so a caller could name a string that referred to nobody and get a decision row about it | closed. The remaining looseness is S13-N1                                                                                                       |
+| S13-N1     | the delegation record is **existential, not specific**: it establishes that the requester delegated work to that member in this room, not that THIS request is that work — and standing never expires. `request_action` naming its task is the tighter form                                                                                                 | **S2.2**, whose co-signature has to reference a task anyway                                                                                     |
+| S06-N4     | **Bible §11 has no budget row for opening a room** — which is where the database wake now lands (ADR-008) and where a pilot's first action of the day pays it. The film's beat one opened in 454ms only because the harness warmed first; there is no written budget it could have breached                                                                 | **S1.1**, when rooms acquire real membership                                                                                                    |

@@ -130,6 +130,8 @@ describe('barrier 1 — model-generated text never activates', () => {
       payload: {
         decision_id: 'd',
         subject: 'claude-main',
+        requested_by: 'prince',
+        subject_basis: 'delegated_task',
         principal: 'principal:prince',
         action: '@sol',
         resource: 'repo:x#1',

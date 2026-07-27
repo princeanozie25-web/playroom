@@ -152,7 +152,7 @@ describe('and it holds against a client that tries', () => {
       }),
     );
     const refusal = await c.waitForError((e) => e.code === 'frame_unrecognised');
-    expect(refusal.message).toMatch(/only `send` and `request_action`/);
+    expect(refusal.message).toMatch(/only `send`, `request_action` and `handoff`/);
 
     // Not JSON at all is the OTHER mistake and gets the other code — the same rule that keeps
     // `credential_required` apart from `credential_invalid`.

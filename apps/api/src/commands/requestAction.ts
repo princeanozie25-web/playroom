@@ -1,11 +1,13 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { evaluate } from '@playroom/fabric';
+import { ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
 // The process-wide mandate cache, shared with the handoff and the turn stamp (S1.3). It used to
 // live here as a module-local `let`, which meant every new reader grew its own.
 import { mandateFor } from '../mandates.js';
 import { appendDecision } from '../events.js';
 import { listRoomMembers } from '../members.js';
+import { subjectBasis } from '../tasks.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // ============================================================================
@@ -38,11 +40,53 @@ function argumentsHash(args: Record<string, unknown>): string {
  * CO_SIGN PAUSES AND STAYS PAUSED. Completing a co-signature is S2.2; nothing here
  * resumes anything.
  */
+export type RequestActionResult =
+  { ok: true } | { ok: false; refusal: { code: string; message: string } };
+
 export async function requestActionCommand(
   deps: CommandDeps,
   ctx: CommandContext,
   input: { roomId: string; clientMsgId: string; subject: string; action: string; resource: string },
-): Promise<void> {
+): Promise<RequestActionResult> {
+  // ── THE SUBJECT MUST BE JUSTIFIED, NOT ASSERTED (S12-N2, closed) ──────────────────────
+  //
+  // Until S1.3 this field was the last claim on the wire. S1.2 deleted `author` and proved WHO
+  // ASKED; `subject` still let any authenticated member name any other — or any string at all,
+  // which is worse than the finding recorded: `decision.test.ts` has a passing case with
+  // `nobody-in-particular` as the subject. The verdict was always sound for the subject it was
+  // given, and the room still implied that member had asked.
+  //
+  // The fix is not a rule about names. It is a RECORD: a task the requester delegated to that
+  // member, a handoff they performed to them, or the requester acting as themselves. That record
+  // is what S13-1 and S13-2 exist to create, which is why the handoff was built first.
+  //
+  // CHECKED BEFORE THE EVALUATOR RUNS — standing before the request (RA-007). A caller with no
+  // standing must not learn what another member's mandate contains, and asking whether Sol's
+  // mandate admits an action is meaningless if the caller had no right to ask under it.
+  const basis = await subjectBasis(deps.pool, input.roomId, ctx.actorId, input.subject);
+  if (!basis) {
+    deps.log.warn(
+      {
+        room_id: input.roomId,
+        subject: input.subject,
+        requested_by: ctx.actorId,
+        action: input.action,
+        code: ERROR_SUBJECT_NOT_JUSTIFIED,
+      },
+      'request refused: no record entitles this member to act for that subject',
+    );
+    // NO DECISION EVENT. The fabric evaluated nothing, because the room refused the ATTRIBUTION
+    // — and a BLOCK card reading "requested under Sol's mandate" would repeat the claim being
+    // rejected. The card either says something true or it does not appear.
+    return {
+      ok: false,
+      refusal: {
+        code: ERROR_SUBJECT_NOT_JUSTIFIED,
+        message: `no record entitles ${ctx.actorId} to request under ${input.subject}'s mandate — delegate a task or hand one over first`,
+      },
+    };
+  }
+
   // The room's roster, for the `counterparties` branch. Read BEFORE the timer starts: the
   // §11 budget is on the evaluation, which is pure and measured in microseconds, and folding
   // a database round trip into that number would make the budget meaningless.
@@ -71,6 +115,7 @@ export async function requestActionCommand(
     requested_by: ctx.actorId,
     action: input.action,
     resource: input.resource,
+    subject_basis: basis,
     decision: verdict.decision,
     reason_code: verdict.reason_code,
     mandate_hash: verdict.effective_mandate_hash,
@@ -83,7 +128,7 @@ export async function requestActionCommand(
   // ALLOW is recorded in the log above and nothing else happens: there is no executor.
   // Deliberately NOT written as a decision event — the room log would fill with
   // approvals for actions that never ran, which reads as work having happened.
-  if (verdict.decision === 'ALLOW') return;
+  if (verdict.decision === 'ALLOW') return { ok: true };
 
   // THE EVENT'S ACTOR IS THE REQUESTER, NOT THE SUBJECT.
   //
@@ -96,6 +141,10 @@ export async function requestActionCommand(
   const event = await appendDecision(deps.pool, input.roomId, ctx.actorId, {
     decision_id: `dec_${randomUUID().replace(/-/g, '').slice(0, 16)}`,
     subject: input.subject,
+    // BOTH HALVES, in the payload rather than only in the envelope: whose mandate was evaluated,
+    // and who asked. The card can now say a true sentence instead of an ambiguous one.
+    requested_by: ctx.actorId,
+    subject_basis: basis,
     principal: mandate?.mandate.principal ?? 'unknown',
     action: input.action,
     resource: input.resource,
@@ -109,4 +158,5 @@ export async function requestActionCommand(
 
   // §12 ordering law: persisted before it fans out.
   deps.bus.publish(input.roomId, event);
+  return { ok: true };
 }

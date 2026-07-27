@@ -58,6 +58,10 @@ export function DecisionCard({
 }) {
   const p = event.payload;
   const subject = roster.find((m) => m.id === p.subject);
+  // The requester, if they are in the roster. `MemberName` renders a human without an accent and
+  // with a different marker shape, so "who asked" and "under whose mandate" are distinguishable
+  // by looking rather than by reading the words between them.
+  const requester = roster.find((m) => m.id === p.requested_by);
   // A principal renders as a NAME. Absent from config, it renders nothing at all rather than
   // falling back to `principal:prince` — an internal identifier in front of a viewer is the
   // same category error `mandate_label` was.
@@ -76,8 +80,16 @@ export function DecisionCard({
       {/* Sentences a person would say, not a form. The uppercase grey field labels —
           ATTEMPTED BY / STOPPED BECAUSE / REQUIRES / UNDER MANDATE — were what made this
           read as a database row with a border. */}
+      {/* THE SENTENCE THE RECORD NOW SUPPORTS (S1.3).
+          It read "Requested under Claude's mandate." — true about the mandate, silent about who
+          asked, and S12-N2 meant the room could not have said more honestly: any authenticated
+          member could name any other as the subject. Both halves are proven now — the requester
+          by their credential (S1.2), the attribution by a task or handoff record (S13-3) — so the
+          card names both. A decision event whose subject nothing justifies does not exist: the
+          request is refused before the evaluator runs. */}
       <p className="decision-line">
-        Requested under <MemberName member={subject} name={p.subject} />
+        Requested by <MemberName member={requester} name={p.requested_by} /> under{' '}
+        <MemberName member={subject} name={p.subject} />
         {"'s mandate."}
       </p>
 

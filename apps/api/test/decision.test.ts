@@ -1,7 +1,14 @@
 import { describe, expect, it, afterAll } from 'vitest';
 import { Writable } from 'node:stream';
 import { DecisionEvent } from '@playroom/shared';
-import { startTestServer, testPool, uniqueRoomId, httpCreateRoom, Client } from './support.js';
+import {
+  startTestServer,
+  testPool,
+  uniqueRoomId,
+  httpCreateRoom,
+  delegateTask,
+  Client,
+} from './support.js';
 
 // The producer. A member requesting `pr.merge` must produce a CO_SIGN decision event
 // carrying the reason code, the required signer and the mandate hash — and the S-UI
@@ -11,6 +18,12 @@ import { startTestServer, testPool, uniqueRoomId, httpCreateRoom, Client } from 
 // ASSERT THE MECHANISM, NEVER THE OUTCOME. "No merge happened" is not a test: it
 // passes if the mandate refused, if the handler threw, or if the socket died. Every
 // assertion below names the decision.
+//
+// EVERY CASE HERE NOW DELEGATES A TASK FIRST, and that is not scaffolding — it is the
+// mechanism S1.3 added. `subject` used to be a free field: these tests named `claude-main` and
+// the server evaluated its mandate on nothing but the caller's word (S12-N2). A governed request
+// now requires a record entitling the requester to act for that subject, so the tests establish
+// one, exactly as a room would.
 
 const pool = testPool();
 afterAll(async () => {
@@ -44,6 +57,7 @@ describe('mandate v0 — the producer', () => {
     const room = uniqueRoomId('decision-cosign');
     try {
       await httpCreateRoom(server.httpBase, room);
+      await delegateTask(pool, room, 'claude-main'); // standing, per S1.3
       const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
@@ -84,6 +98,7 @@ describe('mandate v0 — the producer', () => {
     const room = uniqueRoomId('decision-unknown');
     try {
       await httpCreateRoom(server.httpBase, room);
+      await delegateTask(pool, room, 'claude-main'); // standing, per S1.3
       const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
@@ -107,6 +122,17 @@ describe('mandate v0 — the producer', () => {
   });
 
   it('a member with no mandate is BLOCKed with NO_MANDATE, not allowed through', async () => {
+    // THIS CASE'S SUBJECT CHANGED IN S1.3, and the reason is the finding it exposed. It used to
+    // name `nobody-in-particular` — a string that is not a member at all — which passed because
+    // `subject` was never checked to BE anyone. That was S12-N2 understated: the hole was not only
+    // that a member could name another member, it was that a member could name NOTHING and get a
+    // decision row about it. No record can entitle anyone to act for a name that refers to nobody,
+    // so that request is now refused before the evaluator (asserted in handoff.test.ts).
+    //
+    // The NO_MANDATE branch is still reachable, through the honest door: `prince` is a MEMBER and
+    // holds no mandate, because mandates bind agents to the principals who grant them and a human
+    // in their own room acts as a principal. A human asking to take a governed action themselves
+    // needs no standing record — `self` — and is BLOCKed for having no mandate at all.
     const server = await startTestServer();
     const room = uniqueRoomId('decision-nomandate');
     try {
@@ -117,7 +143,7 @@ describe('mandate v0 — the producer', () => {
         JSON.stringify({
           type: 'request_action',
           client_msg_id: 'm3-nomandate-1',
-          subject: 'nobody-in-particular',
+          subject: 'prince',
           action: 'pr.review',
           resource: 'repo:x#1',
         }),
@@ -127,6 +153,8 @@ describe('mandate v0 — the producer', () => {
       expect(ev.payload.decision).toBe('BLOCK');
       expect(ev.payload.reason_code).toBe('NO_MANDATE');
       expect(ev.payload.effective_mandate_hash).toBeNull();
+      // And the record says which door it came through.
+      expect(ev.payload.subject_basis).toBe('self');
       c.close();
     } finally {
       await server.close();
@@ -139,6 +167,7 @@ describe('mandate v0 — the producer', () => {
     const room = uniqueRoomId('decision-allow');
     try {
       await httpCreateRoom(server.httpBase, room);
+      await delegateTask(pool, room, 'claude-main'); // standing, per S1.3
       const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(

@@ -158,6 +158,8 @@ export async function appendMessage(
 export interface DecisionPayload {
   decision_id: string;
   subject: string;
+  requested_by: string;
+  subject_basis: string;
   principal: string;
   action: string;
   resource: string;

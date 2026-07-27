@@ -12,7 +12,7 @@ import { postMessageCommand } from './postMessage.js';
 import { summonCommand } from './summon.js';
 import { triggerAgentTurnCommand } from './triggerAgentTurn.js';
 import { handoffCommand, type HandoffResult } from './handoff.js';
-import { requestActionCommand } from './requestAction.js';
+import { requestActionCommand, type RequestActionResult } from './requestAction.js';
 
 export * from './context.js';
 
@@ -71,7 +71,7 @@ export function executeCommand(
     resource: string;
   },
   deps: CommandDeps,
-): Promise<void>;
+): Promise<RequestActionResult>;
 export function executeCommand(
   ctx: CommandContext,
   command: Command,

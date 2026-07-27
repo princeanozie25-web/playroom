@@ -210,6 +210,58 @@ export async function handoffTask(
 }
 
 /**
+ * WHAT RECORD, IF ANY, LETS `requester` NAME `subject` IN A GOVERNED REQUEST (S12-N2).
+ *
+ * Three answers, and every one of them is a row rather than a rule about names:
+ *
+ *   'self'           — the requester IS the subject. Nothing to justify.
+ *   'delegated_task' — the requester created a task the subject now holds. Asking under the
+ *                      mandate of a member you handed work to is what delegation means.
+ *   'handoff'        — the requester performed a handoff TO the subject. Same standing, arrived
+ *                      by the other path: a member who moved work to Sol may ask about it, even
+ *                      if someone else created the task.
+ *
+ * Null means NO RECORD JUSTIFIES IT, and the request must be refused before the evaluator is
+ * consulted — standing before the request (RA-007), which here also stops a caller with no
+ * standing from learning what another member's mandate contains.
+ *
+ * ── WHAT THIS DOES NOT DO ──
+ *
+ * It does not require the task to be OPEN, or the request to name which task it is about. So
+ * standing does not expire: a task delegated once justifies requests under that member's mandate
+ * for as long as the room exists. The tighter version is `request_action` carrying a `task_id`,
+ * which makes the justification exact rather than existential — recorded as S13-N1 rather than
+ * built here, because a co-sign flow (S2.2) is the first thing that needs to name a task anyway.
+ */
+export type SubjectBasis = 'self' | 'delegated_task' | 'handoff';
+
+export async function subjectBasis(
+  pool: Pool,
+  roomId: string,
+  requester: string,
+  subject: string,
+): Promise<SubjectBasis | null> {
+  if (requester === subject) return 'self';
+
+  const { rows } = await pool.query<{ delegated: boolean; handed: boolean }>(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM tasks
+          WHERE room_id = $1 AND created_by = $2 AND assignee_member_id = $3
+       ) AS delegated,
+       EXISTS (
+         SELECT 1 FROM events
+          WHERE room_id = $1 AND event_type = 'task.handoff'
+            AND actor_id = $2 AND payload ->> 'to_member' = $3
+       ) AS handed`,
+    [roomId, requester, subject],
+  );
+  if (rows[0].delegated) return 'delegated_task';
+  if (rows[0].handed) return 'handoff';
+  return null;
+}
+
+/**
  * Fold a task's events into the state they imply.
  *
  * THE FUNCTION THAT MAKES "THE LOG IS THE SOURCE OF TRUTH" A STATEMENT ABOUT CODE. If this

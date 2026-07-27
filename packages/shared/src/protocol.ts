@@ -178,7 +178,22 @@ export const DecisionEvent = z.object({
   event_type: z.literal('decision'),
   payload: z.object({
     decision_id: z.string(),
-    subject: z.string(), // the member the decision is about
+    subject: z.string(), // the member whose mandate was evaluated
+    /**
+     * THE AUTHENTICATED MEMBER WHO ASKED (S1.3).
+     *
+     * `actor_id` on the event has carried this since S1.2, and the payload says it too because a
+     * projection, a receipt or a host adapter reading the payload alone must not have to infer
+     * the requester from an envelope field. Both halves of §9.3's question — whose mandate was
+     * evaluated, and who asked — are now in the record the card renders from.
+     */
+    requested_by: z.string(),
+    /**
+     * WHICH RECORD entitled the requester to name that subject: `self`, `delegated_task` or
+     * `handoff`. Never null on a decision that exists — a request whose subject no record
+     * justifies is refused before the evaluator runs, so it produces no decision at all.
+     */
+    subject_basis: z.string(),
     principal: z.string(), // who that member speaks for
     action: z.string(), // e.g. "pr.merge"
     resource: z.string(), // e.g. "repo:playroom/playroom#pr-41"
@@ -389,6 +404,16 @@ export const ERROR_NOT_YOUR_TASK = 'not_your_task';
 export const ERROR_HANDOFF_ROSTER = 'handoff_roster_violation';
 /** The receiving member's mandate does not admit the work. They would BLOCK on arrival. */
 export const ERROR_HANDOFF_MANDATE = 'handoff_mandate_does_not_admit';
+
+/**
+ * The requester named a subject no record entitles them to name — S12-N2, closed.
+ *
+ * NOT a mandate verdict, and deliberately not written as a `decision` event: the fabric never
+ * evaluated anything, because the room refused the ATTRIBUTION. A BLOCK card reading "requested
+ * under Sol's mandate" would repeat the very claim being rejected, which is why this refusal
+ * travels to the caller and leaves the room's log alone.
+ */
+export const ERROR_SUBJECT_NOT_JUSTIFIED = 'subject_not_justified';
 
 /**
  * Valid JSON, and not a frame this server accepts.

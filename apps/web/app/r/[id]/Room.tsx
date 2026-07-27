@@ -149,9 +149,13 @@ function buildItems(events: ServerEvent[]): Item[] {
 function socketUrl(roomId: string, after: number, token: string): string {
   const base = API_URL.replace(/^http/, 'ws');
   // The credential travels in the query string because a browser cannot set headers on a
-  // WebSocket handshake. That puts it in the api's access log if one is ever enabled, which is
-  // recorded as S12-N2 rather than papered over — the fix is a subprotocol or a cookie, and
-  // both are more machinery than this slice should introduce.
+  // WebSocket handshake. That puts it in any api access log that is ever enabled, and in browser
+  // history — recorded as S13-N3, with a subprotocol or a short-lived ticket as the fix.
+  //
+  // THIS COMMENT CITED S12-N2 UNTIL S1.3, which is a different finding entirely (a governed
+  // request's subject being a claim). So the concern was documented at the code and recorded
+  // nowhere, under a label pointing at something else — the failure mode a ledger exists to
+  // prevent, committed in the same slice that built the ledger entry.
   return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}&token=${encodeURIComponent(token)}`;
 }
 

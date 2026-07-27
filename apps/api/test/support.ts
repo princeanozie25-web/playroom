@@ -13,6 +13,7 @@ import { loadRootEnv } from '../src/env.js';
 import { buildServer } from '../src/server.js';
 import { makePool } from '../src/db.js';
 import { issueCredential } from '../src/credentials.js';
+import { ensureTask, taskCreatedEvent } from '../src/tasks.js';
 
 loadRootEnv();
 
@@ -174,6 +175,37 @@ export async function httpCreateRoom(httpBase: string, id: string): Promise<Resp
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id, title: id }),
   });
+}
+
+/**
+ * Delegate a task to a member — the record that entitles a requester to name them as the subject
+ * of a governed action (S12-N2, closed in S1.3).
+ *
+ * Built through the PRODUCT's own functions, row and event both, so a test's standing comes from
+ * the same record the summon path writes. Inserting the row alone would create a task the log
+ * cannot rebuild, which is precisely the drift `tasks.test.ts` exists to catch.
+ *
+ * The alternative for a test that needs standing is to tag a member and wait for a real turn,
+ * which several suites do. This exists for the ones that must not: a suite with no injected
+ * adapter would reach live providers.
+ */
+export async function delegateTask(
+  pool: Pool,
+  roomId: string,
+  assignee: string,
+  createdBy = 'prince',
+): Promise<string> {
+  const { task, created } = await ensureTask(pool, {
+    roomId,
+    assignee,
+    state: 'working',
+    action: null,
+    intent: `standing for ${assignee}`,
+    createdBy,
+    causeSeq: 0,
+  });
+  if (created) await taskCreatedEvent(pool, task, createdBy);
+  return task.id;
 }
 
 // A ws test client. Frames are zod-parsed on receipt (never cast), matching the

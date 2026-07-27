@@ -164,17 +164,21 @@ function bearerToken(req: { headers: Record<string, unknown> }): string | undefi
 /**
  * The two send-path refusals.
  *
- * `ClientFrame` accepts `send` and `request_action`. THERE IS NO FRAME THAT STARTS AN AGENT
- * TURN, and this refusal is where that becomes observable rather than merely true: a caller
- * inventing one is told the frame is not recognised, instead of watching a socket stay silent
- * and having to guess whether the turn is coming.
+ * `ClientFrame` accepts `send`, `request_action` and `handoff`. THERE IS STILL NO FRAME THAT
+ * STARTS AN AGENT TURN, and this refusal is where that becomes observable rather than merely
+ * true: a caller inventing one is told the frame is not recognised, instead of watching a socket
+ * stay silent and having to guess whether the turn is coming.
+ *
+ * A handoff is not a counter-example. It moves who HOLDS work; being given work and being asked
+ * to do it are different events, and only the second one is a summon (agent-path.test.ts asserts
+ * that no turn follows a handoff).
  */
 function frameRefusal(unrecognised: boolean, roomId: string): ServerErrorFrame {
   return ServerErrorFrame.parse({
     type: 'error',
     code: unrecognised ? ERROR_FRAME_UNRECOGNISED : ERROR_FRAME_MALFORMED,
     message: unrecognised
-      ? 'that is not a frame this room accepts — only `send` and `request_action`'
+      ? 'that is not a frame this room accepts — only `send`, `request_action` and `handoff`'
       : 'that frame was not valid JSON',
     room_id: roomId,
   });
@@ -473,7 +477,7 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
               // THE REQUESTER is the authenticated member. `subject` stays a claim from the
               // frame — a host sidecar asks on its member's behalf, which is beat 5 of the
               // film — so the two are different parties and only one of them is proven.
-              await executeCommand(
+              const decided = await executeCommand(
                 { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
                 {
                   kind: 'requestAction',
@@ -485,6 +489,21 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
                 },
                 deps,
               );
+              // AN UNJUSTIFIED SUBJECT IS REFUSED TO THE CALLER and writes nothing to the room
+              // (S12-N2). Not a BLOCK card: the fabric evaluated nothing, and a card saying
+              // "requested under X's mandate" would repeat the claim being rejected.
+              if (!decided.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: decided.refusal.code,
+                      message: decided.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
               return;
             }
             if (msg.type === 'handoff') {

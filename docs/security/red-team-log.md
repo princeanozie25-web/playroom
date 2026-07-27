@@ -16,15 +16,18 @@ Severity is about the trust boundary, not user annoyance:
 - **medium** — a failure is detectable but not surfaced to the party who needs it.
 - **low** — hardening; no observable trust consequence yet.
 
-| id     | date        | severity | discovered by                     | principle violated                                                                                                          | disposition                              | commit    |
-| ------ | ----------- | -------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------- |
-| RT-001 | 25 Jul 2026 | high     | found during A4 automated capture | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one                         | fixed                                    | `161aa16` |
-| RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001      | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                             | accepted until **S1.1**                  | —         |
-| RT-003 | 26 Jul 2026 | high     | property test, S0.5a              | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                         | fixed                                    | `01ae2e8` |
-| RT-004 | 26 Jul 2026 | high     | S0.5b activation-boundary review  | model output is DATA; a summon token in generated text would convert injection into cross-principal action                  | guarded, one gap accepted until **S1.7** | `fe642c0` |
-| RT-005 | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b     | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member | fixed                                    | `7fc279a` |
-| M-N1   | 25 Jul 2026 | critical | logged at the mandate slice       | identity must be stamped by the boundary, not asserted by the caller; `actor_id` arrived from the wire as a free string     | fixed                                    | `7fc279a` |
-| S04-N2 | 25 Jul 2026 | high     | logged at the mandate slice       | a mandate is an unsigned file, so _this principal granted this authority_ is asserted by the document, not proven           | open, narrowed — trigger **S2.6**        | —         |
+| id     | date        | severity | discovered by                                 | principle violated                                                                                                                                | disposition                              | commit    |
+| ------ | ----------- | -------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------- |
+| RT-001 | 25 Jul 2026 | high     | found during A4 automated capture             | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one                                               | fixed                                    | `161aa16` |
+| RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001                  | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                                                   | accepted until **S1.1**                  | —         |
+| RT-003 | 26 Jul 2026 | high     | property test, S0.5a                          | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                                               | fixed                                    | `01ae2e8` |
+| RT-004 | 26 Jul 2026 | high     | S0.5b activation-boundary review              | model output is DATA; a summon token in generated text would convert injection into cross-principal action                                        | guarded, one gap accepted until **S1.7** | `fe642c0` |
+| RT-005 | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b                 | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member                       | fixed                                    | `7fc279a` |
+| M-N1   | 25 Jul 2026 | critical | logged at the mandate slice                   | identity must be stamped by the boundary, not asserted by the caller; `actor_id` arrived from the wire as a free string                           | fixed                                    | `7fc279a` |
+| S04-N2 | 25 Jul 2026 | high     | logged at the mandate slice                   | a mandate is an unsigned file, so _this principal granted this authority_ is asserted by the document, not proven                                 | open, narrowed — trigger **S2.6**        | —         |
+| S12-N2 | 26 Jul 2026 | medium   | S1.2 closeout, while writing the roster scope | a governed request's subject must be justified by a record, not asserted by the caller — and it was not even checked to be a member               | fixed                                    | `S13-3`   |
+| S13-N2 | 27 Jul 2026 | high     | S1.3 Phase 0, reading the handshake           | room membership is the product's boundary; the handshake checks that a room EXISTS, not that the caller is IN it                                  | accepted until the first pilot           | —         |
+| S13-N3 | 27 Jul 2026 | medium   | S1.3 Phase 0, reading Room.tsx                | a credential must not travel where logs collect it; the browser's token is in the WebSocket query string, and the code cited the wrong finding id | accepted until a proxy or access logging | —         |
 
 ## RT-001 — a refused write was indistinguishable from an accepted one
 
@@ -362,3 +365,111 @@ claim that cannot cause an effect outside the log is a claim about a picture, no
 **S2.6, the GitHub bridge, is still the slice that ends it.** The moment an `ALLOW` causes a comment
 to be posted or a branch to be pushed, an unproven mandate and an unverified subject stop being
 survivable. Whoever builds S2.6 must find this line before they merge it.
+
+---
+
+## What S1.3 closed, and what it found
+
+### CLOSED — S12-N2: `request_action`'s subject was a claim
+
+A governed request is now refused unless a RECORD entitles the requester to name that subject:
+
+| basis            | the record                                               |
+| ---------------- | -------------------------------------------------------- |
+| `self`           | the requester IS the subject — nothing to justify        |
+| `delegated_task` | the requester created a task the subject currently holds |
+| `handoff`        | the requester performed a handoff TO the subject         |
+
+**The fix is not a rule about names, it is a record** — which is why this slice built tasks and
+the handoff first and closed the finding third. A rule ("only name members you have worked with")
+would have been a policy invented in the same commit that enforces it; a task and a handoff are
+things the room already does, and the check reads them.
+
+**Checked before the evaluator runs** — standing before the request (RA-007). A caller with no
+standing must not learn what another member's mandate contains, and asking whether Sol's mandate
+admits an action is meaningless if the caller had no right to ask under it.
+
+**A refused request writes NOTHING to the room.** No `decision` event, deliberately: the fabric
+evaluated nothing, and a BLOCK card reading _requested under Sol's mandate_ would render the very
+claim being rejected. The refusal travels to the caller as a typed frame,
+`subject_not_justified`, with a sentence naming what to do instead.
+
+**And the hole was wider than the finding said.** `subject` was never checked to be a MEMBER at
+all: a caller could name any string and get a decision row about it. `decision.test.ts` had a
+PASSING case asserting exactly that — subject `nobody-in-particular`, verdict `NO_MANDATE` — which
+means the test suite documented the hole as a feature for two slices. That case now names `prince`,
+a real member who holds no mandate, which reaches the same branch through a door that exists.
+
+The decision event records **both parties and the basis**: `subject`, `requested_by`,
+`subject_basis`. The card reads _"Requested by Prince under Claude's mandate."_
+
+### NEW — S13-N1: the delegation record is existential, not specific
+
+The check establishes that the requester delegated work to that member **in this room**. It does
+not establish that THIS request is that work, and standing never expires: a task delegated once
+justifies requests under that member's mandate for as long as the room exists.
+
+Severity **low**. It cannot escalate authority — the subject's own mandate is still what gets
+evaluated, so the worst case is a request grounded in older work than the one it concerns. What
+closes it: `request_action` carrying a `task_id`, so the justification is exact.
+
+**Trigger: S2.2.** A co-signature has to reference the task it signs for anyway, so that slice is
+where the tighter shape stops being extra work.
+
+### NEW — S13-N2: any authenticated member may connect to any room and write to it
+
+Found while reading the handshake for this slice. The WebSocket handshake authenticates the
+credential and checks that the room EXISTS — it does not check that the member is IN the room.
+So an authenticated member can open a socket on any room id they can guess and post messages,
+summon agents, and hand tasks around inside it.
+
+The handoff refuses when either member is outside the room (S13-2), and `GET
+/rooms/:id/members` refuses a non-member (S1.2) — so the roster rule is enforced at two places
+and **not at the front door**. That is the inconsistency worth logging: the room's front door is
+the widest opening left.
+
+Severity **high**: it crosses a room boundary, which is the boundary the product sells. It is
+survivable today for the reasons RT-005's acceptance names — the api is not internet-exposed,
+there are three members and one deployment, and no ALLOW causes an external effect — and it is
+not survivable at a pilot.
+
+**Trigger: the first pilot, or exposing the api beyond localhost — whichever comes first.** The
+fix is small (`isRoomMember` at the handshake, refused with its own close code); it is logged
+rather than built because it is a fifth concern in a slice with four commits, and a membership
+refusal at the handshake needs its own decision about what a non-member is allowed to learn.
+
+### NEW — S13-N3: the browser's credential travels in the WebSocket query string
+
+`Room.tsx` puts the token in `?token=` because a browser cannot set headers on a WebSocket
+handshake. It is therefore written to any api access log that is ever enabled, and to browser
+history. The comment at that line cited **S12-N2**, which is a different finding entirely — so
+the concern was documented at the code and recorded nowhere, under a label that pointed at
+something else.
+
+Severity **medium**: it is a real credential in a real log line, mitigated only by there being no
+access log configured and no proxy in front of the api. HTTP callers already use
+`Authorization: Bearer` and the roster route refuses a token in the query string.
+
+**Trigger: the first deployment behind a proxy or with access logging, or the first non-localhost
+client.** The fix is a subprotocol-based handshake or a short-lived ticket exchanged for the
+socket — both more machinery than S1.2 should have introduced, which is why the comment was right
+to say so and wrong about which finding it was.
+
+### FIXED — S12-N3: test credentials accumulated
+
+479 active credentials for `prince` had piled up in the test database — one per `startTestServer`,
+never removed. `TestServer.close()` now deletes the credential it issued, and a test asserts the
+count is unchanged across three server lifecycles. Deleted rather than revoked: revocation is the
+product's rotation semantics, where the row survives as the record that the secret existed, and a
+test credential is the record of nothing.
+
+### CONFIRMED — RT-005's acceptance condition, again
+
+> **NO ALLOW CAUSES ANY EXTERNAL SIDE EFFECT ANYWHERE IN THE SYSTEM.**
+
+Still true after S1.3, and checked against this slice's additions rather than assumed: a task is a
+row and three event types; a handoff moves an assignee and appends one event; the subject check is
+two `EXISTS` queries. Nothing here reaches outside Playroom's own log, and **a handoff triggers no
+turn**, so the slice does not even spend a token by itself.
+
+It now carries S04-N2, S13-N1 and S13-N2. **S2.6 remains the slice that ends it.**

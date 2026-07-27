@@ -26,6 +26,10 @@ const FIXTURE = DecisionEvent.parse({
   payload: {
     decision_id: 'dec_fixture',
     subject: 'claude-main',
+    // S1.3's two fields. The fixture failed the build the moment they became required, which is
+    // exactly what "parsed through the real schema, not hand-typed" was for.
+    requested_by: 'prince',
+    subject_basis: 'delegated_task',
     principal: 'principal:prince',
     action: 'pr.merge',
     resource: 'repo:playroom/playroom#pr-41',

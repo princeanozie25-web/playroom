@@ -241,3 +241,151 @@ describe('the four refusals, each naming its own constraint', () => {
     c.close();
   });
 });
+
+describe('S12-N2 is closed: the subject must be justified by a record', () => {
+  it('REFUSES a subject the requester has no record for, and writes NOTHING to the room', async () => {
+    // THE HOLE, AS IT WAS. Any authenticated member could name any other as the subject of a
+    // governed request — or any string at all, which is worse than the finding recorded:
+    // `decision.test.ts` still has a passing case with `nobody-in-particular`. The verdict was
+    // sound for the subject it was given, and the card said "requested under Claude's mandate"
+    // for a request Claude never made.
+    const id = room('subj-unjustified');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
+    await c.open();
+
+    // No task, no handoff — nothing in this room says prince may act for sol.
+    c.ws.send(
+      JSON.stringify({
+        type: 'request_action',
+        client_msg_id: 'unjust-1',
+        subject: 'sol',
+        action: 'pr.review',
+        resource: 'repo:playroom/playroom#pr-41',
+      }),
+    );
+    const refusal = await c.waitForError((e) => e.code === 'subject_not_justified');
+    expect(refusal.message).toMatch(/no record entitles prince to request under sol's mandate/);
+
+    // AND NO DECISION EVENT. The fabric evaluated nothing, because the room refused the
+    // attribution — a BLOCK card reading "requested under Sol's mandate" would render the very
+    // claim being rejected.
+    await new Promise((r) => setTimeout(r, 600));
+    const { rows } = await pool.query<{ n: string }>(
+      "SELECT count(*) AS n FROM events WHERE room_id = $1 AND event_type = 'decision'",
+      [id],
+    );
+    expect(Number(rows[0].n)).toBe(0);
+    c.close();
+  });
+
+  it('ACCEPTS the subject once a task delegates the work, and records BOTH parties', async () => {
+    // The film's beat 5 shape: prince tags @claude, which creates a task claude-main holds, and
+    // prince then requests pr.merge under claude's mandate. The record that makes that legitimate
+    // is the task itself — delegation, in the only form the product has.
+    const { c } = await roomWithTask('subj-delegated');
+    c.ws.send(
+      JSON.stringify({
+        type: 'request_action',
+        client_msg_id: 'just-1',
+        subject: 'claude-main',
+        action: 'pr.merge',
+        resource: 'repo:playroom/playroom#pr-41',
+      }),
+    );
+    await c.waitForType('decision');
+    const decision = c.ofType('decision')[0];
+    if (decision.event_type !== 'decision') throw new Error('narrowing');
+    expect(decision.payload).toMatchObject({
+      subject: 'claude-main',
+      requested_by: 'prince',
+      subject_basis: 'delegated_task',
+      decision: 'CO_SIGN',
+    });
+    // The envelope and the payload agree on who asked — one of them is what a projection reads.
+    expect(decision.actor_id).toBe('prince');
+    c.close();
+  });
+
+  it('ACCEPTS a subject the requester handed work TO', async () => {
+    // The other record. `prince` created the task and handed it to sol, so `handoff` is the basis
+    // even though the delegated-task branch would also match — asserted on the SPECIFIC basis so
+    // a future refactor cannot collapse the two and still pass.
+    const { c, taskId } = await roomWithTask('subj-handoff');
+    c.handoff(taskId, 'sol', 'pr.review');
+    await c.waitForType('task.handoff');
+    // Remove the delegated-task basis so only the handoff can justify it: the task's creator is
+    // still prince, so reassign creation to claude-main to isolate the branch.
+    await pool.query('UPDATE tasks SET created_by = $1 WHERE id = $2', ['claude-main', taskId]);
+
+    c.ws.send(
+      JSON.stringify({
+        type: 'request_action',
+        client_msg_id: 'just-2',
+        subject: 'sol',
+        action: 'deploy',
+        resource: 'repo:playroom/playroom#pr-41',
+      }),
+    );
+    await c.waitForType('decision');
+    const decision = c.ofType('decision')[0];
+    if (decision.event_type !== 'decision') throw new Error('narrowing');
+    expect(decision.payload).toMatchObject({ subject: 'sol', subject_basis: 'handoff' });
+    c.close();
+  });
+
+  it('ACCEPTS a member acting as THEMSELVES with no record at all', async () => {
+    // `self` needs no justification, and it must not require one: a member asking about their own
+    // authority is the base case, and a rule that demanded a task first would refuse the one
+    // request that never needed a record.
+    const id = room('subj-self');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    const solToken = await issueTestCredential('sol', 'handoff-test-self');
+    const sol = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, solToken);
+    await sol.open();
+    sol.ws.send(
+      JSON.stringify({
+        type: 'request_action',
+        client_msg_id: 'self-1',
+        subject: 'sol',
+        action: 'pr.merge',
+        resource: 'repo:playroom/playroom#pr-41',
+      }),
+    );
+    await sol.waitForType('decision');
+    const decision = sol.ofType('decision')[0];
+    if (decision.event_type !== 'decision') throw new Error('narrowing');
+    expect(decision.payload).toMatchObject({
+      subject: 'sol',
+      requested_by: 'sol',
+      subject_basis: 'self',
+      // sol's own mandate does not admit pr.merge, so the verdict is still BLOCK. Standing to ask
+      // is not authority to act — the two questions stay separate.
+      decision: 'BLOCK',
+    });
+    sol.close();
+  });
+
+  it('REFUSES a subject that is not a member at all', async () => {
+    // The case the finding understated. `subject` was never checked to be a member: a caller could
+    // name any string, and `decision.test.ts` proves it by asserting a NO_MANDATE verdict for
+    // `nobody-in-particular`. No record can name a non-member, so this now refuses before the
+    // evaluator — and the room stops accepting decision rows about names that refer to nobody.
+    const id = room('subj-ghost');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
+    await c.open();
+    c.ws.send(
+      JSON.stringify({
+        type: 'request_action',
+        client_msg_id: 'ghost-1',
+        subject: 'nobody-in-particular',
+        action: 'pr.review',
+        resource: 'repo:x#1',
+      }),
+    );
+    const refusal = await c.waitForError((e) => e.code === 'subject_not_justified');
+    expect(refusal.message).toMatch(/nobody-in-particular/);
+    c.close();
+  });
+});
