@@ -193,3 +193,70 @@ describe('the claim is gone from the wire', () => {
     c.close();
   });
 });
+
+describe('the front door checks membership (S13-N2, closed in S1.3b)', () => {
+  it('a MEMBER of the room connects, and the room replays to them', async () => {
+    // The positive half first: enforcement that refuses everyone is not enforcement, and this is
+    // the case the film depends on — `prince` is enrolled in every room at creation.
+    const id = room('door-member');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
+    await c.open();
+    c.send('I am in this room', 'door-1');
+    await c.waitForEvents(1);
+    expect(c.events[0].actor_id).toBe('prince');
+    c.close();
+  });
+
+  it('a NON-MEMBER is refused, and cannot tell that from a room that does not exist', async () => {
+    // The hole S1.3 found and logged: the handshake authenticated the credential and checked the
+    // room EXISTED, never that the caller was in it. So any authenticated member could open a
+    // socket on any room id they could guess and write into it — the widest thing an
+    // authenticated member could assert with no record behind it.
+    const id = room('door-outsider');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [id, 'sol']);
+    const solToken = await issueTestCredential('sol', 'identity-test-door');
+
+    const outsider = await probe(`${server.wsBase}/rooms/${id}/ws?after=0&token=${solToken}`);
+    const ghost = await probe(
+      `${server.wsBase}/rooms/definitely-no-such-room/ws?after=0&token=${solToken}`,
+    );
+
+    // SAME CLOSE CODE, SAME FRAME, and the room id is the only difference between the bytes.
+    expect(outsider.code).toBe(4404);
+    expect(ghost.code).toBe(4404);
+    const normalise = (frames: Array<Record<string, string>>, roomId: string): string =>
+      JSON.stringify(frames).replaceAll(roomId, '<room>');
+    expect(normalise(outsider.frames, id)).toBe(normalise(ghost.frames, 'definitely-no-such-room'));
+    // Not a hint anywhere: no `hello`, so the socket never became usable, and no replay.
+    expect(outsider.frames.some((f) => f.type === 'hello')).toBe(false);
+
+    // AND NOTHING WAS WRITTEN. The S12 frame-refusal standard: a refused connection leaves the
+    // room exactly as it was, so a non-member cannot even prove they were here.
+    const { rows } = await pool.query<{ n: string }>(
+      'SELECT count(*) AS n FROM events WHERE room_id = $1',
+      [id],
+    );
+    expect(Number(rows[0].n)).toBe(0);
+  });
+
+  it('a member removed from a room LOSES the front door', async () => {
+    // Membership is data (S1.1b), so this is a live property rather than a boot-time one. The same
+    // credential that connected a moment ago is refused once the row is gone — no restart, no
+    // cache to invalidate.
+    const id = room('door-revoked');
+    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    const first = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
+    await first.open();
+    first.close();
+
+    await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
+      id,
+      'prince',
+    ]);
+    const after = await probe(`${server.wsBase}/rooms/${id}/ws?after=0&token=${server.token}`);
+    expect(after.code).toBe(4404);
+    expect(after.frames[0]).toMatchObject({ type: 'error', code: 'room_not_found' });
+  });
+});

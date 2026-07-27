@@ -167,6 +167,39 @@ export async function memberRecord(
 }
 
 /**
+ * CAN THIS MEMBER SEE THIS ROOM? Existence and membership, in ONE query.
+ *
+ * One round trip rather than two, and that is not an optimisation — it is what makes the two
+ * refusals indistinguishable. S1.3b's ruling is that a room you are not in answers exactly as a
+ * room that does not exist: same close code, same bytes, same timing. Asking `getRoom` and then
+ * `isRoomMember` would do one query for a missing room and two for a room you cannot see, so a
+ * caller with a clock could tell which of the two it was — an oracle rebuilt out of latency after
+ * being closed in the response.
+ *
+ * Both branches now do identical work: one query, two `EXISTS` subqueries, whatever the answer.
+ */
+export interface RoomAccess {
+  room_exists: boolean;
+  is_member: boolean;
+}
+
+export async function roomAccess(
+  pool: Pool,
+  roomId: string,
+  memberId: string,
+): Promise<RoomAccess> {
+  const { rows } = await pool.query<RoomAccess>(
+    `SELECT
+       EXISTS (SELECT 1 FROM rooms WHERE id = $1) AS room_exists,
+       EXISTS (
+         SELECT 1 FROM room_members WHERE room_id = $1 AND member_id = $2
+       ) AS is_member`,
+    [roomId, memberId],
+  );
+  return rows[0];
+}
+
+/**
  * Is this member in this room?
  *
  * One indexed read against `room_members`' primary key. Deliberately NOT expressed as

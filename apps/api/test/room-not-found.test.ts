@@ -104,7 +104,13 @@ describe('a room that does not exist', () => {
       await new Promise((r) => setTimeout(r, 150)); // let any stray write settle
 
       const raw = logs.join('');
-      expect(raw).toContain('ws refused: room not found');
+      // THE SENTENCE CHANGED IN S1.3b, and what it now says is the point. One refusal covers a
+      // room that does not exist and a room the caller is not in, because they are
+      // indistinguishable to the caller by design — so the log carries `reason` to tell them
+      // apart. A4-F1's substance is unchanged and slightly stronger: the refusal is recorded, and
+      // it says which of the two it was, in the one place the caller cannot read.
+      expect(raw).toContain('ws refused: room not visible to this member');
+      expect(raw).toContain('"reason":"no_room"');
       expect(raw).not.toContain('23503');
       expect(raw).not.toContain('events_room_id_fkey');
       expect(raw).not.toContain('send failed');

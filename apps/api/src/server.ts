@@ -23,7 +23,7 @@ import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
 import { authenticate, type AuthFailure, type AuthResult } from './credentials.js';
-import { isRoomMember, listMembers, listRoomMembers } from './members.js';
+import { isRoomMember, listMembers, listRoomMembers, roomAccess } from './members.js';
 import { setKnownMemberTokens } from './agent.js';
 
 export interface BuildOptions {
@@ -377,9 +377,25 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       // the last line of defence; it must never again be the first thing to notice.
       //
       // One extra SELECT per connection, not per message: the write path is unchanged.
-      const refuse = (): void => {
+      //
+      // ── AND A ROOM YOU ARE NOT IN IS A ROOM THAT DOES NOT EXIST (S1.3b) ──────────────
+      //
+      // One refusal for both, byte for byte: same typed frame, same close code 4404, same
+      // sentence. The two are told apart only in the LOG, server-side, where the caller cannot
+      // read it.
+      //
+      // Deliberate, and it is the one place this codebase does not distinguish two mistakes to
+      // the caller — the same ruling S12-3 applied to the roster read. `sol` holds a legitimate
+      // credential; if a non-member were told "you are not in this room" it could enumerate
+      // Prince's room ids by trying, and cross-principal leakage is the boundary the product
+      // exists to defend. The standing rule that fail-closed distinguishes REFUSED from
+      // MISCONFIGURED is about the operator, and the operator has logs.
+      const refuse = (reason: 'no_room' | 'not_in_room', member?: string): void => {
         unsub();
-        app.log.warn({ room_id: roomId, code: ERROR_ROOM_NOT_FOUND }, 'ws refused: room not found');
+        app.log.warn(
+          { room_id: roomId, code: ERROR_ROOM_NOT_FOUND, reason, member },
+          'ws refused: room not visible to this member',
+        );
         send(roomNotFound(roomId));
         socket.close(WS_CLOSE_ROOM_NOT_FOUND, 'room not found');
       };
@@ -422,8 +438,13 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           return null;
         }
 
-        if (!(await getRoom(db(), roomId))) {
-          refuse();
+        // EXISTENCE AND MEMBERSHIP, IN ONE QUERY. Two queries would make the refusals
+        // distinguishable by timing, which is the oracle rebuilt out of latency (see
+        // `roomAccess`). S13-N2 closed: the front door now asks the question the handoff and the
+        // roster read were already asking.
+        const access = await roomAccess(db(), roomId, result.auth.member_id);
+        if (!access.room_exists || !access.is_member) {
+          refuse(access.room_exists ? 'not_in_room' : 'no_room', result.auth.member_id);
           return null;
         }
         const helloSeq = await lastSeq(db(), roomId);
