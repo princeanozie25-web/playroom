@@ -26,7 +26,27 @@ import {
 // one, exactly as a room would.
 
 const pool = testPool();
+
+/**
+ * Every room this file creates, so it can delete them — S12-N3's shape, one layer over.
+ *
+ * These rooms leaked five per run from S0.3 until S1.3b: 20 rooms and, once S1.3 gave every
+ * delegated task a row, 20 tasks with them. Nothing broke, which is why nobody looked — the same
+ * reason 479 credentials accumulated. A test that creates durable rows and does not remove them is
+ * a test that lies about its own cost.
+ */
+const rooms: string[] = [];
+function room(prefix: string): string {
+  const id = uniqueRoomId(prefix);
+  rooms.push(id);
+  return id;
+}
+
 afterAll(async () => {
+  for (const id of rooms) {
+    await pool.query('DELETE FROM events WHERE room_id = $1', [id]);
+    await pool.query('DELETE FROM rooms WHERE id = $1', [id]); // tasks cascade (migration 011)
+  }
   await pool.end();
 });
 
@@ -54,11 +74,11 @@ function capture(): { lines: string[]; stream: Writable } {
 describe('mandate v0 — the producer', () => {
   it('pr.merge produces a CO_SIGN decision event naming the required signer', async () => {
     const server = await startTestServer();
-    const room = uniqueRoomId('decision-cosign');
+    const roomId = room('decision-cosign');
     try {
-      await httpCreateRoom(server.httpBase, room);
-      await delegateTask(pool, room, 'claude-main'); // standing, per S1.3
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
+      await httpCreateRoom(server.httpBase, roomId);
+      await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
+      const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
         JSON.stringify({
@@ -86,7 +106,7 @@ describe('mandate v0 — the producer', () => {
       expect(ev.payload.arguments_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
 
       // It is durable, not only fanned out (§12 persist-before-fan-out).
-      expect(await decisionRows(room)).toHaveLength(1);
+      expect(await decisionRows(roomId)).toHaveLength(1);
       c.close();
     } finally {
       await server.close();
@@ -95,11 +115,11 @@ describe('mandate v0 — the producer', () => {
 
   it('an unknown action type is BLOCKed — deny by default, asserted by reason code', async () => {
     const server = await startTestServer();
-    const room = uniqueRoomId('decision-unknown');
+    const roomId = room('decision-unknown');
     try {
-      await httpCreateRoom(server.httpBase, room);
-      await delegateTask(pool, room, 'claude-main'); // standing, per S1.3
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
+      await httpCreateRoom(server.httpBase, roomId);
+      await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
+      const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
         JSON.stringify({
@@ -134,10 +154,10 @@ describe('mandate v0 — the producer', () => {
     // in their own room acts as a principal. A human asking to take a governed action themselves
     // needs no standing record — `self` — and is BLOCKed for having no mandate at all.
     const server = await startTestServer();
-    const room = uniqueRoomId('decision-nomandate');
+    const roomId = room('decision-nomandate');
     try {
-      await httpCreateRoom(server.httpBase, room);
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
+      await httpCreateRoom(server.httpBase, roomId);
+      const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
         JSON.stringify({
@@ -164,11 +184,11 @@ describe('mandate v0 — the producer', () => {
   it('an ALLOW writes NO decision event — nothing ran, so nothing is recorded as having run', async () => {
     const { lines, stream } = capture();
     const server = await startTestServer({ loggerStream: stream, logLevel: 'info' });
-    const room = uniqueRoomId('decision-allow');
+    const roomId = room('decision-allow');
     try {
-      await httpCreateRoom(server.httpBase, room);
-      await delegateTask(pool, room, 'claude-main'); // standing, per S1.3
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
+      await httpCreateRoom(server.httpBase, roomId);
+      await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
+      const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
         JSON.stringify({
@@ -180,7 +200,7 @@ describe('mandate v0 — the producer', () => {
         }),
       );
       await new Promise((r) => setTimeout(r, 700));
-      expect(await decisionRows(room)).toHaveLength(0);
+      expect(await decisionRows(roomId)).toHaveLength(0);
       // But the evaluation IS audited with its mandate hash (Bible §9.2). Asserting the
       // log, not the absence — an unlogged ALLOW is A4-F1 wearing a different hat.
       const raw = lines.join('');
@@ -198,15 +218,15 @@ describe('mandate v0 — the producer', () => {
     // them, and a human typing in their own room acts as a principal. If this ever
     // starts producing decisions, every message in the room becomes a governance event.
     const server = await startTestServer();
-    const room = uniqueRoomId('decision-chat');
+    const roomId = room('decision-chat');
     try {
-      await httpCreateRoom(server.httpBase, room);
-      const c = new Client(`${server.wsBase}/rooms/${room}/ws?after=0`, server.token);
+      await httpCreateRoom(server.httpBase, roomId);
+      const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.send('just talking', 'm3-chat-1');
       await c.waitForEvents(1);
       expect(c.ofType('message')).toHaveLength(1);
-      expect(await decisionRows(room)).toHaveLength(0);
+      expect(await decisionRows(roomId)).toHaveLength(0);
       c.close();
     } finally {
       await server.close();

@@ -60,7 +60,7 @@ describe('stable selector hooks', () => {
 
   it('no component hardcodes a hook string instead of using the constant', () => {
     // `data-pr="..."` written by hand would drift from this module silently, which is the
-    // whole failure being prevented. The only permitted form is `pr(HOOK.x)`.
+    // whole failure being prevented. The only form this accepts is `pr(HOOK.x)`.
     const hardcoded = corpus.match(/data-pr=["'][a-z-]+["']/g);
     expect(hardcoded, `hardcoded data-pr found: ${hardcoded?.join(', ')}`).toBeNull();
   });

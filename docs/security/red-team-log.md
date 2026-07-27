@@ -480,3 +480,90 @@ two `EXISTS` queries. Nothing here reaches outside Playroom's own log, and **a h
 turn**, so the slice does not even spend a token by itself.
 
 It now carries S04-N2, S13-N1 and S13-N2. **S2.6 remains the slice that ends it.**
+
+---
+
+## RE-VERIFICATION — 27 Jul 2026, after the NUL byte
+
+**Why this section exists.** `apps/api/src/agent.ts` carried a NUL byte from S0.5b (`fe642c0`) to
+S1.3 (`38f5981`). A file containing NUL is classed as binary by ripgrep and **its contents are
+skipped**, so for eight slices every content search of this repository silently excluded the
+activation boundary — the most security-relevant file in it. Several exit criteria were signed off
+on those searches. This is the record of re-running them against a corpus that no longer excludes
+anything, and it is dated because the earlier claims were not wrong so much as **untested**.
+
+Every grep below now lives in `tests/evidence.test.ts` and runs in CI. A claim a person re-runs by
+hand is a claim that decays the moment nobody re-runs it, which is exactly what happened to the
+third row.
+
+| claim                                                     | closeout that asserted it | re-run verdict                                          |
+| --------------------------------------------------------- | ------------------------- | ------------------------------------------------------- |
+| no provider or model name in the room, fabric, data model | S0.4 (headline criterion) | **HELD** — zero hits                                    |
+| exactly one construction site for a decision event        | M-3                       | **HELD** — `commands/requestAction.ts`                  |
+| `permit` appears nowhere in code, schema, prompt, config  | ADR-006 / DOC-1           | **BROKEN** — four hits, fixed here                      |
+| exactly one writer of agent turn events                   | S0.5a                     | **HELD** — `agent.ts`                                   |
+| no `agent.summon` scope anywhere                          | S0.5b                     | **HELD** — zero hits                                    |
+| no hardcoded member id or summon token in app code        | §21.2 / S0.5b             | **HELD in app code; the PROMPT was wrong** — fixed here |
+| `mandate_label` is gone as a field                        | UI2                       | **HELD** — comments only                                |
+| the decision card never says `attempted`                  | S06-N3                    | **HELD** — zero hits                                    |
+| `principal:` never reaches the rendered surface           | UI2                       | **HELD** — fixture payload only, asserted in the film   |
+
+### The one that broke: ADR-006's zero-hit `permit`
+
+Four occurrences, all English usage: `hooks.test.ts` ("the only permitted form"),
+`008_room_members.sql` ("THE SHAPE THE DATA PERMITS"), and two in `conformance.ts` ("the contract
+permits", "what is NOT permitted").
+
+ADR-006 refused this exception in advance, in writing: _"English usage is not the term. A sentence
+using 'permit' as a verb is REWORDED rather than left, because the exit criterion is a zero-hit grep
+and a grep cannot distinguish the two. Reworded, not excepted."_ So these are violations of the
+ADR's own rule, not a scoping quibble.
+
+**Two of the four predate the ADR** (`conformance.ts` is S0.4, `hooks.test.ts` is S-UI), which means
+**the claim was false at the moment it was written.** The third arrived after it (migration 008,
+S1.1b). All four are reworded in this commit.
+
+**The NUL byte is not the excuse for this one.** None of those files is `agent.ts`. The grep was run
+once, at the commit that made the claim, and never again — which is the failure this section's test
+file exists to end.
+
+### Two claims that HELD but could not have been evidence
+
+Both have their answer inside the file the search skipped, so the search that "confirmed" them could
+not have seen it:
+
+- **one writer of agent turn events.** The only caller of `appendAgentEvent` is in `agent.ts`. A
+  ripgrep for callers would have found none there — reporting zero callers for a function with one,
+  which reads as a stronger result than the truth.
+- **no hardcoded summon token.** `agent.ts` HELD a hardcoded `@claude` and a literal member id
+  until S0.5b removed them. A grep that skips the file passes identically before and after the fix,
+  so §21.2's exit criterion was verified by a check that could not have failed.
+
+Both are true today, and now they are true **with evidence**.
+
+### The prompt named one member to all of them
+
+`prompts/room-agent.v1.md` said _"You are summoned by name (for example, `@claude`)"_ — one shared
+prompt, so **Sol was told another member's tag as its own example.** Routing was never affected
+(summon tokens come from the room's membership), which is why §21.2's claim was still true and why
+no test caught it. It is a different defect from the one that claim covers, and it is fixed rather
+than excepted: the line now says the room addresses you with an `@` and your own display name.
+
+### The CRLF story from S13-1 was wrong, and this is the correction
+
+S13-1's message called the CRLF rewrite an independent defect — _"a 546-line diff for a 29-line
+change"_. Re-checked against git: `.gitattributes` sets `* text=auto eol=lf`, so git normalises CRLF
+on commit and reports **no diff at all** for a working-tree file that has it (`.gitignore` is in that
+state right now and `git status` is clean).
+
+The whole-file diff happened because **`text=auto` stops normalising a file it detects as binary**,
+and a NUL byte makes it do exactly that. So the CRLF was a _symptom_ of the NUL, not a second
+defect: the byte removed the file from ripgrep's corpus **and** from git's line-ending handling. The
+guard is built accordingly — the NUL check is the primary assertion, and the CRLF check is a backstop
+against a file explicitly marked `-text`.
+
+### Housekeeping, same shape as S12-N3
+
+`decision.test.ts` created five rooms per run and deleted none, from S0.3 onward — 20 rooms by the
+end of S1.3, and 20 tasks once S1.3 gave every delegated task a row. Fixed and measured: 0 rooms and
+0 tasks remain after a run.

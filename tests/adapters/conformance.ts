@@ -105,8 +105,8 @@ export function runAdapterConformance(name: string, makeCase: () => ConformanceC
     for (const status of [400, 401, 429, 500, 503]) {
       it(`a provider ${status} surfaces as a typed failure, not an unhandled rejection`, async () => {
         const c = makeCase();
-        // The contract permits either an `error` chunk or a thrown error — runAgentTurn
-        // handles both and writes completed{success:false}. What is NOT permitted is a
+        // The contract accepts either an `error` chunk or a thrown error — runAgentTurn
+        // handles both and writes completed{success:false}. What is NOT accepted is a
         // rejection nobody awaits, or a stream that ends with `done` as though it worked.
         let terminal: AgentTurnChunk | undefined;
         let thrown: unknown;

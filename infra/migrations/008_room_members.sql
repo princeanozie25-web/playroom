@@ -58,7 +58,7 @@ ON CONFLICT DO NOTHING;
 
 -- ── events.actor_member_id ────────────────────────────────────────────────────────────
 --
--- THE SHAPE THE DATA PERMITS, and it is not the shape a straight foreign key would take.
+-- THE SHAPE THE DATA ALLOWS, and it is not the shape a straight foreign key would take.
 --
 -- `actor_id` cannot become `NOT NULL REFERENCES members (id)`. Three reasons, all present
 -- in the log today rather than hypothetical:
