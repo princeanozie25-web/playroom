@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testPool } from './support.js';
 import { attemptForeignRead, isolationState, withPrincipalStore } from '../src/principal-store.js';
 
@@ -10,7 +10,44 @@ import { attemptForeignRead, isolationState, withPrincipalStore } from '../src/p
 
 const pool = testPool();
 
+// THE FIXTURES ARE THE TEST'S OWN, not the seed script's.
+//
+// `scripts/seed-context.ts` puts real content in both stores, and depending on it here would make
+// this file pass or fail according to whether an operator remembered to run it — on a fresh CI
+// database it would fail on the corpus assertion while the isolation was perfectly intact. A test
+// about a boundary must not be able to go red for a reason unrelated to the boundary.
+const MINE = 'store-test prince fixture 4a91';
+const THEIRS = 'store-test jerry fixture 7c02';
+let planted: Array<{ principal: string; id: string }> = [];
+
+async function deleteAs(principal: string, id: string): Promise<void> {
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query('SET LOCAL ROLE playroom_context');
+    await c.query('SELECT set_config($1, $2, true)', ['playroom.principal_id', principal]);
+    await c.query('DELETE FROM principal_context WHERE id = $1', [id]);
+    await c.query('COMMIT');
+  } finally {
+    c.release();
+  }
+}
+
+beforeAll(async () => {
+  const a = await withPrincipalStore(pool, 'principal:prince', (s) =>
+    s.add({ kind: 'note', title: MINE, body: 'prince fixture body' }),
+  );
+  const b = await withPrincipalStore(pool, 'principal:jerry', (s) =>
+    s.add({ kind: 'note', title: THEIRS, body: 'jerry fixture body', summary: 'jerry summary' }),
+  );
+  planted = [
+    { principal: 'principal:prince', id: a.id },
+    { principal: 'principal:jerry', id: b.id },
+  ];
+});
+
 afterAll(async () => {
+  for (const p of planted) await deleteAs(p.principal, p.id);
   await pool.end();
 });
 
@@ -56,8 +93,12 @@ describe('a foreign store is unreachable', () => {
       theirs.length,
       'jerry has no context — the leak tests below would be vacuous',
     ).toBeGreaterThan(0);
-    // And they are DIFFERENT items, so "I saw an item" cannot be satisfied by seeing my own.
-    expect(mine.map((i) => i.title)).not.toEqual(theirs.map((i) => i.title));
+    // And they are DIFFERENT items, so "I saw an item" cannot be satisfied by seeing my own. Named
+    // exactly, not counted: each store contains its own fixture and not the other's.
+    expect(mine.map((i) => i.title)).toContain(MINE);
+    expect(theirs.map((i) => i.title)).toContain(THEIRS);
+    expect(mine.map((i) => i.title)).not.toContain(THEIRS);
+    expect(theirs.map((i) => i.title)).not.toContain(MINE);
   });
 
   it('a store bound to one principal returns only that principal’s items', async () => {

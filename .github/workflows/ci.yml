@@ -33,3 +33,48 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm migrate
       - run: pnpm verify
+
+  # ── §7.1, ON ITS OWN ────────────────────────────────────────────────────────────────────
+  #
+  # The context-isolation test also runs inside `verify` above, so this job is not what makes it
+  # blocking — every test in this repo already blocks. What a separate job buys is that the one
+  # question which must never be answered late gets answered INDEPENDENTLY:
+  #
+  #   - it runs even when `verify` fails for an unrelated reason, so a broken formatter or a flaky
+  #     latency assertion cannot leave cross-principal leakage unreported;
+  #   - a red run names the invariant in the job title instead of in one line of a 300-test wall;
+  #   - `fileParallelism: false` makes the main suite serial and slow, and this answers in seconds.
+  #
+  # It is deliberately NOT `continue-on-error` and deliberately not conditional on the other job.
+  context-isolation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: playroom
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/playroom
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/playroom_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm migrate
+      # THE ISOLATION IS ASSERTED AGAINST THE ROLE, NOT ASSUMED. CI's postgres user is a superuser,
+      # which bypasses RLS unconditionally — the same trap Neon's owner role set. The store's tests
+      # assert `current_user = playroom_context` and `BYPASSRLS = false` inside the transaction, so
+      # if `SET LOCAL ROLE` ever stopped dropping the bypass this job goes red rather than green.
+      - run: pnpm vitest run apps/api/test/context-isolation.test.ts apps/api/test/principal-store.test.ts

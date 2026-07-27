@@ -199,6 +199,12 @@ if (!seed.ok) {
 const roomId = (seed.out.match(/room:([a-z0-9-]+)/) ?? [])[1] ?? 'playroom';
 say(`room "${roomId}" is ready, with prince enrolled`);
 
+// Each principal's private store gets one real note (S1.5). Idempotent, and it writes through the
+// scoped store like everything else — so a stranger's clone shows the isolation working on content
+// rather than on an empty table, where it would prove nothing.
+const ctx = tryRun('pnpm', ['tsx', 'scripts/seed-context.ts']);
+say(ctx.ok ? 'each principal has a private store with a note in it' : 'context seed skipped');
+
 // ── 6. run it ─────────────────────────────────────────────────────────────────────────
 const url = `http://localhost:3000/r/${roomId}`;
 const keys = {

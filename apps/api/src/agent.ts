@@ -3,16 +3,11 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import type { AgentAdapter, AgentMessage, ServerEvent } from '@playroom/shared';
+import type { AgentAdapter, ServerEvent } from '@playroom/shared';
 import { costUsd, getAdapterConfig, listAdapters } from '@playroom/adapters';
 import type { RoomBus } from './bus.js';
-import {
-  appendAgentEvent,
-  appendMessage,
-  recentMessages,
-  type SummonRef,
-  type TaskRef,
-} from './events.js';
+import { appendAgentEvent, appendMessage, type SummonRef, type TaskRef } from './events.js';
+import { assembleContext, assemblyShape, windowFor } from './assembly.js';
 import { stampFor } from './stamp.js';
 import { getTask, transitionTask, type TaskState } from './tasks.js';
 
@@ -431,12 +426,27 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
       }),
     );
 
-    const messages: AgentMessage[] = await recentMessages(pool, roomId, CONTEXT_MESSAGES);
+    // §7.1 ASSEMBLY. This was `recentMessages(pool, roomId, CONTEXT_MESSAGES)` — the room's log and
+    // nothing else, which satisfied the invariant only because no private store existed to violate
+    // it. Now the window is assembled from declared sources and `windowFor` asserts, on this turn,
+    // that every private part belongs to the principal being summoned. `stamp.principal_id` comes
+    // from the members table, not the wire, so a forged frame cannot choose whose store is read.
+    const assembly = await assembleContext(pool, {
+      memberId: adapterId,
+      principalId: stamp.principal_id,
+      roomId,
+      task: task ? await getTask(pool, task.task_id) : null,
+      system: { text: sys, hash: promptHash },
+      commonGroundLimit: CONTEXT_MESSAGES,
+    });
+    // Throws AssemblyInvariantError rather than returning a window: an unprovable window is not
+    // sent to a provider in a weaker form, it is not sent.
+    const { systemPrompt: windowSystem, messages } = windowFor(assembly);
     const adapter = adapterFactory(adapterId); // may throw (e.g. missing key) → caught below
 
     tStreamInvoked = performance.now(); // span boundary: stream() about to be invoked
     for await (const chunk of adapter.stream(messages, {
-      systemPrompt: sys,
+      systemPrompt: windowSystem,
       maxOutputTokens: cfg.max_output_tokens,
     })) {
       if (chunk.kind === 'text_delta') {
@@ -480,8 +490,13 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         ? Number(costUsd(cfg, tokensIn, tokensOut).toFixed(5))
         : null;
     const latencyMs = Date.now() - startedAt;
+    // The window's COMPOSITION on the telemetry line, next to what it cost. `own=0` on a turn for a
+    // member whose principal has no notes is the honest reading, and `own=N` for one principal while
+    // another's store holds items is the isolation being visible in the log rather than only in a
+    // test.
+    const shape = assemblyShape(assembly);
     console.log(
-      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms ttft=${timings.t_provider_ttft}ms ttfd=${timings.ttfd_total}ms`,
+      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms ttft=${timings.t_provider_ttft}ms ttfd=${timings.ttfd_total}ms ctx=common:${shape.common_ground}+own:${shape.own_store}+task:${shape.task}`,
     );
 
     publish(

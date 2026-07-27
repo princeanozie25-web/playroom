@@ -732,3 +732,60 @@ Added in S13c-3, with the reason updated — the sentence is tempting for the sa
 mechanism behind the refusal has changed since. **The general fault is mine and it is mechanical:**
 a `replace` without an assert is a no-op that reports success. Every scripted edit in this slice
 asserts its anchor, and the two that failed to match said so loudly instead of passing quietly.
+
+## S1.5 — context scopes, and the assertion that was checking itself
+
+### FIXED IN THE SAME COMMIT — S15-N1: the §7.1 invariant could not see a mislabelled part
+
+`assembleContext` labels each part of an agent's context window with its provenance, and
+`windowFor` refuses to hand a window to a provider unless every private part belongs to the
+principal being summoned. The first version derived BOTH sides of that comparison from the same
+value: the part was labelled `input.principalId` and then checked against `input.principalId`.
+
+**Found by mutation, not by reading.** One line of `assembly.ts` was changed to open a literal
+foreign store — `withPrincipalStore(pool, 'principal:jerry', …)` while acting for
+`principal:prince`. Four tests in `context-isolation.test.ts` went red on the TEXT of Jerry's note
+appearing in Prince's window. **The invariant stayed silent**, because the part carried Jerry's rows
+under Prince's label and the assertion had nothing to compare it against but itself.
+
+That is the wrong way round. The text assertions run in CI; the invariant is what runs on every
+turn in production, and it was the half that missed.
+
+**Closed** by labelling the part from `store.principal` — the principal the transaction was actually
+scoped to — so the comparison is between two independently-derived values. Re-running the same
+mutation now throws `AssemblyInvariantError: §7.1 assembly invariant violated: 1 foreign principal
+store(s) in the window (member acts for principal:prince)` and takes five tests with it.
+
+**Severity as it stood: low, and only because nothing had a reason to open the wrong store yet.** No
+released code path passed a principal other than the stamped one; the bug was in the control rather
+than in the behaviour, which is the failure mode this project keeps finding — a field that looks like
+authority, an assertion that looks like a check.
+
+**The general lesson, and it now applies to every invariant in this repo:** an assertion whose
+expected value and observed value come from the same expression cannot fail. Mutate the line the
+control is about and watch WHICH assertion catches it. If only the tests notice, the runtime control
+is decoration.
+
+### MEASURED — the database, not the policy, is what isolates
+
+Recorded because the first attempt at migration 015 shipped nothing and read correctly.
+
+```
+neondb_owner                                     superuser: false  BYPASSRLS: true
+  policy ENABLEd + FORCEd, read as prince     →  BOTH rows visible
+playroom_context (via SET LOCAL ROLE)            BYPASSRLS: false
+  SELECT … WHERE principal_id='principal:jerry'  →  0 rows
+  same query as neondb_owner                     →  1 row: "What Jerry needs before trusting…"
+  setting unset                                  →  0 rows
+  after COMMIT                                   →  current_user = neondb_owner
+```
+
+The third line is the falsification: the zero is a refusal and not an absence. A test asserting only
+the zero would have passed against an empty table, a typo'd principal id, and a policy that does
+nothing.
+
+**Still true and worth stating: a superuser bypasses this.** CI's postgres user is one, and the
+isolation holds there only because `SET LOCAL ROLE` drops to a role that cannot bypass — which the
+tests assert rather than assume. Anyone with the owner credential can read every store directly.
+This isolates PRINCIPALS FROM EACH OTHER through the application; it does not isolate either of them
+from the database owner, and nothing in this design claims it does.
