@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "concurrently -n api,web \"pnpm --filter @playroom/api dev\" \"pnpm --filter @playroom/web dev\"",
+    "bootstrap": "node scripts/bootstrap.mjs",
     "test": "vitest run",
     "typecheck": "tsc -b",
     "format": "prettier --check .",

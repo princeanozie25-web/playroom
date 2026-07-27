@@ -1,0 +1,33 @@
+# Postgres for a local Playroom, and nothing else.
+#
+# ONE SERVICE, DELIBERATELY. The api and the web app are not containerised here: they are two
+# `pnpm` processes that a contributor wants to restart, attach a debugger to and read the logs of,
+# and wrapping them in images would add a build step to every edit for no gain on one machine.
+# What a stranger actually lacks is a database, so that is what this provides.
+#
+# `pnpm bootstrap` starts this for you if `DATABASE_URL` is not already set — if you have a
+# Postgres of your own (or a hosted one), point `DATABASE_URL` at it and this file is unused.
+#
+# Port 5433, not 5432, so it cannot collide with a Postgres already running on the host.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: playroom
+    ports:
+      - '5433:5432'
+    # The bootstrap waits on this rather than sleeping: a fixed sleep is either too short on a
+    # cold machine or wasted on a warm one.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d playroom']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - playroom-db:/var/lib/postgresql/data
+
+volumes:
+  playroom-db:
