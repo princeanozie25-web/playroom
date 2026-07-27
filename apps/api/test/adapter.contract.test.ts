@@ -24,7 +24,7 @@ describe('agent turn contract', () => {
       { kind: 'done', tokens_in: 12, tokens_out: 3, stop_reason: 'end_turn' },
     ]);
     server = await startTestServer({ adapterFactory: factoryFor(adapter) });
-    expect((await httpCreateRoom(server.httpBase, roomId)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
   });
 
   afterAll(async () => {

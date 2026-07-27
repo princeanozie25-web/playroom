@@ -113,7 +113,7 @@ describe('the handshake', () => {
     // at the route that mints one, because "no credential" would send a client author to the
     // wrong place now.
     const id = room('auth-none');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const { frames, code } = await probe(`${server.wsBase}/rooms/${id}/ws?after=0`);
     expect(code).toBe(4401);
     expect(frames[0]).toMatchObject({ type: 'error', code: 'ticket_required' });
@@ -124,7 +124,7 @@ describe('the handshake', () => {
 
   it('REFUSES a fabricated ticket with a DIFFERENT code, and a LONG-LIVED TOKEN outright', async () => {
     const id = room('auth-bad');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const bad = await probe(`${server.wsBase}/rooms/${id}/ws?after=0&ticket=pwt_nonsense`);
     expect(bad.code).toBe(4401);
     expect(bad.frames[0]).toMatchObject({ type: 'error', code: 'ticket_invalid' });
@@ -150,7 +150,7 @@ describe('the handshake', () => {
 
   it('accepts a valid credential and stamps the actor on what it writes', async () => {
     const id = room('auth-ok');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('hello from a stamped identity', 'ok-1');
@@ -166,7 +166,7 @@ describe('the claim is gone from the wire', () => {
     // actor_id 'sol', which the room rendered with Sol's chip and Sol's accent — visually
     // indistinguishable from a real turn apart from a missing spend line.
     const id = room('forge-human');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -194,7 +194,7 @@ describe('the claim is gone from the wire', () => {
     // The credential is the actor. Connecting as sol writes as sol — which is correct, and is
     // also why credentials are per-member rather than one shared secret for the deployment.
     const id = room('forge-cred');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const solToken = await issueTestCredential('sol', 'identity-test-as-sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, solToken);
     await c.open();
@@ -210,7 +210,7 @@ describe('the front door checks membership (S13-N2, closed in S1.3b)', () => {
     // The positive half first: enforcement that refuses everyone is not enforcement, and this is
     // the case the film depends on — `prince` is enrolled in every room at creation.
     const id = room('door-member');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('I am in this room', 'door-1');
@@ -225,7 +225,7 @@ describe('the front door checks membership (S13-N2, closed in S1.3b)', () => {
     // socket on any room id they could guess and write into it — the widest thing an
     // authenticated member could assert with no record behind it.
     const id = room('door-outsider');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [id, 'sol']);
     const solToken = await issueTestCredential('sol', 'identity-test-door');
 
@@ -263,7 +263,7 @@ describe('the front door checks membership (S13-N2, closed in S1.3b)', () => {
     // credential that connected a moment ago is refused once the row is gone — no restart, no
     // cache to invalidate.
     const id = room('door-revoked');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const first = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await first.open();
     first.close();

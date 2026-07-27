@@ -169,10 +169,23 @@ export function factoryFor(adapter: AgentAdapter): (id: string) => AgentAdapter 
   return () => adapter;
 }
 
-export async function httpCreateRoom(httpBase: string, id: string): Promise<Response> {
+/**
+ * Create a room the way a client does — with a credential, as of S1.3c (RT-002).
+ *
+ * The token is optional so a test can assert the refusal by omitting it; every ordinary call site
+ * passes `server.token` and is otherwise unchanged.
+ */
+export async function httpCreateRoom(
+  httpBase: string,
+  id: string,
+  token?: string,
+): Promise<Response> {
   return fetch(`${httpBase}/rooms`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({ id, title: id }),
   });
 }

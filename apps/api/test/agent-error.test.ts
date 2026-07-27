@@ -21,7 +21,7 @@ describe('agent error handling', () => {
     server = await startTestServer({
       adapterFactory: factoryFor(throwingAdapter('claude-main', 'provider exploded')),
     });
-    expect((await httpCreateRoom(server.httpBase, roomId)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
   });
 
   afterAll(async () => {

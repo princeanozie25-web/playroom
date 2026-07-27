@@ -29,7 +29,7 @@ describe('one in-flight turn per room', () => {
       { delayMs: 150 },
     );
     server = await startTestServer({ adapterFactory: factoryFor(adapter) });
-    expect((await httpCreateRoom(server.httpBase, roomId)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
   });
 
   afterAll(async () => {

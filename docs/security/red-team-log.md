@@ -19,7 +19,7 @@ Severity is about the trust boundary, not user annoyance:
 | id     | date        | severity | discovered by                                 | principle violated                                                                                                                                | disposition                              | commit    |
 | ------ | ----------- | -------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------- |
 | RT-001 | 25 Jul 2026 | high     | found during A4 automated capture             | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one                                               | fixed                                    | `161aa16` |
-| RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001                  | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                                                   | accepted until **S1.1**                  | —         |
+| RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001                  | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                                                   | fixed                                    | `S13c-2`  |
 | RT-003 | 26 Jul 2026 | high     | property test, S0.5a                          | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                                               | fixed                                    | `01ae2e8` |
 | RT-004 | 26 Jul 2026 | high     | S0.5b activation-boundary review              | model output is DATA; a summon token in generated text would convert injection into cross-principal action                                        | guarded, one gap accepted until **S1.7** | `fe642c0` |
 | RT-005 | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b                 | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member                       | fixed                                    | `7fc279a` |
@@ -641,3 +641,54 @@ has landed — so it is overdue rather than deferred. It is small: the browser's
 only client that would need a credential threaded through it, which is shell-slice work.
 
 **Trigger: the first pilot, or the first non-localhost exposure — whichever comes first.**
+
+---
+
+## S1.3c — the ticket, and an acceptance that expired quietly
+
+### FIXED — RT-002: creating a room required no credential
+
+`POST /rooms` was open to anyone who could reach the api, from S0.3 until now. The creator is an
+authenticated member, and `createRoom` enrols them **in the same transaction that creates the
+room** — the first transaction in this codebase, and it earns it: after S1.3b's front door, a room
+with no members is a room NOBODY can open, including the person who just made it, with no product
+surface to repair it from.
+
+The creator's row is written explicitly rather than left as a consequence of "every room gets every
+member". Redundant today and not tomorrow: the day rooms stop enrolling everyone, the line keeping
+a creator out of their own room would be a deletion nobody notices.
+
+**THE ACCEPTANCE EXPIRED FIVE SLICES BEFORE ANYONE ACTED ON IT, and that is the finding worth
+recording.** RT-002 was accepted "until S1.1", on a sound argument: §1's invite-only roster cannot
+be enforced by a route guard when nothing knows who is asking. S1.1a, S1.1b and S1.1c landed
+principals, members and rooms-with-members; S1.2 landed identity. Each of those closings made
+RT-002's condition false, and none of them was the slice that owned RT-002, so nobody looked.
+
+**An acceptance with a named trigger still needs someone to check the trigger.** This log records
+dispositions and re-reads them only when the finding comes up again — which, for a finding nobody
+is working on, is never. The cheapest fix is a habit rather than a mechanism: **when a slice closes,
+re-read the acceptances whose trigger it just satisfied.** S1.3b's re-verification section exists
+because greps decay the same way, and this is the same failure in a different column.
+
+### FIXED — S13-N3, both faces: the socket takes a single-use ticket
+
+A browser cannot set headers on a WebSocket handshake, so the credential travelled in the query
+string, and the page handed the same credential to a client component so it could put it there.
+
+`POST /ws-ticket` behind Bearer mints a ticket worth **one socket, one member, one room, thirty
+seconds**, hashed at rest. Consumption is an atomic UPDATE — the property a signed ticket cannot
+have, and the reason the store is rows rather than a signature. Two concurrent handshakes on one
+ticket: exactly one `hello`, exactly one refusal.
+
+The issuing route asks **no authorisation question** — checking membership there would answer "does
+that room exist and am I in it", the oracle S1.3b closed, rebuilt one route over. The handshake
+stays the single place that decides.
+
+Fabricated, consumed, expired and wrong-room are **one refusal to the caller** and four reasons in
+the log. There is no `token` fallback on the socket: a valid credential presented the old way is
+refused, because a fallback is the old path still open.
+
+**What it does not fix, and the reason it is still worth doing.** There is no login, so the web tier
+mints a ticket for anyone who can reach it. The credential moved from every reader of the page's
+HTML into one server process; `which human is this` is unchanged and is S04-N2. A ticket narrows
+EXPOSURE, not authority.

@@ -14,7 +14,7 @@ describe('idempotent sends', () => {
 
   beforeAll(async () => {
     server = await startTestServer();
-    const res = await httpCreateRoom(server.httpBase, roomId);
+    const res = await httpCreateRoom(server.httpBase, roomId, server.token);
     expect(res.status).toBe(201);
   });
 

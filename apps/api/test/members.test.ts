@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  Client,
   httpCreateRoom,
   issueTestCredential,
   startTestServer,
@@ -89,7 +90,7 @@ describe('a room roster, scoped', () => {
   it('GET /rooms/:id/members returns only that room, and 404s for a room that is not there', async () => {
     server = await startTestServer();
     const room = `members-scope-${Date.now()}`;
-    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
 
     const res = await fetch(`${server.httpBase}/rooms/${room}/members`, {
       headers: { authorization: `Bearer ${server.token}` },
@@ -112,7 +113,7 @@ describe('a room roster, scoped', () => {
     // removing a member yet — invites and their inverse need an authenticated actor (S1.2) —
     // but membership is data, and the read must follow it.
     const room = `members-remove-${Date.now()}`;
-    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
       room,
       'sol',
@@ -131,7 +132,7 @@ describe('a room roster, scoped', () => {
     // member record in S1.1a and resolution became per-room in S1.1b; this is the tag the
     // film types, checked through both moves.
     const room = `members-tokens-${Date.now()}`;
-    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
     await loadRoomTokens(pool, room);
 
     const { summonRuling } = await import('../src/agent.js');
@@ -157,7 +158,7 @@ describe('who may read a roster (S1.2)', () => {
     // open, with the finding saying so. A roster is not a room id: it names people, the
     // principals they act for, and the actions each of them has been fenced from.
     const room = `roster-auth-${Date.now()}`;
-    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
 
     const none = await fetch(`${server.httpBase}/rooms/${room}/members`);
     expect(none.status).toBe(401);
@@ -184,7 +185,7 @@ describe('who may read a roster (S1.2)', () => {
     // enumerate room ids by trying, and cross-principal leakage is what the product exists to
     // prevent. The distinction is moved to the server's log, not lost.
     const room = `roster-outsider-${Date.now()}`;
-    expect((await httpCreateRoom(server.httpBase, room)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
       room,
       'sol',
@@ -220,7 +221,7 @@ describe('who may read a roster (S1.2)', () => {
 describe('the oracle is closed everywhere, not just at the front door (S12-N1)', () => {
   it('GET /rooms/:id requires a credential, and refuses a token in the query string', async () => {
     const roomId = `oracle-auth-${Date.now()}`;
-    expect((await httpCreateRoom(server.httpBase, roomId)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
 
     const none = await fetch(`${server.httpBase}/rooms/${roomId}`);
     expect(none.status).toBe(401);
@@ -245,7 +246,7 @@ describe('the oracle is closed everywhere, not just at the front door (S12-N1)',
     // quiet is worth nothing if a sibling route answers the same question one request later, so
     // this asserts the whole surface at once rather than each route in isolation.
     const roomId = `oracle-end-${Date.now()}`;
-    expect((await httpCreateRoom(server.httpBase, roomId)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
       roomId,
       'sol',
@@ -268,17 +269,75 @@ describe('the oracle is closed everywhere, not just at the front door (S12-N1)',
     }
 
     // AND THE CREATE ROUTE, which used to return an existing room's title and creation date to
-    // anyone who guessed the id — an oracle for content, not merely for existence.
-    const collide = await fetch(`${server.httpBase}/rooms`, {
+    // anyone who guessed the id — an oracle for content, not merely for existence. It is closed
+    // twice over now, and both halves are asserted because they fail independently.
+    //
+    // FIRST: it takes a credential at all (RT-002, closed in S1.3c).
+    const anonymous = await fetch(`${server.httpBase}/rooms`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ id: roomId, title: 'a title I chose' }),
     });
+    expect(anonymous.status).toBe(401);
+
+    // SECOND: even an authenticated member learns nothing by guessing. `sol` is not in this room;
+    // a collision and a fresh create return the same body, so the response cannot be used to
+    // discover that the room exists or what it is called.
+    const collide = await fetch(`${server.httpBase}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...bearer },
+      body: JSON.stringify({ id: roomId, title: 'a title I chose' }),
+    });
     expect(collide.status).toBe(201);
-    // Only the id comes back, so a collision and a fresh create are indistinguishable.
     expect(await collide.json()).toEqual({ id: roomId });
 
     await pool.query("DELETE FROM member_credentials WHERE label = 'roster-outsider'");
+    await pool.query('DELETE FROM rooms WHERE id = $1', [roomId]);
+  });
+});
+
+describe('creating a room requires a credential (RT-002, closed in S1.3c)', () => {
+  it('REFUSES an unauthenticated create, in the standard shape', async () => {
+    const res = await fetch(`${server.httpBase}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: `rt002-${Date.now()}`, title: 'no credential here' }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ type: 'error', code: 'credential_required' });
+
+    const bad = await fetch(`${server.httpBase}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer prm_nope' },
+      body: JSON.stringify({ id: `rt002-bad-${Date.now()}` }),
+    });
+    expect(bad.status).toBe(401);
+    expect(await bad.json()).toMatchObject({ code: 'credential_invalid' });
+  });
+
+  it('ENROLS THE CREATOR in the same transaction, so the room can actually be opened', async () => {
+    // The property that makes creation and enrolment one act rather than two: after S1.3b's front
+    // door, a room with no members is a room NOBODY can open — including the member who just made
+    // it, and there is no product surface to fix it from.
+    const roomId = `rt002-enrol-${Date.now()}`;
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+
+    const { rows } = await pool.query<{ member_id: string }>(
+      'SELECT member_id FROM room_members WHERE room_id = $1 ORDER BY member_id',
+      [roomId],
+    );
+    expect(rows.map((r) => r.member_id)).toContain('prince');
+
+    // And the door opens for them, which is the only assertion that proves the row is the right
+    // one rather than merely present.
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
+    await c.open();
+    c.send('the creator can open their own room', 'rt002-1');
+    await c.waitForEvents(1);
+    expect(c.events[0].actor_id).toBe('prince');
+    c.close();
+
+    await pool.query('DELETE FROM events WHERE room_id = $1', [roomId]);
     await pool.query('DELETE FROM rooms WHERE id = $1', [roomId]);
   });
 });

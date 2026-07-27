@@ -42,7 +42,7 @@ function adapterFor(id: string) {
 
 beforeAll(async () => {
   server = await startTestServer({ adapterFactory: (id) => adapterFor(id) });
-  expect((await httpCreateRoom(server.httpBase, roomId)).status).toBe(201);
+  expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
 });
 
 afterAll(async () => {

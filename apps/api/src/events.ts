@@ -44,38 +44,68 @@ function rowToServerEvent(row: EventRow): ServerEvent {
   });
 }
 
-// Create a room, or return the existing one if the id is already taken (so a
-// stable slug like `demo-room` is safe to POST repeatedly).
-export async function createRoom(pool: Pool, id: string, title: string): Promise<RoomRow> {
-  const inserted = await pool.query<RoomRow>(
-    `INSERT INTO rooms (id, title) VALUES ($1, $2)
-     ON CONFLICT (id) DO NOTHING
-     RETURNING id, title, created_at`,
-    [id, title],
-  );
-  // A NEW ROOM GETS EVERY CURRENT MEMBER.
-  //
-  // Not a policy choice — it is what already happens, written down. Every room could
-  // already address every member and every actor could already post anywhere; migration
-  // 008 recorded that for existing rooms and this keeps it true for new ones, so nothing
-  // about the film's room changes.
-  //
-  // Narrowing it needs a way to express exceptions, which is invites, which needs an
-  // authenticated inviter (S1.2). The interesting case still arrives without any of that:
-  // a member enabled AFTER a room is created is not in that room, and the roster rules then
-  // have something real to refuse.
-  await pool.query(
-    `INSERT INTO room_members (room_id, member_id)
-     SELECT $1, m.id FROM members AS m
-     ON CONFLICT DO NOTHING`,
-    [id],
-  );
-  if (inserted.rows[0]) return inserted.rows[0];
-  const existing = await pool.query<RoomRow>(
-    'SELECT id, title, created_at FROM rooms WHERE id = $1',
-    [id],
-  );
-  return existing.rows[0];
+/**
+ * Create a room, or return the existing one if the id is already taken (so a stable slug like
+ * `demo-room` is safe to POST repeatedly).
+ *
+ * ── CREATION AND ENROLMENT ARE ONE ACT (S1.3c) ──
+ *
+ * In a transaction, and this is the first one in the codebase. Two writes that must both happen:
+ * a room with no members is UNREACHABLE through the front door S1.3b built — the handshake
+ * refuses everyone, the roster read refuses everyone, and the room can never be opened by anybody
+ * including the person who just made it. Before this, a failure between the two statements left
+ * exactly that: a room nobody could enter and nobody could delete through the product.
+ *
+ * The creator is enrolled EXPLICITLY rather than as a consequence of being in `members`. That
+ * matters the day rooms stop enrolling everyone: the line that keeps a creator out of their own
+ * room would otherwise be a deletion nobody notices, and the failure would be a room that opens
+ * for the whole roster except its author.
+ *
+ * A NEW ROOM STILL GETS EVERY CURRENT MEMBER. Not a policy choice — it is what already happens,
+ * written down (S1.1b). Narrowing it needs a way to express exceptions, which is invites, which
+ * needs an authenticated inviter; that arrived in S1.2 and the invite surface has not. What is
+ * new here is only that the creator's own row is guaranteed rather than incidental.
+ */
+export async function createRoom(
+  pool: Pool,
+  id: string,
+  title: string,
+  creator: string,
+): Promise<RoomRow> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const inserted = await client.query<RoomRow>(
+      `INSERT INTO rooms (id, title) VALUES ($1, $2)
+       ON CONFLICT (id) DO NOTHING
+       RETURNING id, title, created_at`,
+      [id, title],
+    );
+    await client.query(
+      `INSERT INTO room_members (room_id, member_id)
+       SELECT $1, m.id FROM members AS m
+       ON CONFLICT DO NOTHING`,
+      [id],
+    );
+    // THE CREATOR, NAMED. Redundant while every member is enrolled above, and it is the one row
+    // whose absence would make the room unopenable by the person who asked for it.
+    await client.query(
+      `INSERT INTO room_members (room_id, member_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [id, creator],
+    );
+    const row =
+      inserted.rows[0] ??
+      (await client.query<RoomRow>('SELECT id, title, created_at FROM rooms WHERE id = $1', [id]))
+        .rows[0];
+    await client.query('COMMIT');
+    return row;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getRoom(pool: Pool, id: string): Promise<RoomRow | null> {

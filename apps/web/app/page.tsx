@@ -13,15 +13,18 @@ export default function Landing() {
     e.preventDefault();
     setBusy(true);
     try {
-      const res = await fetch('/rooms', {
+      // `/api/rooms`, not `/rooms`: the api requires a credential now (RT-002, closed in S1.3c)
+      // and a client component cannot hold one. The route handler adds the Bearer header
+      // server-side, exactly as the ticket counter does for the socket.
+      const res = await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: slug.trim() || undefined, title: title.trim() || undefined }),
       });
       if (!res.ok) throw new Error(`create failed: ${res.status}`);
-      // POST /rooms returns the RoomRow shape; the client needs only `id`. RoomRow
-      // is not exported from @playroom/shared (see FINDING in the closeout), so it
-      // is typed locally here — an any→typed assignment, not a cast.
+      // POST /rooms returns ONLY `{ id }` as of S1.3b — it used to return the whole row, which
+      // handed an existing room's title and creation date to anyone who guessed the id. The
+      // client never needed more than the id, which is why closing that oracle cost nothing.
       const room: { id: string } = await res.json();
       router.push(`/r/${room.id}`);
     } catch (err) {

@@ -59,7 +59,7 @@ afterAll(async () => {
 describe('refuse out loud', () => {
   it('says so when a tag names nobody, and writes no summon', async () => {
     const id = room('summon-unknown');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -80,7 +80,7 @@ describe('refuse out loud', () => {
     // appendMessage's idempotency. Without that, a replayed frame would append a second
     // identical refusal — the same class of bug as the replayed summon.
     const id = room('summon-unknown-replay');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -99,7 +99,7 @@ describe('refuse out loud', () => {
 
   it('names the known member AND refuses the unknown one in the same message', async () => {
     const id = room('summon-mixed');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -117,7 +117,7 @@ describe('refuse out loud', () => {
     // turn fails LOUDLY, with a body a member can read and an error_class in telemetry.
     // Not silence, which is what a caught-and-swallowed factory error would have been.
     const id = room('summon-unreachable');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -142,7 +142,7 @@ describe('the second drift number, enforced', () => {
     // and nothing in application memory remembers this summon was already answered. Only
     // migration 006's unique index on `agent.turn.started` can refuse it.
     const id = room('one-turn-per-summon');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
 
     // A TASK FIRST, because a summon belongs to one as of S1.3 and the signature says so.
     // This test drives `runAgentTurn` directly to reach the retry race, so it builds what the

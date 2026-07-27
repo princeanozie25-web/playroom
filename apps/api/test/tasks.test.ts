@@ -72,7 +72,7 @@ afterAll(async () => {
 describe('a task is created when a human asks a member for work', () => {
   it('starts WORKING, names its assignee and intent, and reaches DONE when the turn completes', async () => {
     const id = room('task-working');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -123,7 +123,7 @@ describe('a task is created when a human asks a member for work', () => {
     // tasks. Migration 011's unique index on the origin is what refuses it — an `if` cannot,
     // because both frames can be in flight before either has committed.
     const id = room('task-replay');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -144,7 +144,7 @@ describe('a task is created when a human asks a member for work', () => {
 
   it('two tagged members produce TWO tasks, one each', async () => {
     const id = room('task-two');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@claude and @sol both please', 't-1');
@@ -169,7 +169,7 @@ describe('input-required, at last', () => {
     // S1.1c could only do the second half. THE SENTENCE IS UNCHANGED — the task state is a new
     // record of the same refusal, not a new refusal, and this assertion is what says so.
     const id = room('task-inputreq');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     await pool.query("UPDATE routes SET status = 'unavailable' WHERE member_id = 'sol'");
     try {
       const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
@@ -205,7 +205,7 @@ describe('held, per §14', () => {
     // new. NOTHING RESUMES IT — there is no retry budget and no scheduler, so this asserts
     // where the work stopped and not that anything picks it up.
     const id = room('task-held');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@sol please look', 'h-1');

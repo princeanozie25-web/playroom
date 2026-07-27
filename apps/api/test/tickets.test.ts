@@ -64,7 +64,7 @@ afterAll(async () => {
 describe('POST /ws-ticket', () => {
   it('requires a credential, and refuses a token in the query string', async () => {
     const id = room('tkt-auth');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
 
     const none = await fetch(`${server.httpBase}/ws-ticket`, {
       method: 'POST',
@@ -85,7 +85,7 @@ describe('POST /ws-ticket', () => {
 
   it('mints a ticket bound to the member and the room, with a seconds-long life', async () => {
     const id = room('tkt-mint');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const res = await fetch(`${server.httpBase}/ws-ticket`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${server.token}` },
@@ -132,7 +132,7 @@ describe('a ticket is spent once', () => {
     // The property a signed ticket could not have given. Expiry alone leaves a thirty-second
     // replay window on every connect; single use closes it, and single use needs state.
     const id = room('tkt-reuse');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const ticket = await mintTicket(server.httpBase, server.token, id);
 
     const first = new WebSocket(`${server.wsBase}/rooms/${id}/ws?after=0&ticket=${ticket}`);
@@ -154,7 +154,7 @@ describe('a ticket is spent once', () => {
     // `consumed_at IS NULL` in the WHERE clause rather than a read followed by a write. Same
     // shape as the replayed summon migrations 005 and 006 exist to refuse.
     const id = room('tkt-race');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const ticket = await mintTicket(server.httpBase, server.token, id);
 
     // NOT via `probe`: the WINNER never closes, so waiting for two closes would hang. Both
@@ -179,7 +179,8 @@ describe('a ticket is spent once', () => {
     // one.
     const a = room('tkt-room-a');
     const b = room('tkt-room-b');
-    for (const id of [a, b]) expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    for (const id of [a, b])
+      expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const ticket = await mintTicket(server.httpBase, server.token, a);
 
     const wrongDoor = await probe(`${server.wsBase}/rooms/${b}/ws?after=0&ticket=${ticket}`);
@@ -193,7 +194,7 @@ describe('a ticket is spent once', () => {
     // Expiry is asserted at the unit, by writing the row with a past expiry — the alternative is a
     // test that sleeps for thirty seconds, which is a test nobody runs twice.
     const id = room('tkt-expired');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const issued = await issueTicket(pool, 'prince', id);
     await pool.query("UPDATE ws_tickets SET expires_at = now() - interval '1 second'");
 
@@ -213,7 +214,7 @@ describe('a ticket is spent once', () => {
   it('the four failures are distinguished IN THE FUNCTION, so the log can name them', async () => {
     // One answer outward, four inward. The operator has logs; the caller has a closed socket.
     const id = room('tkt-reasons');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
 
     const missing = await consumeTicket(pool, undefined, id);
     const unknown = await consumeTicket(pool, 'pwt_never_existed', id);
@@ -238,7 +239,7 @@ describe('the tickets table stays bounded (S12-N3 measured, not assumed)', () =>
     // rows unnoticed. The sweep runs inside `issueTicket` — no scheduler, no second mechanism —
     // and the assertion is a measurement rather than a comment saying it happens.
     const id = room('tkt-sweep');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
 
     for (let i = 0; i < 5; i += 1) await issueTicket(pool, 'prince', id);
     const withLive = await ticketCount(pool);
@@ -253,7 +254,7 @@ describe('the tickets table stays bounded (S12-N3 measured, not assumed)', () =>
 
   it('a live ticket is NOT swept — the window is an audit window, not a deletion policy', async () => {
     const id = room('tkt-keep');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const keep = await issueTicket(pool, 'prince', id);
     await issueTicket(pool, 'prince', id); // triggers a sweep
     expect((await consumeTicket(pool, keep.ticket, id)).ok).toBe(true);
@@ -265,7 +266,7 @@ describe('the client walks the whole path', () => {
     // The end-to-end shape every other suite now uses: credential → ticket → socket. Nothing in
     // the room changed, which is the point of calling this plumbing.
     const id = room('tkt-e2e');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('through the ticket path', 'tkt-1');

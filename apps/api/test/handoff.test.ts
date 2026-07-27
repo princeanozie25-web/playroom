@@ -39,7 +39,7 @@ async function roomWithTask(
   tag = '@claude please look at this',
 ): Promise<{ id: string; c: Client; taskId: string }> {
   const id = room(prefix);
-  expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+  expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
   const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
   await c.open();
   c.send(tag, `seed-${id}`);
@@ -250,7 +250,7 @@ describe('S12-N2 is closed: the subject must be justified by a record', () => {
     // sound for the subject it was given, and the card said "requested under Claude's mandate"
     // for a request Claude never made.
     const id = room('subj-unjustified');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -339,7 +339,7 @@ describe('S12-N2 is closed: the subject must be justified by a record', () => {
     // authority is the base case, and a rule that demanded a task first would refuse the one
     // request that never needed a record.
     const id = room('subj-self');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const solToken = await issueTestCredential('sol', 'handoff-test-self');
     const sol = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, solToken);
     await sol.open();
@@ -372,7 +372,7 @@ describe('S12-N2 is closed: the subject must be justified by a record', () => {
     // `nobody-in-particular`. No record can name a non-member, so this now refuses before the
     // evaluator — and the room stops accepting decision rows about names that refer to nobody.
     const id = room('subj-ghost');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.ws.send(

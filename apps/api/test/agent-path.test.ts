@@ -137,7 +137,7 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
 describe('and it holds against a client that tries', () => {
   it('REFUSES an invented turn-triggering frame — out loud, socket intact', async () => {
     const id = room('forge-turn');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -184,7 +184,7 @@ describe('and it holds against a client that tries', () => {
     // to a human summon stops being true — and that invariant is asserted globally, over the
     // whole database, in summon-provenance.
     const id = room('handoff-no-turn');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@claude take a first look', 'h-1');
@@ -215,7 +215,7 @@ describe('and it holds against a client that tries', () => {
     // it carries the authority context (Bible §4.1, §8.1) rather than making a reader ask for
     // it. Derived from records in stamp.ts, so there is no field here a client could influence.
     const id = room('stamped-turn');
-    expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@sol please take a look', 's-1');

@@ -13,14 +13,22 @@ function genId(): string {
   return `room-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-// Rooms have no creator column yet; ctx.actorId is validated at the entry and will
-// be fabric-stamped in S2.1. Behaviour is identical to the pre-refactor route.
+// THE CREATOR IS THE AUTHENTICATED MEMBER (S1.3c). `ctx.actorId` was `anonymous` until this
+// slice, because `POST /rooms` took no credential — RT-002, accepted "until S1.1" and then
+// carried five slices past it. It is a real member now, and it is enrolled in the room in the
+// same transaction that creates it: a room with no members cannot be opened by anyone, including
+// the person who just made it.
+//
+// Rooms still have no `created_by` COLUMN. The creator is recorded by their membership row rather
+// than by an attribute, which is enough for the reachability property this slice needs and is not
+// enough for "who owns this room" — that question arrives with invites and has nowhere to live
+// until it does.
 export function createRoomCommand(
   deps: CommandDeps,
-  _ctx: CommandContext,
+  ctx: CommandContext,
   input: { id?: string; title?: string },
 ): Promise<RoomRow> {
   const title = input.title && input.title.trim() ? input.title.trim() : 'Untitled room';
   const id = input.id && input.id.trim() ? slugify(input.id) : genId();
-  return createRoom(deps.pool, id, title);
+  return createRoom(deps.pool, id, title, ctx.actorId);
 }

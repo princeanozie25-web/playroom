@@ -412,9 +412,24 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // costs nothing. RT-002's own risk is unchanged: an unauthenticated caller can still CREATE
     // rooms, and that is the finding to close, not this one.
     fastify.post('/rooms', async (req, reply) => {
+      // ── RT-002 CLOSES HERE ────────────────────────────────────────────────────────────
+      //
+      // Anyone who could reach the api could create a room. Accepted in S0.3 "until S1.1",
+      // because §1's invite-only roster cannot be enforced by a route guard when nothing knows
+      // who is asking — which was true then and stopped being true when S1.2 landed identity.
+      // It ran five slices past its own expiry.
+      //
+      // The creator is now an authenticated member, and `createRoom` enrols them in the same
+      // transaction: after S1.3b's front door, a room with no members is a room nobody can open.
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        app.log.warn({ code: auth.failure }, 'create refused: no usable credential');
+        reply.code(401);
+        return credentialRefusal(auth.failure, undefined);
+      }
       const body = (req.body ?? {}) as { id?: unknown; title?: unknown };
       const room = await executeCommand(
-        { actorId: 'anonymous', mode: 'human' },
+        { actorId: auth.auth.member_id, principalId: auth.auth.principal_id, mode: 'human' },
         {
           kind: 'createRoom',
           id: typeof body.id === 'string' ? body.id : undefined,

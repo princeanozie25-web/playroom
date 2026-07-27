@@ -76,7 +76,7 @@ describe('mandate v0 — the producer', () => {
     const server = await startTestServer();
     const roomId = room('decision-cosign');
     try {
-      await httpCreateRoom(server.httpBase, roomId);
+      await httpCreateRoom(server.httpBase, roomId, server.token);
       await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
       const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
@@ -117,7 +117,7 @@ describe('mandate v0 — the producer', () => {
     const server = await startTestServer();
     const roomId = room('decision-unknown');
     try {
-      await httpCreateRoom(server.httpBase, roomId);
+      await httpCreateRoom(server.httpBase, roomId, server.token);
       await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
       const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
@@ -156,7 +156,7 @@ describe('mandate v0 — the producer', () => {
     const server = await startTestServer();
     const roomId = room('decision-nomandate');
     try {
-      await httpCreateRoom(server.httpBase, roomId);
+      await httpCreateRoom(server.httpBase, roomId, server.token);
       const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
@@ -186,7 +186,7 @@ describe('mandate v0 — the producer', () => {
     const server = await startTestServer({ loggerStream: stream, logLevel: 'info' });
     const roomId = room('decision-allow');
     try {
-      await httpCreateRoom(server.httpBase, roomId);
+      await httpCreateRoom(server.httpBase, roomId, server.token);
       await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
       const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
@@ -220,7 +220,7 @@ describe('mandate v0 — the producer', () => {
     const server = await startTestServer();
     const roomId = room('decision-chat');
     try {
-      await httpCreateRoom(server.httpBase, roomId);
+      await httpCreateRoom(server.httpBase, roomId, server.token);
       const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.send('just talking', 'm3-chat-1');
