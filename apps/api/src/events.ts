@@ -140,9 +140,14 @@ export async function eventsAfter(
   return rows.map(rowToServerEvent);
 }
 
-// The context handed to an agent: the last N chat messages of the room, oldest
-// first. Agent turn events are excluded — the agent sees the conversation, not
-// its own event stream (PM7 cap; no summaries or principal stores yet).
+// THE ROOM'S COMMON GROUND: the last N chat messages, oldest first. Agent turn events are
+// excluded — the agent sees the conversation, not its own event stream (PM7 cap).
+//
+// This used to be described as "the context handed to an agent", and until S1.5 that was true
+// because it was the whole window. It is now ONE PART of §7.1's assembly — the shared part, the
+// one that is nobody's private context — and `assembly.ts` is what decides what a turn sees.
+// Correcting the comment rather than leaving it: a function whose doc claims a wider role than it
+// has is how the next reader concludes there is only one place context comes from.
 export async function recentMessages(
   pool: Pool,
   roomId: string,

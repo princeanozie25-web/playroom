@@ -765,3 +765,42 @@ body {
   border-color: var(--ink-3);
   color: var(--ink);
 }
+
+/* ── A PROMOTION (S1.5) ────────────────────────────────────────────────────────────────
+   §5.2: promoted content must be VISUALLY DISTINCT from native content, and the reason is
+   not neatness. A promotion is text written somewhere else, by someone who may not be in
+   this room, for a different audience. Given a byline and a bubble it would read as a
+   member speaking now, and the two things a reader most needs — this is imported, here is
+   why it was shared — would be exactly what the rendering hid.
+
+   So it is built like a system line, not like a turn: no bubble, no accent, small quiet
+   type for the sentence, and the disclosed text inset behind a rule so the boundary
+   between imported and native content is a visible EDGE rather than a change of tone.
+   NO PRINCIPAL ACCENT, deliberately — an accent answers "whose authority does this carry",
+   and a promotion carries none. It is a record that something was shared. */
+.promotion {
+  margin: var(--s-2) 0;
+}
+.promotion-head {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  align-items: baseline;
+}
+.promotion-purpose {
+  color: var(--ink-2);
+}
+/* THE DISCLOSED TEXT STAYS TEXT. `pre-wrap` for the same reason `.turn-body` has it (A4-F8,
+   §13): this is the one surface in the room carrying content from outside it, so it is the
+   last place to begin interpreting markup. Left rule in the muted grey rather than an
+   accent — the edge marks "not from here", and says nothing about authority. */
+.promotion-body {
+  white-space: pre-wrap;
+  margin: var(--s-1) 0 0;
+  padding: var(--s-1) 0 var(--s-1) var(--s-3);
+  border-left: 2px solid var(--line);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+}

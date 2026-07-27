@@ -80,6 +80,14 @@ export const HOOK = {
   interruptBudget: 'interrupt-budget',
   /** The one-tap downgrade control, shown only to the member the interrupt addresses. */
   interruptDowngrade: 'interrupt-downgrade',
+  /** A promotion row — somebody moved a private note into the room. Carries `data-pr-representation`. */
+  promotion: 'promotion',
+  /** The quiet sentence: who shared, and how much. */
+  promotionHead: 'promotion-head',
+  /** WHY it was shared, in the promoter's words. */
+  promotionPurpose: 'promotion-purpose',
+  /** The disclosed text itself, quoted and inset. */
+  promotionBody: 'promotion-body',
   /** The composer form. */
   composer: 'composer',
   /** The room refusal banner (RT-001). */

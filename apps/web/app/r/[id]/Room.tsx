@@ -21,6 +21,7 @@ import { MemberChip, MemberName } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
 import { HandoffRow, TaskChip, type HandoffItemView, type TaskItemView } from '../../TaskChip';
 import { InterruptChip, type InterruptItemView } from '../../InterruptChip';
+import { PromotionRow, type PromotionItemView } from '../../PromotionRow';
 import { HOOK, pr } from '../../hooks';
 import type { Principal, RosterMember } from '../../roster';
 
@@ -59,7 +60,12 @@ type HandoffItem = { kind: 'handoff'; key: string; view: HandoffItemView };
 // An interrupt is a claim on a member's attention. One chip per interrupt, updated in place when
 // it is lowered — the downgrade changes the claim rather than making a second one.
 type InterruptItem = { kind: 'interrupt'; key: string; view: InterruptItemView };
-type Item = MessageItem | AgentItem | DecisionItem | TaskItem | HandoffItem | InterruptItem;
+// A promotion is a DISCLOSURE that happened. One row where it happened, never updated in place:
+// unlike a task or an interrupt there is no later event that changes it, because a disclosure has
+// no second state — it cannot be lowered, moved or undone.
+type PromotionItem = { kind: 'promotion'; key: string; view: PromotionItemView };
+type Item =
+  MessageItem | AgentItem | DecisionItem | TaskItem | HandoffItem | InterruptItem | PromotionItem;
 
 /**
  * Group the event log into renderable items.
@@ -105,6 +111,22 @@ function buildItems(events: ServerEvent[]): Item[] {
         view.state = ev.payload.state;
         view.assignee = ev.payload.assignee;
       }
+    } else if (ev.event_type === 'context.promoted') {
+      // STRAIGHT FROM THE EVENT, with nothing derived. Every field the row shows is a field the
+      // record wrote — who approved, why, how much, and the text — so the room cannot describe a
+      // disclosure differently from the way it was recorded.
+      order.push({
+        kind: 'promotion',
+        key: `p${ev.payload.promotion_id}`,
+        view: {
+          promotion_id: ev.payload.promotion_id,
+          source_principal: ev.payload.source_principal,
+          representation: ev.payload.representation,
+          purpose: ev.payload.purpose,
+          approved_by: ev.payload.approved_by,
+          content: ev.payload.content,
+        },
+      });
     } else if (ev.event_type === 'interrupt.raised') {
       const view: InterruptItemView = {
         interrupt_id: ev.payload.interrupt_id,
@@ -476,6 +498,10 @@ export function Room({
           ) : it.kind === 'handoff' ? (
             <li key={it.key}>
               <HandoffRow handoff={it.view} roster={byId} />
+            </li>
+          ) : it.kind === 'promotion' ? (
+            <li key={it.key}>
+              <PromotionRow promotion={it.view} roster={byId} />
             </li>
           ) : (
             /* `data-accent` on the ROW, so the caret and the working indicator inherit the
