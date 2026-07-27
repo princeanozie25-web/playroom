@@ -12,7 +12,7 @@ import { HOOK, pr } from './hooks';
 //
 // `MemberName` is the transcript: name, colour, shape. Nothing else. The chip used to be
 // repeated above every turn, restating affiliation and the full mandate scope on every
-// message, which nobody does about a colleague. Removing it is most of this slice.
+// message, which nobody does about a colleague. Removing it is most of that slice.
 //
 // NEITHER INVENTS A FIELD. An agent absent from the roster renders as a bare name with no
 // affiliation and no mandate; a member whose principal is not in config renders no
@@ -21,15 +21,100 @@ import { HOOK, pr } from './hooks';
 // `mandate_label` used to sit in adapters.yaml describing authority nothing enforced; M-3
 // deleted it rather than leave a lie-shaped hole, and the summary below is derived from the
 // mandate document for exactly that reason.
+//
+// ── THE BINDING IS THE NAME (S-LIVE, owner's ruling) ──
+//
+// An agent renders as `Claude (Prince)`, not as `Claude` plus a separate `for Prince` clause. It
+// finishes what D-2 started: no word doing work the name can do. And it stops being cosmetic the
+// moment two agents stream in one room — which is now the primary test — because "whose agent just
+// said that" has to be answerable in the byline itself rather than by looking back up at the roster.
+//
+// The full detail on tap is unchanged: `Claude acts for Prince`, the namespaced scope, and which
+// actions need a signature.
 
-/** Marker: filled rounded square for an agent, hollow circle for a human. See globals.css. */
-function Marker() {
-  return <span className="chip-marker" />;
+/**
+ * Which kind of member this is.
+ *
+ * NOT `Boolean(member)`, and that was a real defect this slice inherited. Humans became roster
+ * records in S1.1b, so every human found in the roster — Prince included — rendered with
+ * `member-agent` and the agent's marker shape. The claim that identity is human-versus-agent BY
+ * SHAPE was quietly false for the member the film shows most, and no test looked at the class name.
+ */
+function isAgent(member?: RosterMember): boolean {
+  return member?.kind === 'agent';
+}
+
+/**
+ * THE MARKER, NOW WITH A GLYPH INSIDE IT (S-LIVE).
+ *
+ * Shape and colour still carry the meaning — filled square for an agent, hollow circle for a human,
+ * accent for the principal — and the glyph makes the distinction legible to someone who was never
+ * told the convention. A non-technical tester on a phone has about thirty seconds to work out that
+ * two of the four names in this room are not people.
+ *
+ * TWO INLINE SVGs. No stock images, no image assets, no licensing, nothing to download. `currentColor`
+ * so each glyph inherits the accent the marker already resolves, and `aria-hidden` because the name
+ * beside it is the accessible label — a screen reader announcing "robot Claude Prince" is worse than
+ * "Claude (Prince)".
+ */
+function Marker({ member }: { member?: RosterMember }) {
+  return (
+    <span
+      className="chip-marker"
+      {...pr(HOOK.memberGlyph)}
+      data-pr-kind={member?.kind ?? 'unknown'}
+    >
+      {isAgent(member) ? (
+        // A ROBOT: square head, two eyes, one antenna. Square because the marker is square, so the
+        // glyph and the shape say the same thing rather than two different things.
+        <svg viewBox="0 0 16 16" className="glyph" aria-hidden="true" focusable="false">
+          <path d="M8 1.5v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <rect
+            x="3"
+            y="4"
+            width="10"
+            height="8"
+            rx="2"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+          />
+          <circle cx="6.2" cy="8" r="1.1" fill="currentColor" />
+          <circle cx="9.8" cy="8" r="1.1" fill="currentColor" />
+        </svg>
+      ) : (
+        // A PERSON: head and shoulders. Round, matching the human marker's circle.
+        <svg viewBox="0 0 16 16" className="glyph" aria-hidden="true" focusable="false">
+          <circle cx="8" cy="5.4" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path
+            d="M2.9 13.6c0-2.6 2.3-4.2 5.1-4.2s5.1 1.6 5.1 4.2"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+    </span>
+  );
 }
 
 /** Accent attribute, or nothing at all. A member with no principal in config borrows no colour. */
 function accentAttr(member?: RosterMember): { 'data-accent'?: number } {
   return member?.accent != null ? { 'data-accent': member.accent } : {};
+}
+
+/**
+ * The name as the binding: `Claude (Prince)` for an agent, `Prince` for a person.
+ *
+ * A human is NOT rendered as `Prince (Prince)`. In this room a human IS their principal, so the
+ * parenthetical would be tautology — the same reasoning that kept `for Prince` off human chips in
+ * UI2. A missing principal name renders nothing rather than falling back to an identifier.
+ */
+function boundName(member: RosterMember | undefined, fallback: string): string {
+  if (!member) return fallback;
+  if (!isAgent(member) || !member.principal_name) return member.display_name;
+  return `${member.display_name} (${member.principal_name})`;
 }
 
 /**
@@ -40,22 +125,21 @@ function accentAttr(member?: RosterMember): { 'data-accent'?: number } {
  * member with no mandate shows no mandate text, never "unrestricted".
  */
 export function MemberChip({ member, name }: { member?: RosterMember; name: string }) {
-  const isAgent = Boolean(member);
+  const agent = isAgent(member);
   const summary = member ? mandateSummary(member.scope, member.protected_actions) : null;
   return (
     <span
-      className={['chip', isAgent ? 'chip-agent' : 'chip-human'].join(' ')}
+      className={['chip', agent ? 'chip-agent' : 'chip-human'].join(' ')}
       {...pr(HOOK.rosterMember)}
       data-pr-member={member ? member.id : name}
       {...accentAttr(member)}
     >
-      <Marker />
+      <Marker member={member} />
+      {/* THE BINDING AS THE NAME. This replaced a separate `for Prince` element: one string where
+          there were two, and one fewer thing to keep in sync with the record it came from. */}
       <span className="chip-name" {...pr(HOOK.author)}>
-        {member ? member.display_name : name}
+        {boundName(member, name)}
       </span>
-      {/* Affiliation, as a NAME. `principal:jerry` is an internal identifier and never
-          reaches the screen; null renders nothing rather than falling back to the id. */}
-      {member?.principal_name && <span className="chip-meta">for {member.principal_name}</span>}
       {summary && member && (
         /* AVAILABLE, NOT SHOUTED. The compact summary is always visible because beat 1
            reads it; the full namespaced scope is one click away rather than permanently on
@@ -94,20 +178,20 @@ export function MemberChip({ member, name }: { member?: RosterMember; name: stri
 /**
  * Transcript byline — the quiet one.
  *
- * No affiliation, no mandate, no `human` label. The shape says which kind of member this is
- * and the colour says whose authority it carries; both are answered by looking rather than
- * reading, which is what makes it survive a room with four principals.
+ * No mandate, no `human` label. The shape and glyph say which kind of member this is, the colour
+ * says whose authority it carries, and the name now says the binding — which is what makes it
+ * survive a room where two agents are talking at once.
  */
 export function MemberName({ member, name }: { member?: RosterMember; name: string }) {
-  const isAgent = Boolean(member);
+  const agent = isAgent(member);
   return (
     <span
-      className={['member', isAgent ? 'member-agent' : 'member-human'].join(' ')}
+      className={['member', agent ? 'member-agent' : 'member-human'].join(' ')}
       data-pr-member={member ? member.id : name}
       {...accentAttr(member)}
     >
-      <Marker />
-      <span {...pr(HOOK.author)}>{member ? member.display_name : name}</span>
+      <Marker member={member} />
+      <span {...pr(HOOK.author)}>{boundName(member, name)}</span>
     </span>
   );
 }

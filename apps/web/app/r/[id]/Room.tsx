@@ -22,6 +22,7 @@ import { DecisionCard } from '../../DecisionCard';
 import { HandoffRow, TaskChip, type HandoffItemView, type TaskItemView } from '../../TaskChip';
 import { InterruptChip, type InterruptItemView } from '../../InterruptChip';
 import { PromotionRow, type PromotionItemView } from '../../PromotionRow';
+import { Welcome } from '../../Welcome';
 import { HOOK, pr } from '../../hooks';
 import type { Principal, RosterMember } from '../../roster';
 
@@ -269,6 +270,14 @@ export function Room({
   // WHICH MEMBER THIS SOCKET IS, from `hello`. Used only to decide whether to draw a control the
   // server would accept — the authorisation itself is the socket's, never this value.
   const [viewer, setViewer] = useState<string | null>(null);
+  // THE WELCOME SCREEN SHOWS ONCE, and only for somebody who arrived through redemption — the join
+  // route redirects with `?welcome=1`. Read from the URL rather than from storage so it cannot
+  // reappear on a later visit, and so my own browser and the capture harness never see it: take 13
+  // is the asset and a panel over the room would have changed the film.
+  const [showWelcome, setShowWelcome] = useState(
+    () =>
+      typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('welcome'),
+  );
 
   const items = useMemo<Item[]>(() => buildItems(events), [events]);
   const conn: Conn = refusal ? 'refused' : status === 'open' ? 'connected' : 'reconnecting';
@@ -455,6 +464,22 @@ export function Room({
             <MemberChip key={h} member={byId.get(h)} name={h} />
           ))}
         </div>
+        {/* INSIDE THE HEADER, not as a fourth child of `.room`. The room is a three-row grid
+            (header / transcript / composer) and a fourth child takes `1fr` off the transcript and
+            pushes the composer into an implicit row — the layout collapses rather than shifting,
+            which is a good deal worse than the panel being in the wrong place. */}
+        {showWelcome && (
+          <Welcome
+            roster={roster}
+            viewer={viewer}
+            onDismiss={() => {
+              setShowWelcome(false);
+              // Take the flag out of the URL so a reload does not bring the panel back, and so a
+              // shared link never carries somebody else's onboarding.
+              window.history.replaceState(null, '', `/r/${roomId}`);
+            }}
+          />
+        )}
       </header>
 
       {refusal && (

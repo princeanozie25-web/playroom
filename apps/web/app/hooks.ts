@@ -80,6 +80,12 @@ export const HOOK = {
   interruptBudget: 'interrupt-budget',
   /** The one-tap downgrade control, shown only to the member the interrupt addresses. */
   interruptDowngrade: 'interrupt-downgrade',
+  /** The kind glyph inside a member's marker. Carries `data-pr-kind` — human | agent. */
+  memberGlyph: 'member-glyph',
+  /** The one-screen welcome panel, shown once after redeeming a code. */
+  welcome: 'welcome',
+  /** Its single dismiss control. */
+  welcomeDismiss: 'welcome-dismiss',
   /** The join form — a room code and a first name, the only screen before the room. */
   join: 'join',
   /** The room-code field. */

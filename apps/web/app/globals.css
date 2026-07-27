@@ -242,9 +242,9 @@ body {
 .chip-agent .chip-name {
   color: var(--accent, var(--ink));
 }
-.chip-meta {
-  color: var(--ink-2);
-}
+/* `.chip-meta` lived here and rendered the `for Prince` clause. Deleted in S-LIVE with the element
+   it styled: the binding is now part of the name (`Claude (Prince)`), so the clause has nothing to
+   say. Dead CSS is a rule that looks like it is doing something. */
 .chip-mandate {
   padding: 0 var(--s-2);
   border-radius: var(--radius-pill);
@@ -889,4 +889,178 @@ body {
   background: var(--paper-2);
   color: var(--ink);
   line-height: 1.45;
+}
+
+/* ── GLYPH AVATARS (S-LIVE) ────────────────────────────────────────────────────────────
+   The marker grows from a 7px dot into a 16px badge holding a glyph. Shape and colour
+   still carry the meaning — square + accent for an agent, circle for a person — and the
+   glyph makes that legible to somebody who was never told the convention. A non-technical
+   tester has about thirty seconds to notice that two of the four names here are not people.
+
+   The rules below OVERRIDE the dot styling above rather than replacing it, so a marker
+   rendered without a glyph (an unknown member) still reads as the old dot. */
+.chip-marker {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.chip-marker .glyph {
+  width: 14px;
+  height: 14px;
+}
+/* An agent's badge keeps the square and the accent; the glyph sits inside it in the
+   accent colour rather than knocked out in white, so a pale accent stays legible. */
+.chip-agent .chip-marker,
+.member-agent .chip-marker {
+  border-radius: 4px;
+  background: var(--accent-soft, var(--paper-2));
+  border: 1.5px solid var(--accent, var(--ink));
+  color: var(--accent, var(--ink));
+}
+.chip-human .chip-marker,
+.member-human .chip-marker {
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1.5px solid var(--ink-3);
+  color: var(--ink-2);
+}
+
+/* ── THE ROOM AT PHONE WIDTH (S-LIVE) ──────────────────────────────────────────────────
+   REFLOW, NOT REDESIGN. No accent changes, no shape changes, no card rewording — the
+   layout is told to stack and wrap, and nothing is told to look different. D-1/D-2 remain
+   the shell slice's.
+
+   One breakpoint, at 480px. A second one would be a design with two states to maintain,
+   and the room has exactly one thing to say at small width: use all of it. */
+@media (max-width: 480px) {
+  /* SAFE AREAS. Paired with viewportFit: 'cover' in layout.tsx — one without the other is
+     worse than neither, because `cover` alone puts content under the notch. */
+  .room {
+    border-left: 0;
+    border-right: 0;
+    padding-left: max(var(--s-3), env(safe-area-inset-left));
+    padding-right: max(var(--s-3), env(safe-area-inset-right));
+  }
+  /* THE ROSTER SCROLLS SIDEWAYS rather than wrapping into three tall rows that push the
+     transcript off screen. Four members at 390px do not fit, and the transcript is what
+     the room is for.
+
+     `min-width: 0` IS THE LOAD-BEARING LINE, and without it this made things worse. A grid or
+     flex item's automatic minimum size is its CONTENT size, so `overflow-x: auto` alone let the
+     roster report its full 903px intrinsic width, which stretched the header to 951px and gave
+     the whole page a horizontal scrollbar — the exact defect the reflow was meant to remove.
+     Measured at 375px: scrollWidth 963 against a 375 viewport. The chain has to be told to
+     shrink at every level between the grid and the scroller. */
+  .room,
+  .room-header,
+  .room-title,
+  [data-pr='roster'] {
+    min-width: 0;
+  }
+  [data-pr='roster'] {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    /* Momentum scrolling without a visible bar eating 8px of a small screen. */
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  [data-pr='roster']::-webkit-scrollbar {
+    display: none;
+  }
+  .chip {
+    flex: none;
+  }
+  /* THE MANDATE PANEL SPANS THE ROOM instead of hanging off its chip.
+     `.mandate` is `position: relative`, so the panel's containing block is a chip INSIDE the
+     horizontally scrolling roster — insets measured from there put its right edge at 412px on a
+     375px screen, and scrolling the roster carried the open panel off with it. Dropping the chip
+     out of the positioning chain makes the HEADER the containing block, so the panel spans the
+     room and sits under the strip regardless of how far the roster has been scrolled. */
+  .room-header {
+    position: relative;
+  }
+  .mandate {
+    position: static;
+  }
+  .mandate-detail {
+    left: var(--s-3);
+    right: var(--s-3);
+    top: auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+  /* THE TRANSCRIPT TAKES THE REST OF THE SCREEN, and the composer stays above the
+     keyboard: `dvh` shrinks with the on-screen keyboard where `vh` does not, which is the
+     single difference between a reachable composer and one behind the keys. */
+  .room {
+    min-height: 100dvh;
+  }
+  .transcript {
+    flex: 1 1 auto;
+  }
+  /* 16px, for the same reason the join inputs are: iOS zooms a focused input under 16px
+     and does not zoom back out. */
+  .composer .what {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .composer button {
+    min-height: 44px;
+    min-width: 64px;
+  }
+  /* THUMB TARGETS. The downgrade control is one tap that spends somebody's budget, so it
+     has to be hittable on purpose and hard to hit by accident — 44px tall, and it keeps
+     its own spacing rather than sitting flush against the chip's text. */
+  .interrupt-downgrade {
+    min-height: 44px;
+    padding: 0 var(--s-3);
+  }
+  /* The decision card reads without sideways scrolling: the hash is the only long
+     unbreakable string on it. */
+  .decision-hash,
+  .decision code {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ── THE WELCOME PANEL (S-LIVE) ────────────────────────────────────────────────────────
+   Inline at the top of the room, not a modal over it. A modal has to be dismissed before a
+   tester can see anything, which makes the first interaction an obstacle; this pushes the
+   transcript down and gets out of the way when they tap. */
+.welcome {
+  margin-top: var(--s-3);
+  border: 1px solid var(--indigo-line);
+  background: var(--indigo-soft);
+  border-radius: 8px;
+  padding: var(--s-3);
+}
+.welcome-line {
+  margin: 0 0 var(--s-2);
+  line-height: 1.5;
+  color: var(--ink);
+}
+.welcome-optional {
+  color: var(--ink-2);
+}
+.welcome-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--paper);
+  border: 1px solid var(--indigo-line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.welcome-dismiss {
+  font: inherit;
+  font-size: 16px;
+  min-height: 44px;
+  padding: 0 var(--s-4);
+  border: 1px solid var(--indigo);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--indigo);
+  font-weight: 650;
+  cursor: pointer;
 }

@@ -829,3 +829,135 @@ for a disclosure is a human act or it is not consent.
 cannot do it, and must ask. That is a worse product and a better boundary, and it is the owner's call
 to revisit. If it is revisited, the thing to add is a co-signed promotion (§12.1's shape), not an
 `allow_agents` flag.
+
+## S-LIVE — what a stranger can reach
+
+Deploy was taken as a NO-GO on the owner's own rule (no hosting platform is authenticated on this
+machine; a first two-service deploy with WebSockets estimated at 2–3.5 hours against a ~2 hour line).
+So nothing below has been exercised over the public internet. **Everything in this section is about
+exposure that now EXISTS IN THE CODE and becomes live the moment a URL does.**
+
+### ACCEPTED WITH TRIGGER — what a demo credential reaches
+
+A room code redeems into a guest seat and issues a named, expiring member credential. What the holder
+can then do:
+
+**CAN:** connect to the ONE room the code named; read that room's transcript and roster; send
+messages; summon the agents enrolled in that room, including other people's; raise and lower
+interrupts within the mandate's `interrupts_per_day`; spend provider budget by summoning, up to the
+daily ceiling.
+
+**CANNOT:** reach any other room — the handshake refuses with byte-identical output to a room that
+does not exist (S1.3b, asserted for a redeemed guest specifically); read any principal's private
+context store, including their own seat's, because nothing exposes one over the wire; promote content;
+act as a non-guest principal, because `mintRoomCode` refuses a non-guest seat — the one refusal in
+that file whose absence would be a disclosure rather than an inconvenience.
+
+**WORTH SAYING PLAINLY:** a guest CAN summon another person's agent, and that agent's turn is stamped
+to ITS principal and spends against the shared ceiling. That is the product working as designed — this
+is a shared room — but it means one tester can spend the day's budget through somebody else's agent.
+**Trigger: the first tester who does it, deliberately or not.** The fix is S2.7's per-member budgets,
+not a rule here.
+
+**Trigger for the entry as a whole:** deployment to a public URL, at which point the gap below stops
+being theoretical.
+
+### NEW — SLIVE-N1: `POST /redeem` is unauthenticated and unthrottled
+
+The only unauthenticated write in the api, and deliberately so — it is the endpoint whose entire job is
+to give a credential to someone who has none. RT-002 closed the previous one in S1.3c; this opens a new
+one with different bounds.
+
+**The gap:** four characters from a 30-character alphabet is ~810,000 possibilities, and nothing slows
+a script down. On a public URL that is a weekend of guessing for one seat.
+
+**Why it survives today and would not survive tomorrow:** a successful guess costs the attacker a seat
+a real person then visibly cannot claim (single-use, and the operator sees it in `--list`); only two
+seats exist; and this is not internet-exposed. None of those three survives a deployment with more
+seats.
+
+**Not half-solved, on purpose.** The right answer is a rate limit keyed on IP plus a longer code, and
+both are cheap — they are omitted because a limiter with no deployment to protect is untested code
+sitting in the path that lets testers in. **Trigger: the first deployment to a public URL, before any
+code is sent to anyone.**
+
+### RE-CHECKED — RT-005's condition holds, and it was NOT checked off localhost
+
+The condition: **no ALLOW verdict causes any external side effect.** Re-read against the code as of
+S-LIVE and it holds, for the same structural reason as before: nothing executes a governed action.
+`pr.merge` and `deploy` appear in mandates and in the decision path, and no executor exists for
+either, so an ALLOW is a record that permission would have been granted and nothing more.
+
+**What this slice adds to the question is new and worth stating.** A guest summoning an agent DOES
+cause an external side effect — an HTTP request to a provider, and a charge. That is not an ALLOW
+verdict causing it (a summon is not a governed action; `agent.turn` never has been), so RT-005's
+condition is untouched as written. But the sentence now does less work than it sounds like it does,
+because the room can spend money with no verdict involved at all. The spend ceiling is the control
+there, not the evaluator.
+
+**THE EXIT CRITERION IS NOT MET.** The brief asked for RT-005 re-checked _off localhost_ — the first
+test of that line away from this machine. Deploy did not happen, so it was not tested there. Recorded
+as unmet rather than as satisfied by a code read.
+
+### NOTED — S15-N2 does not exist in this ledger, so its reasoning cannot be re-read
+
+The brief asks that S15-N2's inference channel be re-read now that external callers exist. **There is
+no S15-N2 in this file.** S1.5 logged exactly one new finding — S15-N1, the §7.1 invariant that
+compared a value against itself — plus one measurement and two corrections. I am not going to invent
+an acceptance argument in order to re-examine it.
+
+**What can be done is to name the inference channels S1.5 actually created and check each against
+external callers:**
+
+1. **The assembly telemetry line.** `ctx=common:N+own:M+task:K` on every turn reveals whether a
+   member's principal holds private notes and roughly how many. It is a SERVER LOG line, so an
+   external caller cannot read it — the channel is real and the audience is me.
+2. **Promotion existence.** A `context.promoted` event tells every member of the room that somebody
+   has private context and chose to share part of it. Intended: a disclosure that concealed the fact
+   it was a disclosure would defeat the record.
+3. **Refusal wording on the store.** `withPrincipalStore` returns zero rows for a foreign principal
+   rather than erroring, so `promoteContent` refuses a foreign item as `no_such_item` — the honest
+   reason, since from inside Prince's scope Jerry's item does not exist. No tell between "not there"
+   and "not yours".
+
+If S15-N2 names something else it needs writing down before it can be assessed. **Owner's call, and it
+is a question rather than a finding.**
+
+### NEW — SLIVE-N2: bring-your-own provider keys, the settings surface and the storage question
+
+Out of this slice by ruling. Logged because the shape is already visible and the design decision is the
+hard part, not the code.
+
+**The settings surface does not exist at all.** There is no per-member or per-principal configuration
+surface anywhere in the product: adapters are a config file, mandates are files, and everything else is
+a record with no editing path. A BYO key needs the first one ever built, and a settings page able to
+edit an authority-adjacent field is a new attack surface the day it ships.
+
+**The storage question is the harder half.** A provider key is a long-lived bearer secret belonging to a
+person, and this codebase holds exactly one class of secret at rest — `member_credentials.token_hash`,
+which is a HASH and works precisely because nothing ever needs to read it back. A provider key must be
+read on every turn, so it cannot be hashed. That leaves an encryption key in the environment (and the
+question of where THAT lives), a secrets manager, or never storing it and asking per session. All three
+are real answers and none is a small change.
+
+**Until then every turn spends MY key**, which is why the daily ceiling exists and why the guest
+adapters run at half the output cap. **Trigger: the first tester who asks to use their own account, or
+the first month the ceiling costs real money.**
+
+### NOTED — the log is replayable only while every row in it is a valid event
+
+Found by inserting a partial `agent.turn.completed` payload as a test fixture: the room's replay threw
+inside `rowToServerEvent` and the client received NOTHING. No error on screen — just a room that would
+not open, with a connection badge cycling forever.
+
+**The general form is a deployment constraint rather than a test problem.** `ServerEvent` is a strict
+discriminated union, so a server meeting an event type it does not know cannot parse it, and
+`eventsAfter` maps over every row in the room. Deploy an older server against a database holding a
+newer event type and **every room containing one becomes unreadable** — not degraded, empty.
+
+S1.5 added `context.promoted`; this slice added nothing to the union. So today's exposure is purely
+ordering: the server must be updated before any row of a new type is written, and a rollback past an
+event type is unsafe once one exists. **Not fixed here, and the fix is a decision rather than a patch**
+— skipping unparseable rows trades a hard failure for a silent gap in the transcript, which weakens
+"the transcript is the record" and is therefore the owner's call. **Trigger: the first deployment, or
+the first rollback.**
