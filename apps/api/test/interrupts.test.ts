@@ -285,3 +285,112 @@ describe('the log is the source of truth', () => {
     c.close();
   });
 });
+
+describe('interrupts_per_day stops being decorative (S1.4)', () => {
+  it('REFUSES a raise beyond the budget, with its own reason', async () => {
+    // The fifth field that looked like authority: parsed by the mandate schema since M-3 and read
+    // by NOTHING. `claude-main` is allowed six interrupts a day; the seventh is refused.
+    const id = room('int-budget');
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await clearSpend();
+
+    const limit = (await budgetFor(pool, 'claude-main')).limit;
+    expect(limit, 'the mandate must carry a limit or this test proves nothing').toBe(6);
+
+    for (let i = 0; i < (limit ?? 0); i += 1) {
+      const ok = await raiseInterrupt(pool, {
+        roomId: id,
+        urgency: 'DECISION',
+        raisedBy: 'claude-main',
+        addressedTo: 'prince',
+        aboutKind: 'message',
+        aboutId: `spend-${i}`,
+        summary: `claim ${i}`,
+      });
+      expect(ok.ok, `raise ${i} should be within budget`).toBe(true);
+    }
+
+    const overspent = await raiseInterrupt(pool, {
+      roomId: id,
+      urgency: 'DECISION',
+      raisedBy: 'claude-main',
+      addressedTo: 'prince',
+      aboutKind: 'message',
+      aboutId: 'one-too-many',
+      summary: 'the seventh',
+    });
+    expect(overspent.ok).toBe(false);
+    if (overspent.ok) throw new Error('narrowing');
+    // ITS OWN REASON. An exhausted budget is not an out-of-scope action: the member MAY do this
+    // and has done it too often, and reporting OUT_OF_SCOPE would send someone to edit a mandate's
+    // scope when the answer is to wait for tomorrow.
+    expect(overspent.failure).toBe('budget_exhausted');
+    expect(overspent.budget).toMatchObject({ limit: 6, spent: 6, remaining: 0 });
+
+    // AND NOTHING WAS WRITTEN. A refused claim leaves no row to render and no event to count.
+    const { rows } = await pool.query<{ n: string }>(
+      "SELECT count(*) AS n FROM interrupts WHERE room_id = $1 AND about_id = 'one-too-many'",
+      [id],
+    );
+    expect(Number(rows[0].n)).toBe(0);
+  });
+
+  it('an FYI still passes when the budget is gone — free is free', async () => {
+    // The other half of "the budget moves only when attention was actually claimed". An exhausted
+    // member can still say something that interrupts nobody, which is the behaviour the pricing
+    // exists to encourage.
+    const id = room('int-fyi-free');
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await clearSpend();
+    for (let i = 0; i < 6; i += 1) {
+      await raiseInterrupt(pool, {
+        roomId: id,
+        urgency: 'DECISION',
+        raisedBy: 'claude-main',
+        addressedTo: 'prince',
+        aboutKind: 'message',
+        aboutId: `fill-${i}`,
+        summary: 'filling the budget',
+      });
+    }
+    const fyi = await raiseInterrupt(pool, {
+      roomId: id,
+      urgency: 'FYI',
+      raisedBy: 'claude-main',
+      addressedTo: 'prince',
+      aboutKind: 'message',
+      aboutId: 'free-one',
+      summary: 'costs nothing',
+    });
+    expect(fyi.ok).toBe(true);
+  });
+
+  it('a member with NO mandate has no limit, and that is not a hole', async () => {
+    // Mandates bind AGENTS to the principals who grant them. `prince` is a human member acting as
+    // a principal, so there is no mandate to read a limit from — and pricing a person's claim on
+    // their own attention would be charging someone rent on their own house.
+    const budget = await budgetFor(pool, 'prince');
+    expect(budget.limit).toBeNull();
+    expect(budget.remaining).toBeNull();
+  });
+
+  it('the raise carries what was LEFT, so the room can show it without asking', async () => {
+    const id = room('int-ambient');
+    expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await clearSpend();
+    const raised = await raiseInterrupt(pool, {
+      roomId: id,
+      urgency: 'DECISION',
+      raisedBy: 'claude-main',
+      addressedTo: 'prince',
+      aboutKind: 'message',
+      aboutId: 'ambient-1',
+      summary: 'a claim',
+    });
+    if (!raised.ok || !raised.event) throw new Error('narrowing');
+    const ev = raised.event;
+    if (ev.event_type !== 'interrupt.raised') throw new Error('narrowing');
+    // Six a day, one spent: five left, on the event, at the moment the claim was made.
+    expect(ev.payload.budget_remaining).toBe(5);
+  });
+});

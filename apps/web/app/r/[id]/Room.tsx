@@ -20,6 +20,7 @@ import {
 import { MemberChip, MemberName } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
 import { HandoffRow, TaskChip, type HandoffItemView, type TaskItemView } from '../../TaskChip';
+import { InterruptChip, type InterruptItemView } from '../../InterruptChip';
 import { HOOK, pr } from '../../hooks';
 import type { Principal, RosterMember } from '../../roster';
 
@@ -55,7 +56,10 @@ type TaskItem = { kind: 'task'; key: string; view: TaskItemView };
 // A handoff is an ACT, so it gets its own row where it happened — see TaskChip.tsx for why the
 // state chip alone is not enough.
 type HandoffItem = { kind: 'handoff'; key: string; view: HandoffItemView };
-type Item = MessageItem | AgentItem | DecisionItem | TaskItem | HandoffItem;
+// An interrupt is a claim on a member's attention. One chip per interrupt, updated in place when
+// it is lowered — the downgrade changes the claim rather than making a second one.
+type InterruptItem = { kind: 'interrupt'; key: string; view: InterruptItemView };
+type Item = MessageItem | AgentItem | DecisionItem | TaskItem | HandoffItem | InterruptItem;
 
 /**
  * Group the event log into renderable items.
@@ -68,6 +72,7 @@ type Item = MessageItem | AgentItem | DecisionItem | TaskItem | HandoffItem;
 function buildItems(events: ServerEvent[]): Item[] {
   const turns = new Map<string, AgentItem>();
   const tasks = new Map<string, TaskItemView>();
+  const interrupts = new Map<string, InterruptItemView>();
   const order: Item[] = [];
   for (const ev of events) {
     if (ev.event_type === 'message') {
@@ -99,6 +104,27 @@ function buildItems(events: ServerEvent[]): Item[] {
       if (view) {
         view.state = ev.payload.state;
         view.assignee = ev.payload.assignee;
+      }
+    } else if (ev.event_type === 'interrupt.raised') {
+      const view: InterruptItemView = {
+        interrupt_id: ev.payload.interrupt_id,
+        urgency: ev.payload.urgency,
+        raised_by: ev.payload.raised_by,
+        addressed_to: ev.payload.addressed_to,
+        summary: ev.payload.summary,
+        budget_remaining: ev.payload.budget_remaining,
+        downgraded: false,
+      };
+      interrupts.set(ev.payload.interrupt_id, view);
+      order.push({ kind: 'interrupt', key: `i${ev.payload.interrupt_id}`, view });
+    } else if (ev.event_type === 'interrupt.downgraded') {
+      // THE SAME CHIP, LOWERED — and the budget number drops with it, which is where "visibly"
+      // in the exit criterion lands. A second chip would read as a second claim.
+      const view = interrupts.get(ev.payload.interrupt_id);
+      if (view) {
+        view.urgency = ev.payload.urgency;
+        view.budget_remaining = ev.payload.budget_remaining;
+        view.downgraded = true;
       }
     } else if (ev.event_type === 'task.handoff') {
       // THE CHIP MOVES. Same chip, new holder — the transfer is a change to the work, not a
@@ -218,6 +244,9 @@ export function Room({
   const [status, setStatus] = useState<Status>('connecting');
   const [body, setBody] = useState<string>('');
   const [refusal, setRefusal] = useState<ServerErrorFrame | null>(null);
+  // WHICH MEMBER THIS SOCKET IS, from `hello`. Used only to decide whether to draw a control the
+  // server would accept — the authorisation itself is the socket's, never this value.
+  const [viewer, setViewer] = useState<string | null>(null);
 
   const items = useMemo<Item[]>(() => buildItems(events), [events]);
   const conn: Conn = refusal ? 'refused' : status === 'open' ? 'connected' : 'reconnecting';
@@ -254,6 +283,22 @@ export function Room({
   const stoppedRef = useRef<boolean>(false);
   const pendingRef = useRef<string>(''); // last body sent, restored if it is refused
   const tailRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * ONE TAP. The frame carries only the interrupt id: who is lowering it is the socket's
+   * authenticated member, which the server reads for itself rather than believing a field.
+   */
+  const downgrade = useCallback((interruptId: string): void => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(
+      JSON.stringify({
+        type: 'downgrade',
+        client_msg_id: `dg-${interruptId}`,
+        interrupt_id: interruptId,
+      }),
+    );
+  }, []);
 
   const connect = useCallback((): void => {
     if (!roomId) return;
@@ -302,6 +347,10 @@ export function Room({
           // box empty after a refusal is the whole bug: it reads as "sent". Only
           // restore if the member has not started typing something else.
           setBody((current) => (current.trim() ? current : pendingRef.current));
+          return;
+        }
+        if (msg.type === 'hello') {
+          setViewer(msg.member_id);
           return;
         }
         if (msg.type !== 'event') return;
@@ -414,6 +463,15 @@ export function Room({
           ) : it.kind === 'task' ? (
             <li key={it.key}>
               <TaskChip task={it.view} roster={byId} />
+            </li>
+          ) : it.kind === 'interrupt' ? (
+            <li key={it.key}>
+              <InterruptChip
+                interrupt={it.view}
+                roster={byId}
+                viewer={viewer}
+                onDowngrade={downgrade}
+              />
             </li>
           ) : it.kind === 'handoff' ? (
             <li key={it.key}>

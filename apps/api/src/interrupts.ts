@@ -199,6 +199,9 @@ export async function raiseInterrupt(
     about_kind: interrupt.about_kind,
     about_id: interrupt.about_id,
     summary: input.summary,
+    // AMBIENT, not a badge (design.md principle 4). The number travels with the claim it belongs
+    // to, so the room can show what this cost without polling anything.
+    budget_remaining: budget.remaining === null ? null : budget.remaining - cost,
   });
   // ── BLOCKER HALTS THE OWNING TASK. THE OTHER TWO DO NOT. ────────────────────────────
   //
@@ -285,6 +288,10 @@ export async function downgradeInterrupt(
   const to = lowerThan(interrupt.urgency);
   if (!to) return { ok: false, failure: 'already_lowest' };
 
+  // THE CHARGE, COMPUTED BEFORE IT IS WRITTEN. `budgetFor` counts today's downgrade events, so
+  // reading it afterwards would already include this one — the number on screen has to be what
+  // the raiser is left with.
+  const before = await budgetFor(pool, interrupt.raised_by);
   const event = await appendInterruptEvent(
     pool,
     interrupt.room_id,
@@ -296,6 +303,7 @@ export async function downgradeInterrupt(
       from_urgency: interrupt.urgency,
       raised_by: interrupt.raised_by,
       addressed_to: interrupt.addressed_to,
+      budget_remaining: before.remaining === null ? null : Math.max(0, before.remaining - 1),
     },
   );
   await pool.query('UPDATE interrupts SET urgency = $1, updated_at = now() WHERE id = $2', [

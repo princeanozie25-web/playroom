@@ -719,3 +719,49 @@ body {
 .handoff-arrow {
   color: var(--ink-3);
 }
+
+/* ── THE INTERRUPT CHIP (S1.4) ─────────────────────────────────────────────────────────
+   A claim on a person's attention. Louder than a task chip and quieter than the DECISION
+   card: urgency is carried by a left rule whose colour changes, so the three levels are
+   distinguishable at a glance and still legible without colour, because the word is there. */
+.interrupt-chip {
+  border-left: 3px solid var(--ink-3);
+  padding-left: var(--s-2);
+}
+[data-pr-urgency='BLOCKER'].interrupt-chip {
+  border-left-color: var(--rose, #e11d48);
+}
+[data-pr-urgency='DECISION'].interrupt-chip {
+  border-left-color: var(--amber, #d97706);
+}
+[data-pr-urgency='FYI'].interrupt-chip {
+  border-left-color: var(--ink-3);
+}
+.interrupt-urgency {
+  font-weight: 650;
+  color: var(--ink);
+}
+.interrupt-summary {
+  color: var(--ink-2);
+}
+/* AMBIENT (§18, design.md principle 4). The same weight as a spend footer, pushed to the end —
+   it is context for the claim, not a score to watch. */
+.interrupt-budget {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.interrupt-downgrade {
+  font: inherit;
+  font-size: var(--t-xs);
+  padding: 0 var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.interrupt-downgrade:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}

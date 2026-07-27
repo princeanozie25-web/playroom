@@ -382,6 +382,17 @@ export const InterruptRaisedEvent = z.object({
     about_id: z.string(),
     /** The sentence the room shows. Written by the raiser, never assembled by the reader. */
     summary: z.string(),
+    /**
+     * WHAT THE RAISER HAD LEFT AFTER MAKING THIS CLAIM — §18, and design.md's principle 4.
+     *
+     * A SNAPSHOT, not a gauge, and the difference is worth stating: it is what was left at the
+     * moment the claim was made, which is the number that belongs beside the claim. A live
+     * remaining-budget would need polling and would make an old row appear to change its mind.
+     *
+     * Null when the member holds no mandate and therefore no limit — reported as absent rather
+     * than as a large number, so a reader can tell "unlimited" from "plenty".
+     */
+    budget_remaining: z.number().nullable(),
   }),
 });
 export type InterruptRaisedEvent = z.infer<typeof InterruptRaisedEvent>;
@@ -405,6 +416,8 @@ export const InterruptDowngradedEvent = z.object({
     from_urgency: z.string(),
     raised_by: z.string(),
     addressed_to: z.string(),
+    /** The raiser's remaining budget AFTER this downgrade charged them. The visible decrement. */
+    budget_remaining: z.number().nullable(),
   }),
 });
 export type InterruptDowngradedEvent = z.infer<typeof InterruptDowngradedEvent>;
@@ -430,6 +443,19 @@ export type DecisionEvent = z.infer<typeof DecisionEvent>;
 export const ServerHello = z.object({
   type: z.literal('hello'),
   last_seq: z.number(),
+  /**
+   * WHO THIS SOCKET IS, told to the client (S1.4).
+   *
+   * The browser holds no credential any more — it presents a ticket minted server-side (S1.3c) —
+   * so it cannot know which member it became. It needs to: only the member an interrupt is
+   * ADDRESSED TO may lower its claim on them, and a control shown to everyone would be a control
+   * the server refuses, which is a UI lying about itself.
+   *
+   * This is a statement OF the server, not a claim BY the client. Nothing downstream trusts it:
+   * the downgrade is authorised from the socket's own authenticated member, and this field only
+   * decides what is worth drawing.
+   */
+  member_id: z.string(),
 });
 export type ServerHello = z.infer<typeof ServerHello>;
 

@@ -72,6 +72,14 @@ export const HOOK = {
   taskMandate: 'task-mandate',
   /** A handoff row — the act of moving a task. Carries `data-pr-to`. */
   handoff: 'handoff',
+  /** An interrupt chip. Carries `data-pr-urgency` — BLOCKER | DECISION | FYI. */
+  interrupt: 'interrupt',
+  /** The urgency, in words. */
+  interruptUrgency: 'interrupt-urgency',
+  /** The raiser's remaining interrupt budget, ambient (§18). */
+  interruptBudget: 'interrupt-budget',
+  /** The one-tap downgrade control, shown only to the member the interrupt addresses. */
+  interruptDowngrade: 'interrupt-downgrade',
   /** The composer form. */
   composer: 'composer',
   /** The room refusal banner (RT-001). */

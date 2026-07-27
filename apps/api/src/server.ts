@@ -600,7 +600,13 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           return null;
         }
         const helloSeq = await lastSeq(db(), roomId);
-        send(ServerHello.parse({ type: 'hello', last_seq: helloSeq }));
+        send(
+          ServerHello.parse({
+            type: 'hello',
+            last_seq: helloSeq,
+            member_id: result.auth.member_id,
+          }),
+        );
         const backlog = await eventsAfter(db(), roomId, after);
         for (const event of backlog) send(event);
         return result.auth;
