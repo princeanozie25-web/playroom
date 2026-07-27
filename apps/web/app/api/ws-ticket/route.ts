@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { viewerCredential } from '../../session';
 
 // THE TICKET COUNTER — where the long-lived credential stops.
 //
@@ -25,16 +26,22 @@ import { NextResponse } from 'next/server';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const token = process.env.PLAYROOM_WEB_TOKEN ?? '';
-  // ABSENT RATHER THAN DEFAULTED. With no credential configured the room does not open, loudly,
+  // THE VIEWER'S OWN CREDENTIAL IF THEY HAVE REDEEMED ONE, and the deployment's only if not.
+  //
+  // Order matters more than it looks. `PLAYROOM_WEB_TOKEN` acts as `prince`, so a fallback that
+  // applied while a session existed would record a tester's messages and summons as MINE. That is
+  // not a degraded experience — it is the audit log lying, and attribution is the product.
+  const credential = await viewerCredential();
+  // ABSENT RATHER THAN DEFAULTED. With no credential at all the room does not open, loudly,
   // which is the correct behaviour and visibly different from a room that works — the same
   // decision the socket's own refusal makes.
-  if (!token) {
+  if (!credential) {
     return NextResponse.json(
       { type: 'error', code: 'credential_required', message: 'this deployment has no credential' },
       { status: 500 },
     );
   }
+  const token = credential.token;
 
   let roomId = '';
   try {

@@ -80,6 +80,16 @@ export const HOOK = {
   interruptBudget: 'interrupt-budget',
   /** The one-tap downgrade control, shown only to the member the interrupt addresses. */
   interruptDowngrade: 'interrupt-downgrade',
+  /** The join form — a room code and a first name, the only screen before the room. */
+  join: 'join',
+  /** The room-code field. */
+  joinCode: 'join-code',
+  /** The first-name field. */
+  joinName: 'join-name',
+  /** The submit control. */
+  joinSubmit: 'join-submit',
+  /** The refusal, when a code does not work. */
+  joinError: 'join-error',
   /** A promotion row — somebody moved a private note into the room. Carries `data-pr-representation`. */
   promotion: 'promotion',
   /** The quiet sentence: who shared, and how much. */

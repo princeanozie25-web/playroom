@@ -63,9 +63,23 @@ afterAll(async () => {
     // created was not enough: an earlier aborted run of this file had left guest events in rooms it
     // no longer knows the ids of, and those rows blocked the member delete permanently. A cleanup
     // that only works when the previous run succeeded is a cleanup that needs a cleanup.
-    await cleanup.query("DELETE FROM events WHERE actor_member_id LIKE 'guest-%-human'");
-    await cleanup.query("DELETE FROM room_members WHERE member_id LIKE 'guest-%-human'");
-    await cleanup.query("DELETE FROM members WHERE id LIKE 'guest-%-human'");
+    //
+    // EVERY TABLE THAT REFERENCES `members`, in FK order — read out of `information_schema` rather
+    // than discovered one error at a time. This suite does not currently summon as a guest, so
+    // `tasks`, `interrupts` and `ws_tickets` are empty for it today; they are here because the first
+    // test that DOES summon would otherwise fail in teardown with a foreign key error and no
+    // obvious cause. `routes` is deliberately absent: those belong to the agent, which stays.
+    const guest = "LIKE 'guest-%-human'";
+    await cleanup.query(`DELETE FROM ws_tickets WHERE member_id ${guest}`);
+    await cleanup.query(`DELETE FROM interrupts WHERE raised_by ${guest} OR addressed_to ${guest}`);
+    await cleanup.query(`DELETE FROM promotions WHERE approved_by ${guest}`);
+    await cleanup.query(
+      `DELETE FROM tasks WHERE created_by ${guest} OR origin_member ${guest}
+          OR assignee_member_id ${guest}`,
+    );
+    await cleanup.query(`DELETE FROM events WHERE actor_member_id ${guest}`);
+    await cleanup.query(`DELETE FROM room_members WHERE member_id ${guest}`);
+    await cleanup.query(`DELETE FROM members WHERE id ${guest}`);
     await cleanup.query(
       "UPDATE principals SET display_name = 'Guest A' WHERE id = 'principal:guest-a'",
     );

@@ -804,3 +804,89 @@ body {
   color: var(--ink-2);
   font-size: var(--t-sm);
 }
+
+/* ── THE JOIN SCREEN (S-LIVE) ──────────────────────────────────────────────────────────
+   Built at phone width first and allowed to grow, because a phone is the only place it
+   will ever be used: a code arrives in a text message and is typed with a thumb. The
+   desktop rendering is the same layout with more air around it, which is why there is no
+   breakpoint here at all. */
+.join-page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
+}
+.join {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+}
+.join-title {
+  font-size: 1.35rem;
+  margin: 0 0 var(--s-2);
+}
+.join-lede {
+  color: var(--ink-2);
+  margin: 0 0 var(--s-5, 20px);
+  line-height: 1.5;
+}
+.join-label {
+  font-weight: 650;
+  margin-bottom: var(--s-1);
+}
+.join-hint {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  margin: 0 0 var(--s-1);
+  line-height: 1.4;
+}
+.join-input {
+  font: inherit;
+  /* 16px MINIMUM, AND IT IS NOT A STYLE CHOICE. iOS Safari zooms the whole viewport when a
+     focused input's text is under 16px, and the zoom does not undo itself — the tester ends
+     up in a room they have to pinch back out of, having done nothing wrong. */
+  font-size: 16px;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  margin-bottom: var(--s-4);
+}
+.join-input:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 1px;
+  border-color: var(--indigo);
+}
+.join-code {
+  /* A code is read character by character, so it is set in a face where 8 and B differ. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.join-submit {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 650;
+  /* 48px: a thumb target, not a mouse target. */
+  min-height: 48px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--indigo);
+  color: #fff;
+  cursor: pointer;
+}
+.join-submit:disabled {
+  background: var(--ink-3);
+  cursor: default;
+}
+.join-error {
+  margin: var(--s-3) 0 0;
+  padding: var(--s-2) var(--s-3);
+  border-left: 3px solid var(--bad, #dc2626);
+  background: var(--paper-2);
+  color: var(--ink);
+  line-height: 1.45;
+}

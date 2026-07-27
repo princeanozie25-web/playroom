@@ -1,4 +1,6 @@
+import { redirect } from 'next/navigation';
 import { loadPrincipals, loadRoster } from '../../roster';
+import { viewerCredential } from '../../session';
 import { Room } from './Room';
 
 // Server component. The roster is read here — on the server — and handed to the room
@@ -8,6 +10,19 @@ import { Room } from './Room';
 // where roster metadata should join the payload properly).
 export default async function RoomRoute({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+
+  // NO CREDENTIAL AT ALL → THE JOIN SCREEN, NOT A BROKEN ROOM (S-LIVE).
+  //
+  // Without this, a stranger opening a shared link gets the room shell, an empty transcript and a
+  // connection badge cycling `reconnecting` forever — every part working correctly and nothing on
+  // screen explaining that they were never let in. A redirect is the difference between a refusal
+  // and a malfunction, which is the distinction this project keeps insisting on.
+  //
+  // It checks only for the PRESENCE of a credential. Whether it is any good is the front door's
+  // business, unchanged: a redeemed guest who then asks for a room their code did not grant still
+  // gets exactly what a missing room gives.
+  if ((await viewerCredential()) === undefined) redirect('/join');
+
   // Both awaited: the roster is records now, fetched from the API rather than read off the
   // disk. A server component is the right place for that — the browser never makes the call.
   const [roster, principals] = await Promise.all([loadRoster(id), loadPrincipals(id)]);

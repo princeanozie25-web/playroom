@@ -1,4 +1,5 @@
 import { principalAccent } from './mandate';
+import { viewerCredential } from './session';
 
 // THE ROSTER, FETCHED FROM THE API — no filesystem, no YAML parser, no fabric.
 //
@@ -87,14 +88,19 @@ interface ApiMember {
  * That is RT-001's shape at the page level, and silence is exactly what it must not be.
  */
 async function fetchMembers(roomId: string): Promise<ApiMember[]> {
-  // THE CREDENTIAL, in a header. The roster is scoped to members of the room as of S1.2, so
-  // this call now carries an identity like every other — the web tier reads the roster AS
-  // `prince`, not as nobody in particular.
+  // THE VIEWER'S CREDENTIAL, in a header — THEIRS, not the deployment's, whenever they have one.
+  //
+  // The roster is scoped to members of the room (S1.2), so reading it with `PLAYROOM_WEB_TOKEN`
+  // would read it AS ME. For a guest that is exactly wrong twice over: they would see a roster their
+  // own membership does not entitle them to, and the per-room scoping the front door enforces would
+  // be silently applied to the wrong principal — a check that passes because it was asked about
+  // somebody else. Since S-LIVE a redeemed session takes precedence; the deployment token remains
+  // the fallback for my own browser and the capture harness.
   //
   // Server-side only: this module is imported by a server component, so the token is never
   // shipped to a browser. It is read here rather than threaded down from the page because a
   // credential passed through props is a credential that can end up serialised into HTML.
-  const token = process.env.PLAYROOM_WEB_TOKEN ?? '';
+  const token = (await viewerCredential())?.token ?? '';
   const res = await fetch(`${API_URL}/rooms/${encodeURIComponent(roomId)}/members`, {
     cache: 'no-store',
     headers: token ? { authorization: `Bearer ${token}` } : {},
