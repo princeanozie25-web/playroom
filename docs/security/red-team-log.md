@@ -16,19 +16,20 @@ Severity is about the trust boundary, not user annoyance:
 - **medium** — a failure is detectable but not surfaced to the party who needs it.
 - **low** — hardening; no observable trust consequence yet.
 
-| id     | date        | severity | discovered by                                 | principle violated                                                                                                                                | disposition                              | commit    |
-| ------ | ----------- | -------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------- |
-| RT-001 | 25 Jul 2026 | high     | found during A4 automated capture             | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one                                               | fixed                                    | `161aa16` |
-| RT-002 | 25 Jul 2026 | medium   | noticed while closing RT-001                  | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                                                   | fixed                                    | `S13c-2`  |
-| RT-003 | 26 Jul 2026 | high     | property test, S0.5a                          | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                                               | fixed                                    | `01ae2e8` |
-| RT-004 | 26 Jul 2026 | high     | S0.5b activation-boundary review              | model output is DATA; a summon token in generated text would convert injection into cross-principal action                                        | guarded, one gap accepted until **S1.7** | `fe642c0` |
-| RT-005 | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b                 | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member                       | fixed                                    | `7fc279a` |
-| M-N1   | 25 Jul 2026 | critical | logged at the mandate slice                   | identity must be stamped by the boundary, not asserted by the caller; `actor_id` arrived from the wire as a free string                           | fixed                                    | `7fc279a` |
-| S04-N2 | 25 Jul 2026 | high     | logged at the mandate slice                   | a mandate is an unsigned file, so _this principal granted this authority_ is asserted by the document, not proven                                 | open, narrowed — trigger **S2.6**        | —         |
-| S12-N2 | 26 Jul 2026 | medium   | S1.2 closeout, while writing the roster scope | a governed request's subject must be justified by a record, not asserted by the caller — and it was not even checked to be a member               | fixed                                    | `S13-3`   |
-| S13-N2 | 27 Jul 2026 | high     | S1.3 Phase 0, reading the handshake           | room membership is the product's boundary; the handshake checks that a room EXISTS, not that the caller is IN it                                  | fixed                                    | `S13b-2`  |
-| S12-N1 | 26 Jul 2026 | low      | S1.2, while scoping the roster read           | an oracle anywhere undoes silence everywhere; room existence was readable without a credential                                                    | fixed                                    | `S13b-3`  |
-| S13-N3 | 27 Jul 2026 | medium   | S1.3 Phase 0, reading Room.tsx                | a credential must not travel where logs collect it; the browser's token is in the WebSocket query string, and the code cited the wrong finding id | accepted until a proxy or access logging | —         |
+| id      | date        | severity | discovered by                                 | principle violated                                                                                                                                | disposition                              | commit    |
+| ------- | ----------- | -------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------- |
+| RT-001  | 25 Jul 2026 | high     | found during A4 automated capture             | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one                                               | fixed                                    | `161aa16` |
+| RT-002  | 25 Jul 2026 | medium   | noticed while closing RT-001                  | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                                                   | fixed                                    | `S13c-2`  |
+| RT-003  | 26 Jul 2026 | high     | property test, S0.5a                          | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                                               | fixed                                    | `01ae2e8` |
+| RT-004  | 26 Jul 2026 | high     | S0.5b activation-boundary review              | model output is DATA; a summon token in generated text would convert injection into cross-principal action                                        | guarded, one gap accepted until **S1.7** | `fe642c0` |
+| RT-005  | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b                 | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member                       | fixed                                    | `7fc279a` |
+| M-N1    | 25 Jul 2026 | critical | logged at the mandate slice                   | identity must be stamped by the boundary, not asserted by the caller; `actor_id` arrived from the wire as a free string                           | fixed                                    | `7fc279a` |
+| S04-N2  | 25 Jul 2026 | high     | logged at the mandate slice                   | a mandate is an unsigned file, so _this principal granted this authority_ is asserted by the document, not proven                                 | open, narrowed — trigger **S2.6**        | —         |
+| S12-N2  | 26 Jul 2026 | medium   | S1.2 closeout, while writing the roster scope | a governed request's subject must be justified by a record, not asserted by the caller — and it was not even checked to be a member               | fixed                                    | `S13-3`   |
+| S13-N2  | 27 Jul 2026 | high     | S1.3 Phase 0, reading the handshake           | room membership is the product's boundary; the handshake checks that a room EXISTS, not that the caller is IN it                                  | fixed                                    | `S13b-2`  |
+| S12-N1  | 26 Jul 2026 | low      | S1.2, while scoping the roster read           | an oracle anywhere undoes silence everywhere; room existence was readable without a credential                                                    | fixed                                    | `S13b-3`  |
+| S13-N3  | 27 Jul 2026 | medium   | S1.3 Phase 0, reading Room.tsx                | a credential must not travel where logs collect it; the browser's token is in the WebSocket query string, and the code cited the wrong finding id | fixed                                    | `S13c-1`  |
+| S13c-N1 | 27 Jul 2026 | low      | S1.3b, a standalone run under load            | a suite that fails 1-in-N erodes the signal it exists to give; two timing-sensitive tests failed once and have not reproduced                     | accepted until the first CI failure      | —         |
 
 ## RT-001 — a refused write was indistinguishable from an accepted one
 
@@ -692,3 +693,42 @@ refused, because a fallback is the old path still open.
 mints a ticket for anyone who can reach it. The credential moved from every reader of the page's
 HTML into one server process; `which human is this` is unchanged and is S04-N2. A ticket narrows
 EXPOSURE, not authority.
+
+### NEW — S13c-N1: two tests failed once, under load, and have not reproduced
+
+`apps/api/test/idempotent.test.ts` and `apps/api/test/agent-error.test.ts` failed together in a
+single standalone run during S1.3b, while the production stack was serving the film against the same
+Neon compute. They passed on immediate re-run, in the pre-commit hook, in isolation at three commits,
+and in CI.
+
+**Reproduction attempted and failed** — three consecutive runs of the pair with the production stack
+up, all green. Not pursued further: the owner's instruction was that the ledger entry matters more
+than the reproduction, and an unreproducible failure investigated by staring at it is a session
+spent on a hypothesis.
+
+**Symptoms:** both tests are timing-sensitive in the same way. `idempotent` races two sends and
+asserts one row; `agent-error` waits for a failed turn to be written and fanned out. Both assert on
+something arriving within a window rather than on a state that settles.
+
+**Hypothesis, unconfirmed:** the api under test and the production stack share one Neon compute
+endpoint (different databases, same instance), so a heavy concurrent load can stretch a query past
+a test's patience. That would make it an artefact of this machine rather than a defect in the
+product — which is a comfortable conclusion, and the reason it is written down as a hypothesis
+rather than a finding closed.
+
+**Trigger: the first CI failure of either test.** At that point it gets a session, not a retry
+button. A suite that fails one run in N erodes exactly the signal eleven slices have been spent
+building — the value of a green run is that it means something, and a flaky test converts every
+future failure into a coin toss about whether to look.
+
+### CORRECTION — S13b-3 claimed a claims-sheet row it did not add
+
+S13b-3's message says it added a do-not-say row for _"the room is private" / "only Prince can see
+it"_. It did not: the edit was a string replacement with no assertion behind it, the anchor had been
+reflowed, and the replacement silently did nothing. The commit's other claims-sheet changes landed;
+that one did not, and the message was written as though it had.
+
+Added in S13c-3, with the reason updated — the sentence is tempting for the same reason and the
+mechanism behind the refusal has changed since. **The general fault is mine and it is mechanical:**
+a `replace` without an assert is a no-op that reports success. Every scripted edit in this slice
+asserts its anchor, and the two that failed to match said so loudly instead of passing quietly.

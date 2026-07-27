@@ -192,3 +192,27 @@ different lengths. Prompt hash changes with it; nothing pins the value.
 
 Warm-up 697ms (database 102ms, claude-main 321ms, sol 695ms). Beat 1 opened with no stall. No
 selector edited. Frame-verified 3/3 distinct.
+
+### S1.3c — re-shot through the ticket path — 27 Jul 2026
+
+| take   | beats | clip   | size  | sha256 (first 16)  | frames | note                          |
+| ------ | ----- | ------ | ----- | ------------------ | ------ | ----------------------------- |
+| **10** | 5     | 56.64s | 3941K | `157c44ac108fae27` | 3/3    | **THE P0 ASSET**, S1.3c build |
+
+**What the harness needed: a ticket, and a credential on the create call.** The socket no longer
+accepts a long-lived credential at all, so `?token=` had to become `?ticket=` — minted from
+`POST /ws-ticket` with the harness's Bearer credential, one per socket, because a ticket is spent
+on use and beats 5 and 6 open different sockets. And `POST /rooms` requires a credential now
+(RT-002), which is also what keeps `prince` enrolled in the film's room and therefore able to walk
+through the front door S1.3b built.
+
+**The film gained an assertion rather than a beat.** After the last hold, the harness reads the
+page's actual HTML and asserts that neither the harness credential nor the browser's own
+`PLAYROOM_WEB_TOKEN` appears in it, and that nothing credential-shaped (`prm_…`) does either. That
+is the runtime half of S13-N3's second face — no source-level check can see a rendered payload — and
+it is asserted against the page a viewer is looking at.
+
+Warm-up 762ms (database 104ms, claude-main 228ms, sol 760ms). Beat 1 opened with no stall.
+`269→191 tok · $0.00122` for Claude, `299→265 tok · $0.0002` for Sol — the same prompt as S1.3b, so
+the difference is the models answering at different lengths, which is what two takes of one script
+look like. No selector edited; the handshake changed underneath and the hooks did not move.
