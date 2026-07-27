@@ -70,6 +70,8 @@ export const HOOK = {
   taskAction: 'task-action',
   /** The mandate the current assignee acts under, after a handoff. */
   taskMandate: 'task-mandate',
+  /** A handoff row — the act of moving a task. Carries `data-pr-to`. */
+  handoff: 'handoff',
   /** The composer form. */
   composer: 'composer',
   /** The room refusal banner (RT-001). */

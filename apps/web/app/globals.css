@@ -708,3 +708,14 @@ body {
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
+
+/* A handoff is an act, so it reads slightly stronger than a state chip — a top rule to separate
+   it from the turn above, and nothing else. Still quieter than a message. */
+.handoff-row {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s-2);
+  margin-top: var(--s-1);
+}
+.handoff-arrow {
+  color: var(--ink-3);
+}

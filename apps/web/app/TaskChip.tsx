@@ -79,3 +79,59 @@ export function TaskChip({
     </div>
   );
 }
+
+/**
+ * THE HANDOFF ROW — a distinct act, at the point it happened.
+ *
+ * The task chip above shows STATE and updates in place. That is right for progress: `working →
+ * done` is the completion of work whose turn is sitting next to it. It is WRONG for a handoff,
+ * for two reasons that both matter:
+ *
+ *   * A handoff is an ACT BY A MEMBER, with an actor and a decision behind it — closer to
+ *     something someone said than to a status changing. The room's log records it that way
+ *     (`task.handoff` carries `actor_id`), and the transcript should too.
+ *   * A chip that mutates in place is INVISIBLE ONCE IT HAS SCROLLED AWAY. Two long agent turns
+ *     put the chip above the fold, and a member watching the room would see nothing happen —
+ *     which is the RT-001 family of problem in a surface rather than a write path: the change is
+ *     real, recorded, and unobservable to the person it concerns.
+ *
+ * So the state lives in one chip and the act gets its own row. Both read from the same events;
+ * neither invents a field.
+ */
+export interface HandoffItemView {
+  task_id: string;
+  actor: string;
+  from_member: string;
+  to_member: string;
+  action: string;
+  mandate_hash: string | null;
+}
+
+export function HandoffRow({
+  handoff,
+  roster,
+}: {
+  handoff: HandoffItemView;
+  roster: Map<string, RosterMember>;
+}) {
+  return (
+    <div className="task-chip handoff-row" {...pr(HOOK.handoff)} data-pr-to={handoff.to_member}>
+      <span className="task-kicker">handoff</span>
+      <MemberName member={roster.get(handoff.actor)} name={handoff.actor} />
+      <span className="handoff-arrow" aria-label="hands to">
+        →
+      </span>
+      <MemberName member={roster.get(handoff.to_member)} name={handoff.to_member} />
+      <code className="task-action" {...pr(HOOK.taskAction)}>
+        {handoff.action}
+      </code>
+      {/* THE MANDATE THE RECEIVER WILL ACT UNDER — Bible §21.3 requires the reference to travel
+          with the task. It identifies WHICH document is in force and proves nothing about who
+          authorised it: mandates are unsigned until S2.1, and the claims sheet says so of the
+          decision card's hash for the same reason. */}
+      <span className="task-mandate" {...pr(HOOK.taskMandate)}>
+        under {handoff.mandate_hash ? `${handoff.mandate_hash.slice(0, 21)}…` : 'no mandate'}
+      </span>
+    </div>
+  );
+}

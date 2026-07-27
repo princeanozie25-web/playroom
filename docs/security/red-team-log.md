@@ -416,6 +416,13 @@ closes it: `request_action` carrying a `task_id`, so the justification is exact.
 **Trigger: S2.2.** A co-signature has to reference the task it signs for anyway, so that slice is
 where the tighter shape stops being extra work.
 
+**A second face of the same looseness, found while filming:** standing MOVES WITH THE TASK. The
+check asks who currently holds the work, so handing a task to Sol silently removes the requester's
+standing to ask under Claude's mandate — even though Claude is the member who did the work. It is
+fail-closed (a request that should be allowed is refused, never the reverse) and it is surprising:
+the film's beat 6 has to come after beat 5 for exactly this reason, which is a script constraint
+imposed by a rule nobody designed. Naming the task on the request fixes both faces at once.
+
 ### NEW — S13-N2: any authenticated member may connect to any room and write to it
 
 Found while reading the handshake for this slice. The WebSocket handshake authenticates the

@@ -19,7 +19,7 @@ import {
 } from '@playroom/shared';
 import { MemberChip, MemberName } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
-import { TaskChip, type TaskItemView } from '../../TaskChip';
+import { HandoffRow, TaskChip, type HandoffItemView, type TaskItemView } from '../../TaskChip';
 import { HOOK, pr } from '../../hooks';
 import type { Principal, RosterMember } from '../../roster';
 
@@ -52,7 +52,10 @@ type DecisionItem = { kind: 'decision'; key: string; event: DecisionEvent };
 // A task chip exists because `task.created` arrived. Its state is mutated in place by later
 // `task.state` and `task.handoff` events — one chip per task, where the work was asked for.
 type TaskItem = { kind: 'task'; key: string; view: TaskItemView };
-type Item = MessageItem | AgentItem | DecisionItem | TaskItem;
+// A handoff is an ACT, so it gets its own row where it happened — see TaskChip.tsx for why the
+// state chip alone is not enough.
+type HandoffItem = { kind: 'handoff'; key: string; view: HandoffItemView };
+type Item = MessageItem | AgentItem | DecisionItem | TaskItem | HandoffItem;
 
 /**
  * Group the event log into renderable items.
@@ -108,6 +111,20 @@ function buildItems(events: ServerEvent[]): Item[] {
         view.mandate_hash = ev.payload.mandate_hash;
         view.handed_by = ev.actor_id;
       }
+      // The act, in the transcript, at the point it happened — visible whether or not the chip
+      // it moved is still on screen.
+      order.push({
+        kind: 'handoff',
+        key: `x${ev.seq}`,
+        view: {
+          task_id: ev.payload.task_id,
+          actor: ev.actor_id,
+          from_member: ev.payload.from_member,
+          to_member: ev.payload.to_member,
+          action: ev.payload.action,
+          mandate_hash: ev.payload.mandate_hash,
+        },
+      });
     } else if (ev.event_type === 'agent.turn.started') {
       const turn: AgentItem = {
         kind: 'agent',
@@ -188,21 +205,29 @@ export function Room({
   const items = useMemo<Item[]>(() => buildItems(events), [events]);
   const conn: Conn = refusal ? 'refused' : status === 'open' ? 'connected' : 'reconnecting';
 
+  // EVERY member, for resolving NAMES — humans included as of S1.3, so a byline and the decision
+  // card show "Prince" rather than the raw id.
   const byId = useMemo(() => new Map(roster.map((m) => [m.id, m])), [roster]);
+  // The strip's chips are the AGENTS: they are the members with a mandate to show, and the
+  // human's chip is added below only once they have spoken. That composition is unchanged —
+  // S1.3 widened who can be NAMED, not who is drawn in the header.
+  const agents = useMemo(() => roster.filter((m) => m.kind === 'agent'), [roster]);
 
-  // Human members are DERIVED FROM THE EVENT LOG — the people who have actually
-  // spoken in this room — not from a membership table, because there isn't one until
-  // S1.1. That is why a human chip carries no principal: nothing has bound one, so
-  // the chip does not claim one.
+  // Human chips are still DERIVED FROM THE EVENT LOG — the people who have actually spoken here.
+  // Membership IS a table now (S1.1b), so this could show every enrolled human from the start;
+  // that is a change to what the header displays and it belongs to the shell slice, not to a
+  // slice about tasks. What DID change: the chip now resolves through the roster, so it renders
+  // a display name instead of a member id.
   const humans = useMemo<string[]>(() => {
+    const agentIds = new Set(agents.map((m) => m.id));
     const seen = new Set<string>();
     for (const e of events) {
       if (e.event_type !== 'message') continue;
-      if (e.actor_id === 'system' || byId.has(e.actor_id)) continue;
+      if (e.actor_id === 'system' || agentIds.has(e.actor_id)) continue;
       seen.add(e.actor_id);
     }
     return [...seen];
-  }, [events, byId]);
+  }, [events, agents]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastSeqRef = useRef<number>(0); // last seq seen — the resume cursor
@@ -317,11 +342,11 @@ export function Room({
           </span>
         </h1>
         <div className="roster" {...pr(HOOK.roster)}>
-          {roster.map((m) => (
+          {agents.map((m) => (
             <MemberChip key={m.id} member={m} name={m.id} />
           ))}
           {humans.map((h) => (
-            <MemberChip key={h} name={h} />
+            <MemberChip key={h} member={byId.get(h)} name={h} />
           ))}
         </div>
       </header>
@@ -354,6 +379,10 @@ export function Room({
           ) : it.kind === 'task' ? (
             <li key={it.key}>
               <TaskChip task={it.view} roster={byId} />
+            </li>
+          ) : it.kind === 'handoff' ? (
+            <li key={it.key}>
+              <HandoffRow handoff={it.view} roster={byId} />
             </li>
           ) : (
             /* `data-accent` on the ROW, so the caret and the working indicator inherit the

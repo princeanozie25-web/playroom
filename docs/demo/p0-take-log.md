@@ -34,9 +34,10 @@ image, which is the failure A4 was built to catch.
 
 ## Recommended take: 10
 
-52.8s, all five beats, one continuous take, shot on the S-UI2 surface and **re-shot after
-S1.2** (see below — the clip currently on disk is the S1.2 one, and the earlier 52.2s cut was
-overwritten by a re-run of the same script). Takes 1–7 were shot before S-UI2 and are kept:
+51.88s, all five beats, one continuous take, shot on the S-UI2 surface and **re-shot twice
+since** — after S1.2, when the harness had to authenticate, and after S1.3, when the decision
+card's sentence and the human's display name both changed. The clip on disk is the S1.3 one; see
+the dated sections below, which keep every measurement rather than overwriting the last. Takes 1–7 were shot before S-UI2 and are kept:
 they are the record of what the room looked like when the P0 film was first cut, and take 8 is
 kept because it is the take that failed on the decision card before UI2-4 reworded it.
 
@@ -94,6 +95,57 @@ has survived a change it was not designed for.
 walks through the same door as a browser: `?token=` on the socket, because the browser
 WebSocket API cannot set a header, and the credential is a real row in `member_credentials`.
 A film shot through a door the product does not have proves nothing about the product.
+
+### S1.3 — take 10 re-shot, and take 11 adds the handoff — 27 Jul 2026
+
+Two takes, because the sixth beat costs more than the owner's runtime condition allowed.
+
+| take   | beats | clip   | size  | sha256 (first 16)  | frames | note                                        |
+| ------ | ----- | ------ | ----- | ------------------ | ------ | ------------------------------------------- |
+| **10** | 5     | 51.88s | 3265K | `f935fe34664d602f` | 3/3    | **THE P0 ASSET.** Re-shot on S1.3           |
+| 11     | 6     | 61.60s | 4085K | `7d2d52c8a44a2ada` | 3/3    | the handoff variant, kept and not the asset |
+
+**Take 10 HAD to be re-shot, not merely kept.** S1.3 changed two things a viewer can read: the
+decision card now says _"Requested by Prince under Claude's mandate."_ (both parties, because both
+are grounded in records), and the room renders human display names — the previous take showed the
+raw member id `prince`, lowercase, in every byline. An asset that no longer matches the product is
+worse than no asset, and the claims sheet quotes that card sentence.
+
+**The sixth beat costs 8.8 seconds of clip: 52.8s → 61.6s.** The owner's condition was "if it makes
+the take longer than about a minute, do not force it", and 61.6s is over that line. The obvious way
+to fit would be to shorten beat 5's hold, and that is the one hold that must not move: nine seconds
+is what it takes to read who requested what, under whose mandate, why it was stopped and who has to
+sign. Robbing the film's best beat to make room for a new one is padding dressed as thrift.
+
+So the handoff is behind an argument — `node film.mjs 10 --five` shoots the asset, no flag shoots
+the six-beat variant — and both clips are on disk. Nothing is deleted; that rule has held since
+takes 1–3 were kept for the faults they exposed.
+
+**What beat 6 records, when it is used:**
+
+| beat | recorded                                                                                                                                                    |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6    | `HANDOFF Prince → Sol pr.review under sha256:7d0d033c69effb…` and the task chip becomes `TASK assigned Sol pr.review` — the work moves, the mandate travels |
+
+The mandate hash on the handoff row is **Sol's** (`7d0d033c…`), and the one on the decision card is
+**Claude's** (`1af314ca…`). Two different documents, visibly, in the same frame: a handoff confers
+no authority, so the reference that travels is the one the RECEIVING member acts under.
+
+**Beat 6 is after beat 5 for a reason that is not staging.** The standing that lets Prince request
+under Claude's mandate is the task Claude HOLDS; moving that task to Sol moves the standing with it,
+so a handoff before beat 5 would make beat 5's request unjustified — correctly refused, and the film
+would have shown nothing. That is S13-N1's second face, and it is recorded in the ledger.
+
+**There is no UI for a handoff**, exactly as there is none for `request_action`. The harness sends
+the frame a host sidecar sends, on a socket with a real credential, and reads the task id from the
+room's own replay the way a sidecar would — not from the database, because a camera that queries
+Postgres to drive a beat is asserting knowledge no client has. **A caption may not say that typing
+"@sol take review" did this.**
+
+Re-shot run (take 10): warm-up **636ms** (database 97ms, claude-main 310ms, sol 636ms), beat 1 opened
+in 463ms with no stall, `262→188 tok · $0.0012` for Claude and `292→151 tok · $0.00013` for Sol.
+App code filmed: `S13-4`, web production build, api warmed at boot. No selector edited for either
+take: the two new hooks (`task`, `handoff`) were added with the components that render them.
 
 ## What the harness asserts before a take passes
 

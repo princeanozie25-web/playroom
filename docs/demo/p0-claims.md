@@ -12,9 +12,12 @@ the DECISION card has exactly one possible input, `appendAgentEvent` will not co
 without a summon, the co-sign buttons are inert by construction. A caption can undo all of
 it in ninety seconds, and no test will catch that.
 
-Recorded take: **take 10**, 52.8s, one continuous take, production build — re-shot after
-S1.2 on 26 Jul 2026. See [p0-take-log.md](p0-take-log.md) for provenance and per-beat
-assertions.
+Recorded take: **take 10**, 51.88s, five beats, one continuous take, production build — re-shot
+after S1.3 on 27 Jul 2026. **Take 11 is a six-beat variant** (61.60s) that adds the handoff; it is
+kept and it is not the asset, because the sixth beat costs 8.8 seconds and the only way to fit it
+under a minute would have been to shorten the decision card's hold. If take 11 is ever cut,
+**beat 6's claims below apply and are not optional.** See [p0-take-log.md](p0-take-log.md) for
+provenance and per-beat assertions.
 
 **The surface changed after the first cut; the claims did not.** Take 6 was shot on the
 pre-S-UI2 room, take 10 on the redesigned one. S-UI2 was appearance work — identity became
@@ -148,6 +151,18 @@ was asked to merge this_. Tightening it means the request naming its task, which
 And the deeper limit under this beat has not moved: **the request is still issued on Claude's
 behalf by a caller**, because no adapter can carry a tool call. Grounding who may ask on whose
 behalf is not the same as an agent asking, and beat 5's caption still may not imply the second.
+
+### Beat 6 — the work moves (SIX-BEAT VARIANT ONLY, take 11)
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | A task moves between the agents of **two different principals**, and the mandate reference travels with it: the handoff row shows `Prince → Sol`, the work (`pr.review`), and the hash of **Sol's** mandate — while the decision card two rows above shows **Claude's**. Two different documents in one frame. The task chip follows to `assigned`, not `working`, because nothing is running. Every field is read from a `task.handoff` row in the log; the refusals behind it (roster, mandate) are server-side and asserted by tests.                                                                                                                         |
+| **What it does NOT** | **Nothing typed this.** There is no UI for a handoff — the composer sends chat and nothing else — so the harness sends the frame a host sidecar sends, exactly as in beat 5. A caption may not say that typing "@sol take review" moved the task. **Sol has not started the work, and cannot be made to:** a handoff triggers no turn, because an agent cannot be asked for work by anything but a human summon (there is no tool-call channel). **And the handoff conferred nothing:** Sol acts under Sol's mandate — the film shows the transfer being ALLOWED, and the tests show `pr.merge` being REFUSED to the same member. That refusal is not on screen. |
+
+**The one sentence a caption may use:** _the task moves to Jerry's agent, and the mandate it will be
+carried out under is Jerry's, not Prince's._ **Not:** _Sol takes over the review_ (nothing has
+started). **Not:** _Prince delegates his authority_ (he delegates the work; the authority is Sol's
+own, and narrower).
 
 ---
 

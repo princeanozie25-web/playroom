@@ -20,6 +20,17 @@ import { principalAccent } from './mandate';
 
 export interface RosterMember {
   id: string;
+  /**
+   * Human or agent. Carried since S1.3 because the room needs NAMES for both and CHIPS for one:
+   * the roster strip shows agents (they are the members with mandates to display), while the
+   * transcript and the decision card have to render a human's display name.
+   *
+   * Before this, `loadRoster` returned agents only, so every human byline in the room rendered
+   * the raw member id — `prince`, not `Prince`. The film had shown that lowercase identifier in
+   * every take since S1.1a made members records, and nothing asserted it, so nothing caught it.
+   * The same category error as `principal:jerry` reaching the screen, which UI2 spent a slice on.
+   */
+  kind: 'human' | 'agent';
   display_name: string;
   principal: string;
   /**
@@ -126,15 +137,18 @@ export async function loadPrincipals(roomId: string): Promise<Principal[]> {
  * appear — this slice must not change the strip.
  */
 export async function loadRoster(roomId: string): Promise<RosterMember[]> {
-  return (await fetchMembers(roomId))
-    .filter((m) => m.kind === 'agent')
-    .map((m) => ({
-      id: m.id,
-      display_name: m.display_name,
-      principal: m.principal_id,
-      principal_name: m.principal_name,
-      accent: principalAccent(m.principal_ordinal),
-      scope: m.scope,
-      protected_actions: m.protected_actions,
-    }));
+  return (await fetchMembers(roomId)).map((m) => ({
+    id: m.id,
+    kind: m.kind,
+    display_name: m.display_name,
+    principal: m.principal_id,
+    // A HUMAN CHIP CARRIES NO PRINCIPAL AND NO ACCENT, which is UI2's ruling unchanged. In this
+    // room a human IS the principal, so "Prince · for Prince" would be tautological, and identity
+    // is human-versus-agent BY SHAPE, not by colour — the accent belongs to the agents that
+    // inherit it. Null renders nothing, rather than falling back to an identifier.
+    principal_name: m.kind === 'agent' ? m.principal_name : null,
+    accent: m.kind === 'agent' ? principalAccent(m.principal_ordinal) : null,
+    scope: m.scope,
+    protected_actions: m.protected_actions,
+  }));
 }
