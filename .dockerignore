@@ -1,0 +1,36 @@
+# WHAT MUST NEVER ENTER AN IMAGE.
+#
+# The first line is the only one that would be a security incident if it were missing. `.env` holds
+# DATABASE_URL and two provider keys; an image is a build artifact that gets pushed to a registry,
+# pulled by a platform, and cached in layers that outlive the container. A secret baked into a layer
+# is a secret you cannot revoke by editing a file.
+#
+# Every secret this deployment needs is set with `fly secrets set`, which stores it encrypted and
+# injects it at runtime. Nothing below is copied.
+.env
+.env.*
+!.env.example
+
+# Not secrets, just weight and correctness.
+node_modules
+**/node_modules
+.next
+.next-dev
+.next-prod
+**/.next
+**/.next-dev
+**/.next-prod
+.git
+.github
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# The film and its assets: ~1MB of GIF and PNG that no server reads.
+docs/demo/assets
+
+# Local tooling and scratch.
+.claude
+coverage
+*.log

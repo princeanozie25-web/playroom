@@ -1,0 +1,46 @@
+# playroom-api on Fly.
+#
+#   fly deploy -c infra/fly/api.fly.toml --dockerfile infra/fly/api.Dockerfile
+#
+# SECRETS ARE NOT HERE AND NEVER WILL BE. `fly secrets set` holds DATABASE_URL, the provider keys
+# and the spend ceiling; this file is committed and a connection string in it would be a connection
+# string in git history forever.
+
+app = "playroom-api"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "../../infra/fly/api.Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # ── AUTO-STOP IS OFF, AND THAT IS THE WARM-UP DECISION ───────────────────────────────
+  #
+  # Fly's default scales a machine to zero when idle. For this api that would undo S0.5c
+  # entirely: `warmOnBoot` pays the TLS handshake and provider client initialisation ONCE at
+  # boot, and a machine that stops between testers pays it again — on the first summon, in
+  # front of the person forming their first impression. ADR-008 measured that cold cost at
+  # +1 to +1.5s and decided it was worth removing.
+  #
+  # So one machine stays up. It costs a few dollars a month and it is the difference between a
+  # tester's first tag answering immediately and answering after a visible stall.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # WebSockets ride this service. Fly terminates TLS and upgrades in place, so `wss://` needs no
+  # extra configuration — the browser's `https` origin becomes `wss` in `socketUrl` and arrives
+  # here as a plain upgrade on the internal port.
+
+  [http_service.concurrency]
+    type = "requests"
+    # Generous, because a WebSocket is a long-lived connection that would otherwise count against a
+    # small limit forever and make the second tester look like overload.
+    soft_limit = 200
+    hard_limit = 250
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

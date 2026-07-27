@@ -1,0 +1,33 @@
+# playroom-web on Fly.
+#
+#   fly deploy -c infra/fly/web.fly.toml --dockerfile infra/fly/web.Dockerfile \
+#     --build-arg NEXT_PUBLIC_API_URL=https://playroom-api.fly.dev
+#
+# THE BUILD ARG IS NOT OPTIONAL. `NEXT_PUBLIC_API_URL` is inlined into the browser bundle at build
+# time, so a deploy without it ships a room that tries to open `ws://localhost:3001` — from the
+# tester's phone, at their own machine. It loads perfectly and never connects.
+#
+# `PLAYROOM_WEB_TOKEN` is a SECRET, set with `fly secrets set`, never here. It authenticates the BFF
+# as `prince` for viewers who have not redeemed a code; a redeemed session takes precedence over it
+# at every call site, which is what keeps a tester's acts attributed to the tester.
+
+app = "playroom-web"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "../../infra/fly/web.Dockerfile"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+
+  # The web tier MAY sleep. It holds no warm connection worth preserving — the provider clients and
+  # the Neon pool live in the api — so a cold start here costs a page render, not a first
+  # impression. The api is the one that stays up.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
