@@ -82,8 +82,24 @@ export async function createRoom(
       [id, title],
     );
     await client.query(
+      // EVERY MEMBER EXCEPT A GUEST'S. The blanket enrolment is unchanged for the members that
+      // have always been here; what is excluded is any member acting for a principal flagged
+      // `guest` in migration 017.
+      //
+      // Because the alternative is an open door with a lock painted on it. A guest slot is
+      // redeemed by a stranger with a room code, and the code's entire job is to enrol them —
+      // if creation enrolled them anyway, they would be a member of every room created after
+      // they redeemed, and the code would be decoration. So a guest gets in exactly one way:
+      // a redemption that writes the row deliberately.
+      //
+      // Narrowing this for EVERYONE is the right eventual design and a bigger change than this
+      // slice should make: `seed-room.ts` and the film's room both rely on the agents being
+      // enrolled by creation, and take 13 is the asset.
       `INSERT INTO room_members (room_id, member_id)
-       SELECT $1, m.id FROM members AS m
+       SELECT $1, m.id
+         FROM members AS m
+         JOIN principals AS p ON p.id = m.principal_id
+        WHERE p.guest = false
        ON CONFLICT DO NOTHING`,
       [id],
     );

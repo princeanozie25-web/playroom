@@ -56,6 +56,34 @@ describe('listMembers', () => {
         scope: ['pr.review', 'pr.comment'],
         protected_actions: ['pr.merge', 'deploy'],
       },
+      // ── THE TWO GUEST AGENTS, ADDED ON PURPOSE IN S-LIVE ────────────────────────────
+      //
+      // This list is UPDATED rather than relaxed, and that is the S1.1c ruling being honoured:
+      // an enumeration is what catches a roster changing by ACCIDENT, so replacing it with
+      // "there are some agents" would delete the check to accommodate a deliberate change.
+      // Ordinals 2 and 3 exhaust the four-hue accent palette — see migration 017.
+      {
+        id: 'ada',
+        kind: 'agent',
+        display_name: 'Ada',
+        principal_id: 'principal:guest-a',
+        principal_name: 'Guest A',
+        principal_ordinal: 2,
+        adapter_id: 'ada',
+        scope: ['pr.review', 'pr.comment', 'pr.merge'],
+        protected_actions: ['pr.merge', 'deploy'],
+      },
+      {
+        id: 'bo',
+        kind: 'agent',
+        display_name: 'Bo',
+        principal_id: 'principal:guest-b',
+        principal_name: 'Guest B',
+        principal_ordinal: 3,
+        adapter_id: 'bo',
+        scope: ['pr.review', 'pr.comment', 'pr.merge'],
+        protected_actions: ['pr.merge', 'deploy'],
+      },
     ]);
   });
 
@@ -97,8 +125,12 @@ describe('a room roster, scoped', () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { members: Array<{ id: string; principal_name: string }> };
-    // A new room gets every current member — today's behaviour, recorded rather than narrowed.
-    expect(body.members.map((m) => m.id).sort()).toEqual(['claude-main', 'prince', 'sol']);
+    // A new room gets every current member EXCEPT A GUEST'S — S-LIVE narrowed exactly one thing.
+    // `jerry` is new (a human member of an existing principal, migration 017); `ada` and `bo` are
+    // absent because their principals are flagged `guest`, and a guest gets into a room only by
+    // redeeming a room code. Blanket enrolment would have made the code decoration over an open
+    // door.
+    expect(body.members.map((m) => m.id).sort()).toEqual(['claude-main', 'jerry', 'prince', 'sol']);
 
     const ghost = await fetch(`${server.httpBase}/rooms/no-such-room-here/members`, {
       headers: { authorization: `Bearer ${server.token}` },
@@ -120,7 +152,7 @@ describe('a room roster, scoped', () => {
     ]);
 
     const inRoom = await listRoomMembers(pool, room);
-    expect(inRoom.map((m) => m.id).sort()).toEqual(['claude-main', 'prince']);
+    expect(inRoom.map((m) => m.id).sort()).toEqual(['claude-main', 'jerry', 'prince']);
     // The full-roster read still sees sol — the member exists, they are just not here.
     expect((await listMembers(pool)).map((m) => m.id)).toContain('sol');
 
@@ -339,5 +371,40 @@ describe('creating a room requires a credential (RT-002, closed in S1.3c)', () =
 
     await pool.query('DELETE FROM events WHERE room_id = $1', [roomId]);
     await pool.query('DELETE FROM rooms WHERE id = $1', [roomId]);
+  });
+});
+
+describe('a guest is not enrolled by creating a room', () => {
+  it('CREATION SKIPS GUEST PRINCIPALS — the room code is the only way in', async () => {
+    // THE HOLE THIS CLOSES, stated as the thing that would have happened. `createRoom` enrols
+    // every member in the database, which was harmless while every member was mine. A stranger
+    // holding a guest slot would have become a member of every room created after they redeemed —
+    // including rooms nobody meant to show them — and the room code, whose entire job is to enrol
+    // the redeemer, would have been decoration over a door already open.
+    //
+    // Asserted on the ROW rather than on the handshake, because the handshake is unchanged and
+    // must stay that way: this is about who is a member, not about what the front door does with
+    // one. A guest with a genuine enrolment still walks the identical path.
+    const room = `members-guest-${Date.now()}`;
+    expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
+
+    const { rows } = await pool.query<{ member_id: string }>(
+      `SELECT rm.member_id FROM room_members AS rm
+         JOIN members AS m ON m.id = rm.member_id
+         JOIN principals AS p ON p.id = m.principal_id
+        WHERE rm.room_id = $1 AND p.guest = true`,
+      [room],
+    );
+    expect(
+      rows.map((r) => r.member_id),
+      'a guest was enrolled by room creation',
+    ).toEqual([]);
+
+    // And the non-guests still are, so this narrowed one thing and not everything. Without this
+    // half, a bug that enrolled NOBODY would pass the assertion above.
+    const all = await listRoomMembers(pool, room);
+    expect(all.map((m) => m.id).sort()).toEqual(['claude-main', 'jerry', 'prince', 'sol']);
+
+    await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
   });
 });

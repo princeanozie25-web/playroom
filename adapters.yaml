@@ -34,3 +34,31 @@ adapters:
     # USD per 1,000 tokens. Config, not constants — a price change is not a release.
     cost_per_1k_in: 0.00015
     cost_per_1k_out: 0.0006
+  # ── GUEST AGENTS (S-LIVE) ────────────────────────────────────────────────────────────
+  #
+  # One agent per guest principal, because a tester gets their own agent bound to their own
+  # principal rather than a shared one. Two, matching migration 017's two slots, which are
+  # capped by the four-hue accent palette and not by anything here.
+  #
+  # BOTH ON HAIKU, and that is a cost decision rather than a preference: these are the
+  # adapters strangers can spend money through, so they get the cheapest concise model in
+  # the registry. `sol` stays on a second provider because provider-neutrality is a claim
+  # this repository makes and one adapter has to prove it.
+  #
+  # `max_output_tokens` is HALF the others'. A guest turn that runs long costs more and reads
+  # worse on a phone, and the spend ceiling should be the second line of defence rather than
+  # the first.
+  - id: ada
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    enabled: true
+    max_output_tokens: 512
+    cost_per_1k_in: 0.001
+    cost_per_1k_out: 0.005
+  - id: bo
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    enabled: true
+    max_output_tokens: 512
+    cost_per_1k_in: 0.001
+    cost_per_1k_out: 0.005

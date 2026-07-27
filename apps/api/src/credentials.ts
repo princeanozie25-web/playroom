@@ -49,6 +49,8 @@ export interface IssuedCredential {
   label: string;
   /** THE PLAINTEXT, RETURNED ONCE AND NEVER STORED. If it is lost, issue another. */
   token: string;
+  /** When it stops working. Null for the long-lived ones that predate S-LIVE. */
+  expires_at: string | null;
 }
 
 /**
@@ -56,26 +58,56 @@ export interface IssuedCredential {
  *
  * Rotation is issue-then-revoke, never update-in-place: the old row stays as the record that
  * the secret existed, which is what makes `revoked_at` mean something.
+ *
+ * ── EXPIRY IS OPTIONAL HERE AND MANDATORY WHERE IT MATTERS ──
+ *
+ * `expiresInHours` is undefined for the credentials that predate S-LIVE — mine, and the capture
+ * harness's — which are long-lived on purpose. Every credential a STRANGER holds is issued through
+ * `redeemRoomCode`, which passes one and does not take no for an answer. So the parameter is
+ * optional and the policy is enforced at the place that knows the difference, rather than by a
+ * default here that would silently expire the harness mid-take.
  */
 export async function issueCredential(
   pool: Pool,
   memberId: string,
   label: string,
+  expiresInHours?: number,
 ): Promise<IssuedCredential> {
   const token = `${TOKEN_PREFIX}${randomBytes(32).toString('hex')}`;
   const id = `cred_${randomBytes(8).toString('hex')}`;
-  await pool.query(
-    'INSERT INTO member_credentials (id, member_id, token_hash, label) VALUES ($1, $2, $3, $4)',
-    [id, memberId, hashSecret(token), label],
+  const { rows } = await pool.query<{ expires_at: Date | null }>(
+    `INSERT INTO member_credentials (id, member_id, token_hash, label, expires_at)
+     VALUES ($1, $2, $3, $4, CASE WHEN $5::numeric IS NULL THEN NULL
+                                  ELSE now() + ($5::numeric * interval '1 hour') END)
+     RETURNING expires_at`,
+    [id, memberId, hashSecret(token), label, expiresInHours ?? null],
   );
-  return { id, member_id: memberId, label, token };
+  // Computed by the DATABASE, not by Node. The expiry is compared against `now()` at
+  // authentication time, so it has to be measured on the same clock that will judge it — a
+  // `new Date()` here would drift against the server that decides.
+  const expiresAt = rows[0].expires_at;
+  return {
+    id,
+    member_id: memberId,
+    label,
+    token,
+    expires_at: expiresAt ? expiresAt.toISOString() : null,
+  };
 }
 
 export async function revokeCredential(pool: Pool, id: string): Promise<void> {
   await pool.query('UPDATE member_credentials SET revoked_at = now() WHERE id = $1', [id]);
 }
 
-/** Why a connection was refused. Two codes, because they send an operator to different places. */
+/**
+ * Why a connection was refused. Two codes, because they send an operator to different places.
+ *
+ * AN EXPIRED CREDENTIAL IS `credential_invalid`, NOT A THIRD CODE — and that is a decision, not an
+ * omission. Outward, the two must be indistinguishable: telling a caller "that one has expired"
+ * confirms the token was real and once worked, which is a fact about our records that a stranger
+ * holding a guessed string has not earned. Same rule as the ticket path's one refusal outward.
+ * The distinction that an operator needs lives in the log, not on the wire.
+ */
 export type AuthFailure = 'credential_required' | 'credential_invalid';
 
 export interface AuthResult {
@@ -110,7 +142,13 @@ export async function authenticate(
     `SELECT c.id AS credential_id, c.member_id, m.principal_id
        FROM member_credentials AS c
        JOIN members AS m ON m.id = c.member_id
-      WHERE c.token_hash = $1 AND c.revoked_at IS NULL`,
+      WHERE c.token_hash = $1
+        AND c.revoked_at IS NULL
+        -- EXPIRY ENFORCED IN THE LOOKUP, compared against the database's own clock. Not by a
+        -- sweep job: an expired credential has to stop working the moment it expires, not the
+        -- next time something remembers to tidy up. The null branch comes first so the
+        -- long-lived rows that predate S-LIVE keep authenticating.
+        AND (c.expires_at IS NULL OR c.expires_at > now())`,
     [hashSecret(token)],
   );
   const row = rows[0];
