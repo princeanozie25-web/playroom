@@ -9,6 +9,7 @@ import type { RoomBus } from './bus.js';
 import { appendAgentEvent, appendMessage, type SummonRef, type TaskRef } from './events.js';
 import { assembleContext, assemblyShape, windowFor } from './assembly.js';
 import { stampFor } from './stamp.js';
+import { ceilingMessage, spendToday } from './spend.js';
 import { getTask, transitionTask, type TaskState } from './tasks.js';
 
 const CONTEXT_MESSAGES = 30; // PM7 hard cap — last 30 room messages, nothing more
@@ -373,6 +374,31 @@ async function moveTask(
 export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
   const { pool, bus, roomId, adapterId, adapterFactory, spans, summon, task } = deps;
   const publish = (ev: ServerEvent): void => bus.publish(roomId, ev);
+
+  // ── THE DAILY SPEND CEILING, CHECKED BEFORE ANYTHING COSTS MONEY (§18, S-LIVE) ──
+  //
+  // HERE, and not at the summon construction site, for two reasons. The constructor is off limits in
+  // this slice, and this is where the §22b refusal already lives — the one existing precedent for
+  // "this turn will not happen, and the room is told why in-thread." A second refusal mechanism for
+  // the same shape of outcome would be a second thing to keep consistent.
+  //
+  // BEFORE THE STAMP AND BEFORE THE ADAPTER. Nothing above this line has cost anything, so a refused
+  // turn spends nothing at all — no provider call, no tokens, and no `agent.turn.started` implying a
+  // turn that never ran.
+  //
+  // OUT LOUD, ALWAYS. A ceiling that stops agents replying and says nothing is indistinguishable from
+  // the product being broken, which is the one thing a refusal may never look like.
+  const spend = await spendToday(pool);
+  if (spend.exceeded) {
+    console.warn(
+      `[spend] ceiling reached: $${spend.spent_usd.toFixed(4)} of $${spend.ceiling_usd} — ` +
+        `refused a turn for ${adapterId} in ${roomId}`,
+    );
+    publish(
+      await appendMessage(pool, roomId, 'system', `sys-${randomUUID()}`, ceilingMessage(spend)),
+    );
+    return;
+  }
 
   // §22b: reject a second concurrent turn with an in-thread notice.
   const flightKey = inFlightKey(roomId, adapterId);
