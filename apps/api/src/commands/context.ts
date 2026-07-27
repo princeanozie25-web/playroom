@@ -26,12 +26,20 @@ export type Command =
   // commands/summon.ts, which owns depth and the root it records. `member` is an adapter
   // id the boundary already resolved, never a raw `@token`, and there is no depth field
   // because the constructor can only produce a human root.
-  | { kind: 'summon'; roomId: string; member: string; causeSeq: number; spans?: TurnSpans }
+  | {
+      kind: 'summon';
+      roomId: string;
+      member: string;
+      causeSeq: number;
+      intent: string;
+      spans?: TurnSpans;
+    }
   | {
       kind: 'triggerAgentTurn';
       roomId: string;
       adapterId: string;
       summonId: string;
+      taskId: string;
       spans?: TurnSpans;
     }
   // A governed action request. Traverses the mandate evaluator; nothing executes.

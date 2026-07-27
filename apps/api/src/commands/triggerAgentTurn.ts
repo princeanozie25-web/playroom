@@ -7,7 +7,13 @@ import type { CommandContext, CommandDeps, TurnSpans } from './context.js';
 export function triggerAgentTurnCommand(
   deps: CommandDeps,
   _ctx: CommandContext,
-  input: { roomId: string; adapterId: string; summonId: string; spans?: TurnSpans },
+  input: {
+    roomId: string;
+    adapterId: string;
+    summonId: string;
+    taskId: string;
+    spans?: TurnSpans;
+  },
 ): Promise<void> {
   return runAgentTurn({
     pool: deps.pool,
@@ -17,5 +23,6 @@ export function triggerAgentTurnCommand(
     adapterFactory: deps.adapterFactory,
     spans: input.spans,
     summon: { summon_id: input.summonId },
+    task: { task_id: input.taskId },
   });
 }

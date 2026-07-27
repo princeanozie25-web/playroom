@@ -648,3 +648,63 @@ body {
   color: #fff;
   cursor: pointer;
 }
+
+/* ── THE TASK CHIP (S1.3) ──────────────────────────────────────────────────────────────
+   Bible §11: task state changes render as chips the moment they commit.
+
+   QUIETER THAN A MESSAGE, deliberately. A task chip is a record of where work stands, not a
+   thing anyone said, so it sits at the density gradient's bottom step — one line, small type,
+   no card. The DECISION card is the only surface in the room allowed to be loud, because it is
+   the only one reporting that authority was withheld. */
+.task-chip {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  padding: var(--s-1) 0;
+}
+.task-kicker {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+/* STATE BY WORD FIRST. The dot is a second cue, never the only one — the same rule that made
+   the connection badge carry a label rather than a colour alone (F1). */
+.task-state {
+  font-weight: 650;
+  color: var(--ink);
+}
+.task-state::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: var(--s-1);
+  background: var(--ink-3);
+}
+[data-pr-state='working'] .task-state::before {
+  background: var(--indigo);
+}
+[data-pr-state='input-required'] .task-state::before,
+[data-pr-state='held'] .task-state::before {
+  background: var(--amber, #d97706);
+}
+[data-pr-state='done'] .task-state::before {
+  background: var(--ink-3);
+}
+.task-action {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: var(--t-xs);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 var(--s-1);
+}
+.task-mandate {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}

@@ -38,15 +38,22 @@ export interface RouteRecord {
 export type RouteReason =
   'only_available_route' | 'no_routes_configured' | 'all_routes_unavailable';
 
-export interface RouteSelection {
-  route: RouteRecord | null;
-  reason: RouteReason;
-  /**
-   * The constraint that failed, for §6.2's failure rule: a task with no usable route goes to
-   * `input-required` and NAMES the failed constraint. Null when a route was found.
-   */
-  failed_constraint: string | null;
-}
+/**
+ * The outcome of route selection, as a DISCRIMINATED UNION rather than two nullable fields.
+ *
+ * §6.2's failure rule says a task with no usable route enters `input-required` and NAMES the
+ * failed constraint — so a selection without a route always has a constraint to name, and one
+ * with a route never does. Written as `route: RouteRecord | null` plus
+ * `failed_constraint: string | null` that invariant was true and unstateable: the summon path
+ * narrowed on `!selection.route` and the compiler still believed the constraint might be null,
+ * which S1.3 turned into a real error the moment the string had to reach `transitionTask`.
+ *
+ * The alternative was a non-null assertion at the one call site. This is the same information
+ * expressed where it is known instead of asserted where it is needed.
+ */
+export type RouteSelection =
+  | { route: RouteRecord; reason: RouteReason; failed_constraint: null }
+  | { route: null; reason: RouteReason; failed_constraint: string };
 
 export async function listRoutes(pool: Pool, memberId: string): Promise<RouteRecord[]> {
   const { rows } = await pool.query<RouteRecord>(

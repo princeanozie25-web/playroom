@@ -203,6 +203,18 @@ export interface SummonRef {
 }
 
 /**
+ * A reference to the task an event belongs to (S1.3).
+ *
+ * Same shape and same reason as `SummonRef`: passed as its own required argument so that
+ * "every summon and every turn belongs to a task" is a signature rather than a convention.
+ * `events.task_id` is a column, not a payload field, because the question it answers is a
+ * query — everything that ever happened to this task, in one indexed read.
+ */
+export interface TaskRef {
+  task_id: string;
+}
+
+/**
  * Append the durable record that a member was asked to take a turn.
  *
  * `root_is_human` is decided by the CALLER, at write time, and frozen. Members are not
@@ -219,6 +231,10 @@ export interface SummonRef {
 export async function appendSummon(
   pool: Pool,
   roomId: string,
+  // THE TASK THIS SUMMON IS WORK ON. Required, same discipline as SummonRef on a turn: a
+  // summon exists to authorise work, and work is a task as of S1.3, so a summon that belongs
+  // to no task cannot be written rather than being written and going unnoticed.
+  task: TaskRef,
   payload: {
     summon_id: string;
     member: string;
@@ -230,8 +246,9 @@ export async function appendSummon(
   },
 ): Promise<ServerEvent | null> {
   const { rows } = await pool.query<EventRow>(
-    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload, summon_id, root_is_human)
-     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'summon', $3, $4, $5)
+    `INSERT INTO events
+       (room_id, actor_id, actor_member_id, event_type, payload, summon_id, root_is_human, task_id)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'summon', $3, $4, $5, $6)
      ON CONFLICT (room_id, (payload ->> 'cause_seq'), (payload ->> 'member'))
        WHERE event_type = 'summon'
        DO NOTHING
@@ -242,6 +259,7 @@ export async function appendSummon(
       JSON.stringify(payload),
       payload.summon_id,
       payload.root_is_human,
+      task.task_id,
     ],
   );
   // Deliberately NOT re-fetching and returning the existing row. The only caller needs
@@ -260,6 +278,7 @@ export async function appendSummon(
 export async function appendRouteSelected(
   pool: Pool,
   roomId: string,
+  task: TaskRef,
   payload: {
     summon_id: string;
     member: string;
@@ -269,12 +288,51 @@ export async function appendRouteSelected(
   },
 ): Promise<ServerEvent> {
   const { rows } = await pool.query<EventRow>(
-    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload, summon_id)
-     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'route.selected', $3, $4)
+    `INSERT INTO events
+       (room_id, actor_id, actor_member_id, event_type, payload, summon_id, task_id)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'route.selected', $3, $4, $5)
      RETURNING ${EVENT_COLS}`,
-    [roomId, payload.member, JSON.stringify(payload), payload.summon_id],
+    [roomId, payload.member, JSON.stringify(payload), payload.summon_id, task.task_id],
   );
   return rowToServerEvent(rows[0]);
+}
+
+/**
+ * Append a task event — `task.created`, `task.state`, `task.handoff`.
+ *
+ * The task id goes in the COLUMN as well as the payload. The payload is what a client renders;
+ * the column is what makes "everything that happened to this task" one indexed query, including
+ * the summon and the turns, which carry it too.
+ *
+ * `eventType` is a parameter rather than three near-identical functions: every one of these
+ * writes exactly the same row shape, and the discrimination that matters happens in the zod
+ * union at the wire, which `rowToServerEvent` validates against. A caller inventing
+ * `task.whatever` fails there, loudly, on the write.
+ */
+export async function appendTaskEvent(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  taskId: string,
+  eventType: 'task.created' | 'task.state' | 'task.handoff',
+  payload: unknown,
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload, task_id)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, $3, $4, $5)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, eventType, JSON.stringify(payload), taskId],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+/** Every event ever written against a task, in order. The history the row is a projection of. */
+export async function eventsForTask(pool: Pool, taskId: string): Promise<ServerEvent[]> {
+  const { rows } = await pool.query<EventRow>(
+    `SELECT ${EVENT_COLS} FROM events WHERE task_id = $1 ORDER BY seq`,
+    [taskId],
+  );
+  return rows.map(rowToServerEvent);
 }
 
 // §17 telemetry written on an agent.turn.completed row.
@@ -300,6 +358,9 @@ export async function appendAgentEvent(
   // call site that passes telemetry. Every agent turn traces to a human summon; this
   // argument is where that stops being a claim.
   summon: SummonRef,
+  // The task the turn is work on. Required for the same reason `summon` is — a turn that
+  // belongs to no task would be work with no record of what it was for.
+  task: TaskRef,
   eventType: string,
   payload: unknown,
   telemetry?: AgentTelemetry,
@@ -317,9 +378,9 @@ export async function appendAgentEvent(
   };
   const { rows } = await pool.query<EventRow>(
     `INSERT INTO events
-       (room_id, actor_id, actor_member_id, event_type, payload, summon_id,
+       (room_id, actor_id, actor_member_id, event_type, payload, summon_id, task_id,
         adapter_id, tokens_in, tokens_out, cost_usd, latency_ms, prompt_hash, success, error_class, timings)
-     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, $3, $4, $5, $15, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING ${EVENT_COLS}`,
     [
       roomId,
@@ -336,6 +397,7 @@ export async function appendAgentEvent(
       t.success,
       t.error_class,
       t.timings ? JSON.stringify(t.timings) : null,
+      task.task_id,
     ],
   );
   return rowToServerEvent(rows[0]);

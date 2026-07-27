@@ -107,6 +107,11 @@ export async function postMessageCommand(
       roomId: input.roomId,
       member,
       causeSeq: event.seq,
+      // THE SENTENCE THAT ASKED, carried so the task it creates can say what it is for.
+      // Read from the committed event rather than from `input`, so what the task records is
+      // what the room actually stored — a replayed frame resolves to the existing row, and
+      // its body is the one already in the log.
+      intent: event.event_type === 'message' ? event.payload.body : input.body,
       spans: { t0, t1 },
     });
   }

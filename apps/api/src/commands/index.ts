@@ -32,7 +32,14 @@ export function executeCommand(
 ): Promise<ServerEvent>;
 export function executeCommand(
   ctx: CommandContext,
-  command: { kind: 'summon'; roomId: string; member: string; causeSeq: number; spans?: TurnSpans },
+  command: {
+    kind: 'summon';
+    roomId: string;
+    member: string;
+    causeSeq: number;
+    intent: string;
+    spans?: TurnSpans;
+  },
   deps: CommandDeps,
 ): Promise<void>;
 export function executeCommand(
@@ -42,6 +49,7 @@ export function executeCommand(
     roomId: string;
     adapterId: string;
     summonId: string;
+    taskId: string;
     spans?: TurnSpans;
   },
   deps: CommandDeps,

@@ -6,8 +6,15 @@ import type { Pool } from 'pg';
 import type { AgentAdapter, AgentMessage, ServerEvent } from '@playroom/shared';
 import { costUsd, getAdapterConfig, listAdapters } from '@playroom/adapters';
 import type { RoomBus } from './bus.js';
-import { appendAgentEvent, appendMessage, recentMessages, type SummonRef } from './events.js';
+import {
+  appendAgentEvent,
+  appendMessage,
+  recentMessages,
+  type SummonRef,
+  type TaskRef,
+} from './events.js';
 import { stampFor } from './stamp.js';
+import { getTask, transitionTask, type TaskState } from './tasks.js';
 
 const CONTEXT_MESSAGES = 30; // PM7 hard cap — last 30 room messages, nothing more
 
@@ -304,7 +311,7 @@ export function summonRuling(event: ServerEvent): SummonRuling {
 //   for the narrower case, so the work is to route the refusal through it rather than to
 //   invent a mechanism.
 const inFlight = new Set<string>();
-const inFlightKey = (roomId: string, adapterId: string): string => `${roomId} ${adapterId}`;
+const inFlightKey = (roomId: string, adapterId: string): string => `${roomId} ${adapterId}`;
 
 // End time of the previous turn in THIS process — lets each turn record the gap
 // since the last one, so cold-start/autosuspend effects are visible (S0.3c).
@@ -334,14 +341,42 @@ export interface AgentTurnDeps {
   adapterFactory: (id: string) => AgentAdapter;
   // The summon this turn answers. Required, so a turn cannot exist without one.
   summon: SummonRef;
+  // The task this turn is work on. Required for the same reason (S1.3): the turn is what
+  // finishes the work or fails to, so it is the only party that can move the task out of
+  // `working`, and a turn with no task would leave one there forever.
+  task: TaskRef;
   spans?: { t0: number; t1: number }; // S0.3c: command-entry + message-committed boundaries
+}
+
+/**
+ * Move this turn's task, and fan the transition out.
+ *
+ * Reads the task row rather than trusting a copy: the turn is long-lived (a streamed reply is
+ * seconds of wall clock) and a handoff could have moved the task while it ran. Transitioning a
+ * stale object would write `from_state` values that never held, and the log is read as a history.
+ *
+ * A MISSING TASK IS NOT FATAL TO THE TURN. It cannot happen through the summon path — the task
+ * is created before the summon exists — but a task deleted underneath a running turn (a room
+ * torn down mid-stream, which the test suite does) must not turn a completed turn into a thrown
+ * error after its events are already in the log.
+ */
+async function moveTask(
+  deps: AgentTurnDeps,
+  to: TaskState,
+  reason: string,
+  actorId: string,
+): Promise<void> {
+  const row = await getTask(deps.pool, deps.task.task_id);
+  if (!row) return;
+  const moved = await transitionTask(deps.pool, row, to, reason, actorId);
+  if (moved) deps.bus.publish(deps.roomId, moved);
 }
 
 // Run an agent turn as a sequence of persisted events: started → deltas →
 // completed. Persist-before-fanout holds for every one (ADR-003). A failure is
 // written as completed{success:false} with an error_class — never a silent hang.
 export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
-  const { pool, bus, roomId, adapterId, adapterFactory, spans, summon } = deps;
+  const { pool, bus, roomId, adapterId, adapterFactory, spans, summon, task } = deps;
   const publish = (ev: ServerEvent): void => bus.publish(roomId, ev);
 
   // §22b: reject a second concurrent turn with an in-thread notice.
@@ -388,7 +423,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     const stamp = await stampFor(pool, adapterId);
 
     publish(
-      await appendAgentEvent(pool, roomId, adapterId, summon, 'agent.turn.started', {
+      await appendAgentEvent(pool, roomId, adapterId, summon, task, 'agent.turn.started', {
         turn_id: turnId,
         adapter_id: adapterId,
         principal_id: stamp.principal_id,
@@ -408,10 +443,18 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         if (tFirstChunk === null) tFirstChunk = performance.now(); // span: first chunk from the SDK
         assembled += chunk.text;
         // Same persist-before-fanout sequence, only split to time it (S0.3c).
-        const delta = await appendAgentEvent(pool, roomId, adapterId, summon, 'agent.turn.delta', {
-          turn_id: turnId,
-          text: chunk.text,
-        });
+        const delta = await appendAgentEvent(
+          pool,
+          roomId,
+          adapterId,
+          summon,
+          task,
+          'agent.turn.delta',
+          {
+            turn_id: turnId,
+            text: chunk.text,
+          },
+        );
         if (tFirstDeltaCommitted === null) tFirstDeltaCommitted = performance.now(); // span: first delta committed
         publish(delta);
         if (tFirstFanout === null) tFirstFanout = performance.now(); // span: first delta frame written
@@ -447,6 +490,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         roomId,
         adapterId,
         summon,
+        task,
         'agent.turn.completed',
         {
           turn_id: turnId,
@@ -471,6 +515,11 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         },
       ),
     );
+
+    // THE WORK IS FINISHED, so the task says so — and the member who finished it is the actor.
+    // Written after the completed row, in the same order the decisions happened: the turn ends,
+    // then the task it belonged to closes.
+    await moveTask(deps, 'done', 'the turn completed', adapterId);
   } catch (err) {
     // A SUMMON MAY START AT MOST ONE TURN (migration 006). This turn lost the race for
     // the `agent.turn.started` row, so another turn already answers this summon.
@@ -494,6 +543,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         roomId,
         adapterId,
         summon,
+        task,
         'agent.turn.completed',
         {
           turn_id: turnId,
@@ -518,6 +568,18 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         },
       ),
     );
+
+    // §14: THE WORK IS HELD, NOT FINISHED AND NOT REFUSED.
+    //
+    // "Provider outage or 429 mid-task → task moves to held, persisted; room notified; resumes
+    // on recovery" — the first three are this line and the completed row above it. NOTHING
+    // RESUMES IT: there is no retry budget and no scheduler, so the state records where the
+    // work stopped and does not imply anything picks it up. The error class is the reason,
+    // because "held" without one is a state a member cannot act on.
+    //
+    // The actor is `system`. The room noticed; the agent did not do anything — attributing an
+    // outage to the member that was unreachable would read as the member having acted.
+    await moveTask(deps, 'held', `the turn failed: ${errorClass}`, 'system');
   } finally {
     lastTurnEndedAt = performance.now();
     inFlight.delete(flightKey);

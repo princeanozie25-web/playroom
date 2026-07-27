@@ -62,6 +62,14 @@ export const HOOK = {
   decisionHash: 'decision-hash',
   /** The (disabled) co-sign controls. */
   decisionActions: 'decision-actions',
+  /** A task chip. Carries `data-pr-state` — working | input-required | held | done. */
+  task: 'task',
+  /** The task's state, in words. */
+  taskState: 'task-state',
+  /** The action a task names, once a handoff has said what the work is. */
+  taskAction: 'task-action',
+  /** The mandate the current assignee acts under, after a handoff. */
+  taskMandate: 'task-mandate',
   /** The composer form. */
   composer: 'composer',
   /** The room refusal banner (RT-001). */

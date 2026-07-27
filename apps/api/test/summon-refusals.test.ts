@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { RoomBus } from '../src/bus.js';
 import { runAgentTurn } from '../src/agent.js';
 import { appendSummon } from '../src/events.js';
+import { ensureTask } from '../src/tasks.js';
 import {
   Client,
   httpCreateRoom,
@@ -143,16 +144,35 @@ describe('the second drift number, enforced', () => {
     const id = room('one-turn-per-summon');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
 
-    const summonId = `sum_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
-    const summon = await appendSummon(pool, id, {
-      summon_id: summonId,
-      member: 'claude-main',
-      requested_by: 'prince',
-      root_actor: 'prince',
-      root_is_human: true,
-      depth: 0,
-      cause_seq: 0,
+    // A TASK FIRST, because a summon belongs to one as of S1.3 and the signature says so.
+    // This test drives `runAgentTurn` directly to reach the retry race, so it builds what the
+    // summon path would have built — including the task, which is the point: there is no
+    // shortcut that skips it, in the product or here.
+    const { task } = await ensureTask(pool, {
+      roomId: id,
+      assignee: 'claude-main',
+      state: 'working',
+      action: null,
+      intent: 'retry the same summon twice',
+      createdBy: 'prince',
+      causeSeq: 0,
     });
+
+    const summonId = `sum_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
+    const summon = await appendSummon(
+      pool,
+      id,
+      { task_id: task.id },
+      {
+        summon_id: summonId,
+        member: 'claude-main',
+        requested_by: 'prince',
+        root_actor: 'prince',
+        root_is_human: true,
+        depth: 0,
+        cause_seq: 0,
+      },
+    );
     expect(summon).not.toBeNull();
 
     const deps = {
@@ -162,6 +182,7 @@ describe('the second drift number, enforced', () => {
       adapterId: 'claude-main',
       adapterFactory: (a: string) => reply(a),
       summon: { summon_id: summonId },
+      task: { task_id: task.id },
     };
     await runAgentTurn(deps);
     await runAgentTurn(deps); // same summon, sequentially — the retry

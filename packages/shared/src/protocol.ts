@@ -208,6 +208,56 @@ export const RouteSelectedEvent = z.object({
 });
 export type RouteSelectedEvent = z.infer<typeof RouteSelectedEvent>;
 
+/**
+ * TASK STATE, as A2A shapes it — Bible §21.3, §6.2, §11, §14.
+ *
+ * Four states, every one reachable today: `working`, `input-required`, `held`, `done`. See
+ * migration 011 for what each one means and why `submitted` is deliberately absent.
+ *
+ * ── WHY TRANSITIONS ARE EVENTS ──
+ *
+ * The `tasks` row carries the CURRENT state; these events carry the HISTORY. The room's log is
+ * the source of truth and the row is a projection of it, which is the same rule that makes the
+ * transcript rebuildable on resume: a task whose state only ever existed as a column update
+ * could not be replayed, could not be audited, and could not be rendered by a client that
+ * reconnected. §11 says task state changes "render as chips the moment they commit" — that
+ * only works if committing means appending.
+ */
+export const TaskCreatedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('task.created'),
+  payload: z.object({
+    task_id: z.string(),
+    state: z.string(), // open string, per the reason-code convention
+    assignee: z.string(),
+    /** The governed action this task names, or null when it names none. Never a placeholder. */
+    action: z.string().nullable(),
+    intent: z.string(),
+    created_by: z.string(),
+  }),
+});
+export type TaskCreatedEvent = z.infer<typeof TaskCreatedEvent>;
+
+export const TaskStateEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('task.state'),
+  payload: z.object({
+    task_id: z.string(),
+    state: z.string(),
+    /** Where it came FROM, so a reader does not have to fold the whole log to know. */
+    from_state: z.string(),
+    /**
+     * WHY, in the room's own words — the failed route constraint, the adapter's error class.
+     *
+     * Never null: a state change with no stated reason is the shape a member cannot argue
+     * with. §6.2's failure rule is explicitly about telling the human which constraint failed.
+     */
+    reason: z.string(),
+    assignee: z.string(),
+  }),
+});
+export type TaskStateEvent = z.infer<typeof TaskStateEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -216,6 +266,8 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   AgentTurnDelta,
   AgentTurnCompleted,
   DecisionEvent,
+  TaskCreatedEvent,
+  TaskStateEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;

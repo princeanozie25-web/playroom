@@ -19,6 +19,7 @@ import {
 } from '@playroom/shared';
 import { MemberChip, MemberName } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
+import { TaskChip, type TaskItemView } from '../../TaskChip';
 import { HOOK, pr } from '../../hooks';
 import type { Principal, RosterMember } from '../../roster';
 
@@ -48,7 +49,10 @@ type AgentItem = {
 // A decision item exists only because a `decision` row arrived in the log. There is
 // no constructor for one anywhere else in the room.
 type DecisionItem = { kind: 'decision'; key: string; event: DecisionEvent };
-type Item = MessageItem | AgentItem | DecisionItem;
+// A task chip exists because `task.created` arrived. Its state is mutated in place by later
+// `task.state` and `task.handoff` events — one chip per task, where the work was asked for.
+type TaskItem = { kind: 'task'; key: string; view: TaskItemView };
+type Item = MessageItem | AgentItem | DecisionItem | TaskItem;
 
 /**
  * Group the event log into renderable items.
@@ -60,6 +64,7 @@ type Item = MessageItem | AgentItem | DecisionItem;
  */
 function buildItems(events: ServerEvent[]): Item[] {
   const turns = new Map<string, AgentItem>();
+  const tasks = new Map<string, TaskItemView>();
   const order: Item[] = [];
   for (const ev of events) {
     if (ev.event_type === 'message') {
@@ -71,6 +76,27 @@ function buildItems(events: ServerEvent[]): Item[] {
       });
     } else if (ev.event_type === 'decision') {
       order.push({ kind: 'decision', key: `d${ev.seq}`, event: ev });
+    } else if (ev.event_type === 'task.created') {
+      const view: TaskItemView = {
+        task_id: ev.payload.task_id,
+        state: ev.payload.state,
+        assignee: ev.payload.assignee,
+        action: ev.payload.action,
+        mandate_hash: null,
+        handed_by: null,
+      };
+      tasks.set(ev.payload.task_id, view);
+      order.push({ kind: 'task', key: `k${ev.payload.task_id}`, view });
+    } else if (ev.event_type === 'task.state') {
+      // NO CHIP IS CREATED HERE. A state change for a task whose creation this client has not
+      // seen is dropped rather than rendered as a chip with invented fields — the same
+      // no-fallthrough rule the transcript has followed since S-UI. On resume the log replays
+      // in order, so `task.created` always arrives first.
+      const view = tasks.get(ev.payload.task_id);
+      if (view) {
+        view.state = ev.payload.state;
+        view.assignee = ev.payload.assignee;
+      }
     } else if (ev.event_type === 'agent.turn.started') {
       const turn: AgentItem = {
         kind: 'agent',
@@ -309,6 +335,10 @@ export function Room({
           ) : it.kind === 'decision' ? (
             <li key={it.key}>
               <DecisionCard event={it.event} roster={roster} principals={principals} />
+            </li>
+          ) : it.kind === 'task' ? (
+            <li key={it.key}>
+              <TaskChip task={it.view} roster={byId} />
             </li>
           ) : (
             /* `data-accent` on the ROW, so the caret and the working indicator inherit the

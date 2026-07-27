@@ -58,7 +58,7 @@ describe('the summon constructor (S05b-2)', () => {
     const { deps, query, warn, execute } = stubDeps();
     await executeCommand(
       { actorId: 'claude-main', mode: 'hosted' },
-      { kind: 'summon', roomId: 'r', member: 'sol', causeSeq: 1 },
+      { kind: 'summon', roomId: 'r', member: 'sol', causeSeq: 1, intent: '@sol hello' },
       deps,
     );
     expect(query).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ describe('the summon constructor (S05b-2)', () => {
     const { deps, query, warn } = stubDeps();
     await executeCommand(
       { actorId: 'system', mode: 'system' },
-      { kind: 'summon', roomId: 'r', member: 'claude-main', causeSeq: 1 },
+      { kind: 'summon', roomId: 'r', member: 'claude-main', causeSeq: 1, intent: '@claude hello' },
       deps,
     );
     expect(query).not.toHaveBeenCalled();

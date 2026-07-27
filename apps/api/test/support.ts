@@ -54,6 +54,42 @@ export async function issueTestCredential(memberId: string, label = 'test'): Pro
   }
 }
 
+/**
+ * Delete a credential the suite issued — S12-N3.
+ *
+ * DELETED, NOT REVOKED, and the difference matters. Revocation is the PRODUCT's rotation
+ * semantics: the row stays because it is the record that the secret existed, which is what makes
+ * `revoked_at` mean anything. A test credential has nothing to be the record of. Every
+ * `startTestServer` issued one and nothing ever removed it, so the test database had accumulated
+ * 479 ACTIVE credentials for `prince` by the end of S1.2 — one per server start, across every
+ * run since the table existed.
+ *
+ * Test-only, so it lives here rather than in `credentials.ts`: the product has no reason to
+ * delete a credential, and giving it one would put a function next to `revokeCredential` whose
+ * only difference is that it destroys the audit record.
+ */
+async function deleteTestCredential(id: string): Promise<void> {
+  const pool = testPool();
+  try {
+    await pool.query('DELETE FROM member_credentials WHERE id = $1', [id]);
+  } finally {
+    await pool.end();
+  }
+}
+
+/** How many credentials exist right now. For the assertion that they stop accumulating. */
+export async function credentialCount(): Promise<number> {
+  const pool = testPool();
+  try {
+    const { rows } = await pool.query<{ n: string }>(
+      'SELECT count(*) AS n FROM member_credentials',
+    );
+    return Number(rows[0].n);
+  } finally {
+    await pool.end();
+  }
+}
+
 export async function startTestServer(
   opts: {
     adapterFactory?: (id: string) => AgentAdapter;
@@ -76,11 +112,26 @@ export async function startTestServer(
   if (addr === null || typeof addr === 'string') {
     throw new Error('expected an AddressInfo from a TCP listen');
   }
+  // A REAL CREDENTIAL, CLEANED UP AFTER ITSELF (S12-N3). The suite already deletes the rooms
+  // and events it creates; a credential is no different, and 479 of them proved it.
+  const pool = testPool();
+  let credential;
+  try {
+    credential = await issueCredential(pool, 'prince', 'test server');
+  } finally {
+    await pool.end();
+  }
+
   return {
     httpBase: `http://127.0.0.1:${addr.port}`,
     wsBase: `ws://127.0.0.1:${addr.port}`,
-    close: () => app.close(),
-    token: await issueTestCredential('prince', 'test server'),
+    close: async () => {
+      // Closed FIRST: a socket still authenticating against this credential while the row
+      // disappears would fail for a reason that has nothing to do with what a test was asserting.
+      await app.close();
+      await deleteTestCredential(credential.id);
+    },
+    token: credential.token,
   };
 }
 
