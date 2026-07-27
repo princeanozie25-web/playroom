@@ -29,13 +29,17 @@ const TOKEN_PREFIX = 'prm_';
 /**
  * sha256, unsalted, and that is a deliberate choice rather than an omission.
  *
+ * Exported since S1.3c, because `ws_tickets` hashes the same way for the same reason. One
+ * function rather than two identical ones: the argument below applies unchanged to a ticket,
+ * and a second copy would be a second place to get it wrong.
+ *
  * The input is 32 bytes of CSPRNG output: there is no dictionary to attack, no password to
  * stretch, and no user-chosen entropy to protect. A per-row salt would prevent the indexed
  * lookup that makes authentication one query, and would buy nothing against a random 256-bit
  * secret. If this ever accepts a human-chosen secret, this line becomes wrong and must change
  * to a KDF — the comment is here so that is a decision rather than an oversight.
  */
-function hashToken(token: string): string {
+export function hashSecret(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
@@ -62,7 +66,7 @@ export async function issueCredential(
   const id = `cred_${randomBytes(8).toString('hex')}`;
   await pool.query(
     'INSERT INTO member_credentials (id, member_id, token_hash, label) VALUES ($1, $2, $3, $4)',
-    [id, memberId, hashToken(token), label],
+    [id, memberId, hashSecret(token), label],
   );
   return { id, member_id: memberId, label, token };
 }
@@ -107,7 +111,7 @@ export async function authenticate(
        FROM member_credentials AS c
        JOIN members AS m ON m.id = c.member_id
       WHERE c.token_hash = $1 AND c.revoked_at IS NULL`,
-    [hashToken(token)],
+    [hashSecret(token)],
   );
   const row = rows[0];
   if (!row) return { ok: false, failure: 'credential_invalid' };

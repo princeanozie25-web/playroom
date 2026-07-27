@@ -10,6 +10,8 @@ import {
   ERROR_CREDENTIAL_INVALID,
   ERROR_FRAME_MALFORMED,
   ERROR_FRAME_UNRECOGNISED,
+  ERROR_TICKET_REQUIRED,
+  ERROR_TICKET_INVALID,
   WS_CLOSE_ROOM_NOT_FOUND,
   WS_CLOSE_UNAUTHENTICATED,
   type AgentAdapter,
@@ -22,7 +24,8 @@ import { RoomBus } from './bus.js';
 import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
-import { authenticate, type AuthFailure, type AuthResult } from './credentials.js';
+import { authenticate, type AuthFailure } from './credentials.js';
+import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
 import { listMembers, listRoomMembers, roomAccess } from './members.js';
 import { setKnownMemberTokens } from './agent.js';
 
@@ -131,7 +134,7 @@ function roomNotFound(roomId: string): ServerErrorFrame {
  * them into "unauthorized" would be the same failure as collapsing NOT_IN_ROOM into
  * UNKNOWN_MEMBER — a refusal that is correct and useless.
  */
-function credentialRefusal(failure: AuthFailure, roomId: string): ServerErrorFrame {
+function credentialRefusal(failure: AuthFailure, roomId?: string): ServerErrorFrame {
   return ServerErrorFrame.parse({
     type: 'error',
     code: failure === 'credential_required' ? ERROR_CREDENTIAL_REQUIRED : ERROR_CREDENTIAL_INVALID,
@@ -139,6 +142,26 @@ function credentialRefusal(failure: AuthFailure, roomId: string): ServerErrorFra
       failure === 'credential_required'
         ? 'no credential was presented — this connection carries no identity'
         : 'the credential presented is not valid — it may have been revoked',
+    room_id: roomId,
+  });
+}
+
+/**
+ * The two ticket refusals the CALLER sees, from four the server knows about.
+ *
+ * `missing` is its own code, because a client that was never wired to fetch a ticket and a client
+ * whose ticket was refused send someone to different places. The other four — fabricated,
+ * consumed, expired, wrong room — collapse into one answer, because telling them apart would let
+ * a caller learn whether a ticket ever existed and for where. The log has already recorded which.
+ */
+function ticketRefusal(failure: TicketFailure, roomId: string): ServerErrorFrame {
+  const missing = failure === 'missing';
+  return ServerErrorFrame.parse({
+    type: 'error',
+    code: missing ? ERROR_TICKET_REQUIRED : ERROR_TICKET_INVALID,
+    message: missing
+      ? 'no ticket was presented — exchange a credential at POST /ws-ticket first'
+      : 'that ticket cannot be spent — request a new one',
     room_id: roomId,
   });
 }
@@ -316,6 +339,41 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       return { members: await listRoomMembers(db(), id) };
     });
 
+    // POST /ws-ticket { room_id } → a single-use ticket for the authenticated member (S1.3c).
+    //
+    // BEHIND BEARER, and it asks NO authorisation question beyond the credential. Whether this
+    // member may join that room is decided at the handshake and nowhere else — if this route
+    // checked, it would answer "does that room exist and am I in it", which is the oracle S1.3b
+    // closed, rebuilt one route over.
+    //
+    // So a ticket for a room the member cannot join is issued happily and refused at the door,
+    // identically to a room that does not exist. One choke point, and this is not it.
+    fastify.post('/ws-ticket', async (req, reply) => {
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        app.log.warn({ code: auth.failure }, 'ticket refused: no usable credential');
+        reply.code(401);
+        return credentialRefusal(auth.failure, undefined);
+      }
+      const body = (req.body ?? {}) as { room_id?: unknown };
+      if (typeof body.room_id !== 'string' || body.room_id.trim() === '') {
+        reply.code(400);
+        return ServerErrorFrame.parse({
+          type: 'error',
+          code: ERROR_TICKET_REQUIRED,
+          message: 'room_id is required — a ticket is bound to one room',
+        });
+      }
+      const issued = await issueTicket(db(), auth.auth.member_id, body.room_id);
+      // The plaintext, once. Not logged: the whole point of a ticket is that it is worthless
+      // thirty seconds from now, and a log line outliving it by weeks would undo that.
+      app.log.info(
+        { room_id: body.room_id, member: auth.auth.member_id, expires_at: issued.expires_at },
+        'ticket issued',
+      );
+      return issued;
+    });
+
     // POST /internal/warmup → pay the cold connection costs now, and report what it cost.
     //
     // AN ENDPOINT RATHER THAN A SCRIPT, because connection state is PER-PROCESS. A script
@@ -417,7 +475,11 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // order, then live-tail via the in-process bus.
     fastify.get('/rooms/:id/ws', { websocket: true }, (socket, req) => {
       const { id: roomId } = req.params as { id: string };
-      const query = req.query as { after?: string; token?: string };
+      // `ticket`, not `token`, as of S1.3c. The long-lived credential no longer travels here:
+      // it is exchanged for a single-use ticket over `POST /ws-ticket`, which a browser CAN
+      // authenticate with a header. There is deliberately no `token` fallback — a fallback is
+      // the old path still open, and closing the old path is the entire slice.
+      const query = req.query as { after?: string; ticket?: string };
       const after = Number(query.after ?? 0) || 0;
 
       const send = (
@@ -488,15 +550,28 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       //
       // Resolved once, held in this closure for the life of the socket. No frame can override
       // it, because `ClientSend` no longer has a field for the claim.
-      const accepted: Promise<AuthResult | null> = (async () => {
-        // AUTHENTICATE BEFORE ANYTHING ELSE, including the room lookup. An unauthenticated
+      // A TICKET HOLDER, not a credential holder, since S1.3c. The socket needs the member and
+      // the principal and has never needed anything else — `AuthResult` also carries the
+      // credential id, which only the credential path knows and no frame handler reads.
+      const accepted: Promise<TicketHolder | null> = (async () => {
+        // SPEND THE TICKET BEFORE ANYTHING ELSE, including the room lookup. An unauthenticated
         // caller learns nothing — not even whether a room exists — and no query runs on their
-        // behalf. The order is the refusal order: identity, then existence.
-        const result = await authenticate(db(), query.token);
-        if (!result.ok) {
-          refuseWith(credentialRefusal(result.failure, roomId), WS_CLOSE_UNAUTHENTICATED);
+        // behalf beyond the one that claims their ticket. The order is the refusal order:
+        // identity, then existence, then membership.
+        //
+        // Consuming here rather than after the room check is deliberate: a ticket presented at a
+        // door that then refuses is still SPENT, because returning it would let a caller probe
+        // room ids with one ticket until it expired.
+        const spent = await consumeTicket(db(), query.ticket, roomId);
+        if (!spent.ok) {
+          app.log.warn(
+            { room_id: roomId, reason: spent.failure },
+            'ws refused: ticket not spendable',
+          );
+          refuseWith(ticketRefusal(spent.failure, roomId), WS_CLOSE_UNAUTHENTICATED);
           return null;
         }
+        const result = { ok: true as const, auth: spent.holder };
 
         // EXISTENCE AND MEMBERSHIP, IN ONE QUERY. Two queries would make the refusals
         // distinguishable by timing, which is the oracle rebuilt out of latency (see

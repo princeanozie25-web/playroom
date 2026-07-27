@@ -264,6 +264,34 @@ describe('claims a closeout asserted by grep', () => {
     expect(matches(scope, /mandate_label/)).toEqual([]);
   });
 
+  it('S13-N3 — NO CLIENT COMPONENT READS THE MEMBER CREDENTIAL', () => {
+    // The second face of S13-N3, guarded structurally. The credential used to be read in the room
+    // page and handed to a client component as a prop, which serialised it into the HTML — so
+    // anyone who could read the page could connect as that member, permanently.
+    //
+    // A client component is anything marked `'use client'`. Server files may read the credential
+    // and do: the roster fetch presents it as a Bearer header, and the ticket route exchanges it.
+    // What must never happen again is the value crossing into a bundle or a payload.
+    //
+    // The runtime half — that the rendered HTML contains no credential material — is asserted by
+    // the capture harness against a real page, because no source-level check can see a payload.
+    const clientComponents = source
+      .filter((f) => f.startsWith('apps/web/app/') && /\.(tsx|ts)$/.test(f))
+      .filter((f) => /^\s*['"]use client['"]/m.test(read(f)));
+    expect(
+      clientComponents.length,
+      'no client components found — the scope is wrong',
+    ).toBeGreaterThan(0);
+    expect(matches(clientComponents, /PLAYROOM_WEB_TOKEN/)).toEqual([]);
+  });
+
+  it('S13-N3 — the room page does not pass a credential to the room', () => {
+    // Narrower and blunter than the rule above, aimed at the exact shape that failed: a `token`
+    // prop. It is the kind of thing a later slice re-adds for a good reason and a bad outcome.
+    expect(code('apps/web/app/r/[id]/page.tsx')).not.toMatch(/token=\{/);
+    expect(code('apps/web/app/r/[id]/Room.tsx')).not.toMatch(/token:\s*string/);
+  });
+
   it('S06-N3 — the decision card never says `attempted`', () => {
     // The card asserted intent the product cannot produce. It says who requested what, under
     // whose mandate — and as of S1.3 it names the requester, because both halves are records now.

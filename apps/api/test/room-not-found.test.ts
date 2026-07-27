@@ -2,7 +2,7 @@ import { describe, expect, it, afterAll } from 'vitest';
 import { Writable } from 'node:stream';
 import WebSocket from 'ws';
 import { ServerErrorFrame, WS_CLOSE_ROOM_NOT_FOUND } from '@playroom/shared';
-import { startTestServer, testPool, uniqueRoomId } from './support.js';
+import { mintTicket, startTestServer, testPool, uniqueRoomId } from './support.js';
 
 // A4-F1. A write to a room that does not exist used to be accepted by the socket,
 // killed by the events→rooms foreign key, and reported to nobody — the client kept a
@@ -28,8 +28,11 @@ describe('a room that does not exist', () => {
     try {
       // AUTHENTICATED, and refused anyway. Identity is checked before existence on purpose:
       // an unauthenticated caller must not learn whether a room exists. So a room-not-found
-      // probe has to present a valid credential, or it never reaches the question.
-      const ws = new WebSocket(`${server.wsBase}/rooms/${ghost}/ws?after=0&token=${server.token}`);
+      // probe has to present a spendable TICKET (S1.3c), or it never reaches the question — and
+      // a ticket is issued for a room that does not exist, deliberately, because the issuing
+      // route asks no authorisation question at all.
+      const ticket = await mintTicket(server.httpBase, server.token, ghost);
+      const ws = new WebSocket(`${server.wsBase}/rooms/${ghost}/ws?after=0&ticket=${ticket}`);
       const frames: unknown[] = [];
       const closed = new Promise<{ code: number }>((resolve) => {
         ws.on('message', (d) => frames.push(JSON.parse(d.toString())));
@@ -84,8 +87,11 @@ describe('a room that does not exist', () => {
     try {
       // AUTHENTICATED, and refused anyway. Identity is checked before existence on purpose:
       // an unauthenticated caller must not learn whether a room exists. So a room-not-found
-      // probe has to present a valid credential, or it never reaches the question.
-      const ws = new WebSocket(`${server.wsBase}/rooms/${ghost}/ws?after=0&token=${server.token}`);
+      // probe has to present a spendable TICKET (S1.3c), or it never reaches the question — and
+      // a ticket is issued for a room that does not exist, deliberately, because the issuing
+      // route asks no authorisation question at all.
+      const ticket = await mintTicket(server.httpBase, server.token, ghost);
+      const ws = new WebSocket(`${server.wsBase}/rooms/${ghost}/ws?after=0&ticket=${ticket}`);
       const closed = new Promise<void>((resolve) => ws.on('close', () => resolve()));
       await new Promise<void>((resolve, reject) => {
         ws.once('open', () => resolve());

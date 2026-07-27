@@ -208,23 +208,80 @@ export async function delegateTask(
   return task.id;
 }
 
+/**
+ * Exchange a credential for a single-use socket ticket, the way every client now does (S1.3c).
+ *
+ * Exposed for the tests that drive a RAW socket — the refusal probes, which have to observe a
+ * handshake being refused rather than have a helper throw it away.
+ */
+export async function mintTicket(httpBase: string, token: string, roomId: string): Promise<string> {
+  const res = await fetch(`${httpBase}/ws-ticket`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ room_id: roomId }),
+  });
+  if (!res.ok) throw new Error(`ticket refused: HTTP ${res.status}`);
+  return ((await res.json()) as { ticket: string }).ticket;
+}
+
 // A ws test client. Frames are zod-parsed on receipt (never cast), matching the
 // wire-contract invariant; parsed events are recorded for assertions.
 export class Client {
-  readonly ws: WebSocket;
   readonly events: ServerEventT[] = [];
   readonly errors: ServerErrorFrameT[] = [];
   hello: number | undefined;
   private readonly seen = new Set<number>();
   private waiters: Array<() => void> = [];
 
+  private socket: WebSocket | null = null;
+  private readonly url: string;
+  private readonly token: string;
+
   /**
-   * @param token the member credential this connection authenticates as. Required, because the
-   *   handshake refuses a socket without one — there is no unauthenticated path to exercise.
+   * @param url the room's ws URL.
+   * @param token the member credential. THE SOCKET NEVER SEES IT: as of S1.3c the credential is
+   *   exchanged for a single-use ticket at `POST /ws-ticket`, and the ticket is what travels in
+   *   the query string.
+   *
+   * Nothing connects here. The exchange is asynchronous and `open()` is where the suite already
+   * awaits, so that is where it goes — every call site reads exactly as it did, and every test
+   * still starts from a real credential and walks the real path. A test helper that skipped the
+   * exchange would be the test-only door S1.2 was written to remove.
    */
   constructor(url: string, token: string) {
-    this.ws = new WebSocket(`${url}${url.includes('?') ? '&' : '?'}token=${token}`);
-    this.ws.on('message', (data) => {
+    this.url = url;
+    this.token = token;
+  }
+
+  /** The socket, once open. Throws rather than returning a half-built one. */
+  get ws(): WebSocket {
+    if (!this.socket)
+      throw new Error('Client.open() has not been awaited — there is no socket yet');
+    return this.socket;
+  }
+
+  /**
+   * Exchange the credential for a ticket, connect, and wait for the socket to open.
+   *
+   * Idempotent: a second call resolves against the socket already open, because several suites
+   * call `open()` after constructing and then again defensively.
+   */
+  async open(): Promise<void> {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) return;
+
+    const roomId = decodeURIComponent(this.url.split('/rooms/')[1].split('/ws')[0]);
+    const httpBase = this.url.replace(/^ws/, 'http').split('/rooms/')[0];
+    const res = await fetch(`${httpBase}/ws-ticket`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.token}` },
+      body: JSON.stringify({ room_id: roomId }),
+    });
+    if (!res.ok) throw new Error(`ticket refused: HTTP ${res.status}`);
+    const { ticket } = (await res.json()) as { ticket: string };
+
+    const ws = new WebSocket(`${this.url}${this.url.includes('?') ? '&' : '?'}ticket=${ticket}`);
+    this.socket = ws;
+    ws.on('message', (data) => {
       const raw = JSON.parse(data.toString());
       if (raw?.type === 'hello') {
         this.hello = ServerHello.parse(raw).last_seq;
@@ -245,13 +302,10 @@ export class Client {
       this.waiters = [];
       w.forEach((fn) => fn());
     });
-  }
 
-  async open(): Promise<void> {
-    if (this.ws.readyState === WebSocket.OPEN) return;
     await new Promise<void>((resolve, reject) => {
-      this.ws.once('open', () => resolve());
-      this.ws.once('error', reject);
+      ws.once('open', () => resolve());
+      ws.once('error', reject);
     });
   }
 

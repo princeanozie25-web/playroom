@@ -163,24 +163,42 @@ function buildItems(events: ServerEvent[]): Item[] {
   return order;
 }
 
-function socketUrl(roomId: string, after: number, token: string): string {
+function socketUrl(roomId: string, after: number, ticket: string): string {
   const base = API_URL.replace(/^http/, 'ws');
-  // The credential travels in the query string because a browser cannot set headers on a
-  // WebSocket handshake. That puts it in any api access log that is ever enabled, and in browser
-  // history — recorded as S13-N3, with a subprotocol or a short-lived ticket as the fix.
+  // A TICKET, NOT THE CREDENTIAL (S1.3c). Something still travels in the query string, because a
+  // browser cannot set headers on a WebSocket handshake — but it is worth one socket, on this
+  // room, for thirty seconds, and it is spent the moment the handshake accepts it. An access log
+  // holding it is holding something already useless.
   //
-  // THIS COMMENT CITED S12-N2 UNTIL S1.3, which is a different finding entirely (a governed
-  // request's subject being a claim). So the concern was documented at the code and recorded
-  // nowhere, under a label pointing at something else — the failure mode a ledger exists to
-  // prevent, committed in the same slice that built the ledger entry.
-  return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}&token=${encodeURIComponent(token)}`;
+  // S13-N3 closed on both faces: this URL, and the page that used to carry the long-lived
+  // credential to the client so it could be put here.
+  return `${base}/rooms/${encodeURIComponent(roomId)}/ws?after=${after}&ticket=${encodeURIComponent(ticket)}`;
+}
+
+/**
+ * Ask the web tier for a ticket.
+ *
+ * SAME-ORIGIN, so the credential stays in the server process that holds it — see
+ * `app/api/ws-ticket/route.ts`. Called on every connect INCLUDING every reconnect, because a
+ * ticket is single-use: a backoff retry that reused one would be refused, which is the property
+ * working rather than a bug.
+ */
+async function fetchTicket(roomId: string): Promise<string> {
+  const res = await fetch('/api/ws-ticket', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ room_id: roomId }),
+  });
+  if (!res.ok) throw new Error(`no ticket: HTTP ${res.status}`);
+  const body: { ticket?: string } = await res.json();
+  if (!body.ticket) throw new Error('no ticket in the response');
+  return body.ticket;
 }
 
 export function Room({
   roomId,
   roster,
   principals,
-  token,
 }: {
   roomId: string;
   roster: RosterMember[];
@@ -195,7 +213,6 @@ export function Room({
    * findings rested on. What it does not buy is a person. A per-human credential needs a login,
    * which is a product; see S12-N1 in the red-team log.
    */
-  token: string;
 }) {
   const [events, setEvents] = useState<ServerEvent[]>([]);
   const [status, setStatus] = useState<Status>('connecting');
@@ -241,56 +258,74 @@ export function Room({
   const connect = useCallback((): void => {
     if (!roomId) return;
     setStatus('connecting');
-    const ws = new WebSocket(socketUrl(roomId, lastSeqRef.current, token));
-    wsRef.current = ws;
 
-    ws.onopen = (): void => {
-      setStatus('open');
-      backoffRef.current = 500; // reset backoff after a good connection
-    };
-    ws.onmessage = (e: MessageEvent): void => {
-      // Wire boundary: JSON.parse returns `any`; assigning it to the union is not a
-      // cast. The server sends validated frames (there is no zod at runtime in the
-      // web app — a dep constraint). We then narrow on the discriminant below.
-      let msg: ServerEvent | ServerHello | ServerErrorFrame;
+    // THE TICKET COMES FIRST, and it is fetched per attempt. A failed exchange is treated exactly
+    // like a failed socket: back off and try again, because both mean "not connected yet" and a
+    // member watching the badge cannot tell them apart anyway.
+    void (async (): Promise<void> => {
+      let ticket: string;
       try {
-        msg = JSON.parse(e.data);
+        ticket = await fetchTicket(roomId);
       } catch {
+        if (stoppedRef.current) return;
+        const wait = backoffRef.current;
+        backoffRef.current = Math.min(wait * 2, 5000);
+        timerRef.current = setTimeout(connect, wait);
         return;
       }
-      // An explicit refusal. Surface it and stop: the server has already closed the
-      // socket, and retrying a room that does not exist would just loop.
-      if (msg.type === 'error') {
-        stoppedRef.current = true;
-        setRefusal(msg);
+      if (stoppedRef.current) return; // a refusal or an unmount landed while we were asking
+
+      const ws = new WebSocket(socketUrl(roomId, lastSeqRef.current, ticket));
+      wsRef.current = ws;
+
+      ws.onopen = (): void => {
+        setStatus('open');
+        backoffRef.current = 500; // reset backoff after a good connection
+      };
+      ws.onmessage = (e: MessageEvent): void => {
+        // Wire boundary: JSON.parse returns `any`; assigning it to the union is not a
+        // cast. The server sends validated frames (there is no zod at runtime in the
+        // web app — a dep constraint). We then narrow on the discriminant below.
+        let msg: ServerEvent | ServerHello | ServerErrorFrame;
+        try {
+          msg = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        // An explicit refusal. Surface it and stop: the server has already closed the
+        // socket, and retrying a room that does not exist would just loop.
+        if (msg.type === 'error') {
+          stoppedRef.current = true;
+          setRefusal(msg);
+          setStatus('closed');
+          // Put the text back. It was cleared optimistically on send, and leaving the
+          // box empty after a refusal is the whole bug: it reads as "sent". Only
+          // restore if the member has not started typing something else.
+          setBody((current) => (current.trim() ? current : pendingRef.current));
+          return;
+        }
+        if (msg.type !== 'event') return;
+        if (seenRef.current.has(msg.seq)) return; // dedupe on seq
+        seenRef.current.add(msg.seq);
+        if (msg.seq > lastSeqRef.current) {
+          lastSeqRef.current = msg.seq;
+          sessionStorage.setItem(`playroom:last:${roomId}`, String(msg.seq));
+        }
+        setEvents((prev) => [...prev, msg].sort((a, b) => a.seq - b.seq));
+      };
+      ws.onclose = (e: CloseEvent): void => {
         setStatus('closed');
-        // Put the text back. It was cleared optimistically on send, and leaving the
-        // box empty after a refusal is the whole bug: it reads as "sent". Only
-        // restore if the member has not started typing something else.
-        setBody((current) => (current.trim() ? current : pendingRef.current));
-        return;
-      }
-      if (msg.type !== 'event') return;
-      if (seenRef.current.has(msg.seq)) return; // dedupe on seq
-      seenRef.current.add(msg.seq);
-      if (msg.seq > lastSeqRef.current) {
-        lastSeqRef.current = msg.seq;
-        sessionStorage.setItem(`playroom:last:${roomId}`, String(msg.seq));
-      }
-      setEvents((prev) => [...prev, msg].sort((a, b) => a.seq - b.seq));
-    };
-    ws.onclose = (e: CloseEvent): void => {
-      setStatus('closed');
-      // A refused room is permanent, not transient: reconnecting would loop until
-      // the tab is closed. The close code says so without string-matching a reason.
-      if (e.code === WS_CLOSE_ROOM_NOT_FOUND) stoppedRef.current = true;
-      if (stoppedRef.current) return;
-      const delay = backoffRef.current;
-      backoffRef.current = Math.min(delay * 2, 5000); // 0.5s → 5s cap
-      timerRef.current = setTimeout(connect, delay);
-    };
-    ws.onerror = (): void => ws.close();
-  }, [roomId, token]);
+        // A refused room is permanent, not transient: reconnecting would loop until
+        // the tab is closed. The close code says so without string-matching a reason.
+        if (e.code === WS_CLOSE_ROOM_NOT_FOUND) stoppedRef.current = true;
+        if (stoppedRef.current) return;
+        const delay = backoffRef.current;
+        backoffRef.current = Math.min(delay * 2, 5000); // 0.5s → 5s cap
+        timerRef.current = setTimeout(connect, delay);
+      };
+      ws.onerror = (): void => ws.close();
+    })();
+  }, [roomId]);
 
   useEffect(() => {
     if (!roomId) return;

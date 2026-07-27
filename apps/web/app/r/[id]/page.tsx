@@ -12,21 +12,13 @@ export default async function RoomRoute({ params }: { params: Promise<{ id: stri
   // disk. A server component is the right place for that — the browser never makes the call.
   const [roster, principals] = await Promise.all([loadRoster(id), loadPrincipals(id)]);
 
-  // THE CREDENTIAL THIS BROWSER CONNECTS AS (S1.2).
+  // NO CREDENTIAL REACHES THIS PAGE (S1.3c).
   //
-  // Read on the SERVER and handed to the client, because a browser cannot set headers on a
-  // WebSocket handshake. It is a member credential — issued with `pnpm tsx
-  // scripts/issue-credential.ts prince browser` — and it reaches the page, which means anyone
-  // who can read the page can connect as that member. That is the honest limit of a credential
-  // without a login, and it is recorded as S13-N3.
+  // It used to: the token was read here and handed to `Room` as a prop, which serialised it into
+  // the HTML — so anyone who could read the page could connect as that member, permanently. That
+  // was S13-N3's second face, and it is closed by the client asking `POST /api/ws-ticket` for a
+  // thirty-second single-use ticket instead. The credential stays in the web tier's process.
   //
-  // THIS COMMENT CITED S12-N1 UNTIL S1.3b, which is the room-existence oracle — a different
-  // finding, now closed. The second mislabel of the same kind in two slices: a concern documented
-  // at the code under a label pointing somewhere else is a concern that is not in the ledger at
-  // all, which is what a ledger exists to prevent.
-  //
-  // Absent rather than defaulted: with no token the socket is refused at the handshake with a
-  // typed reason, which is the correct behaviour and visibly different from a room that works.
-  const token = process.env.PLAYROOM_WEB_TOKEN ?? '';
-  return <Room roomId={id} roster={roster} principals={principals} token={token} />;
+  // The roster fetch above still uses it, and correctly: that call is made on the server.
+  return <Room roomId={id} roster={roster} principals={principals} />;
 }

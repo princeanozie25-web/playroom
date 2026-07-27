@@ -387,6 +387,22 @@ export const ERROR_ROOM_NOT_FOUND = 'room_not_found';
 export const ERROR_CREDENTIAL_REQUIRED = 'credential_required';
 /** A credential was presented and is not valid — revoked, mistyped, or another deployment's. */
 export const ERROR_CREDENTIAL_INVALID = 'credential_invalid';
+/**
+ * THE SOCKET PRESENTED NO TICKET (S1.3c).
+ *
+ * Kept apart from `ticket_invalid` for the usual reason: a client that was never wired to fetch
+ * one and a client whose ticket was refused send someone to different places.
+ */
+export const ERROR_TICKET_REQUIRED = 'ticket_required';
+/**
+ * The ticket was refused — and the caller is not told which of the four reasons applied.
+ *
+ * Fabricated, already consumed, expired, or minted for a different room: one answer at the door.
+ * A refusal that diagnoses is a refusal that can be probed, and here it would leak whether a
+ * ticket ever existed. The log names the reason; S1.3b's ruling, applied one layer in.
+ */
+export const ERROR_TICKET_INVALID = 'ticket_invalid';
+
 /** The bytes were not JSON. A broken client or a corrupted frame, not a rejected request. */
 export const ERROR_FRAME_MALFORMED = 'frame_malformed';
 /**

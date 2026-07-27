@@ -4,6 +4,7 @@ import {
   Client,
   httpCreateRoom,
   issueTestCredential,
+  mintTicket,
   startTestServer,
   testPool,
   uniqueRoomId,
@@ -106,34 +107,44 @@ describe('the credential', () => {
 });
 
 describe('the handshake', () => {
-  it('REFUSES a connection with no credential — typed frame, close 4401, a sentence', async () => {
+  it('REFUSES a connection with no ticket — typed frame, close 4401, a sentence', async () => {
+    // THE SOCKET NO LONGER TAKES A CREDENTIAL AT ALL (S1.3c). It takes a single-use ticket, so
+    // the missing-credential refusal became a missing-TICKET refusal — and the sentence points
+    // at the route that mints one, because "no credential" would send a client author to the
+    // wrong place now.
     const id = room('auth-none');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
     const { frames, code } = await probe(`${server.wsBase}/rooms/${id}/ws?after=0`);
     expect(code).toBe(4401);
-    expect(frames[0]).toMatchObject({ type: 'error', code: 'credential_required' });
-    expect(frames[0].message).toMatch(/no credential/);
+    expect(frames[0]).toMatchObject({ type: 'error', code: 'ticket_required' });
+    expect(frames[0].message).toMatch(/POST \/ws-ticket/);
     // NOT a silent drop, and NOT a socket that opens and does nothing — RT-001's shape.
     expect(frames.some((f) => f.type === 'hello')).toBe(false);
   });
 
-  it('REFUSES a bad credential with a DIFFERENT code and sentence', async () => {
+  it('REFUSES a fabricated ticket with a DIFFERENT code, and a LONG-LIVED TOKEN outright', async () => {
     const id = room('auth-bad');
     expect((await httpCreateRoom(server.httpBase, id)).status).toBe(201);
-    const { frames, code } = await probe(`${server.wsBase}/rooms/${id}/ws?after=0&token=prm_wrong`);
-    expect(code).toBe(4401);
-    expect(frames[0]).toMatchObject({ type: 'error', code: 'credential_invalid' });
-    expect(frames[0].message).toMatch(/not valid/);
+    const bad = await probe(`${server.wsBase}/rooms/${id}/ws?after=0&ticket=pwt_nonsense`);
+    expect(bad.code).toBe(4401);
+    expect(bad.frames[0]).toMatchObject({ type: 'error', code: 'ticket_invalid' });
+
+    // AND THE OLD PATH IS GONE. A valid member credential presented the way S1.2 accepted it is
+    // now refused: there is no `token` fallback on this route, because a fallback is the old path
+    // still open and closing it is the whole slice.
+    const legacy = await probe(`${server.wsBase}/rooms/${id}/ws?after=0&token=${server.token}`);
+    expect(legacy.code).toBe(4401);
+    expect(legacy.frames[0].code).toBe('ticket_required');
   });
 
-  it('checks identity BEFORE existence — an unauthenticated caller learns nothing', async () => {
-    // A probe with no credential against a room that does not exist must not reveal which of
-    // the two was wrong. Otherwise the refusal is an oracle for room ids.
+  it('checks the ticket BEFORE existence — a caller with none learns nothing', async () => {
+    // A probe with no ticket against a room that does not exist must not reveal which of the two
+    // was wrong. Otherwise the refusal is an oracle for room ids.
     const { frames, code } = await probe(
       `${server.wsBase}/rooms/definitely-not-a-room-${Date.now()}/ws?after=0`,
     );
     expect(code).toBe(4401);
-    expect(frames[0].code).toBe('credential_required');
+    expect(frames[0].code).toBe('ticket_required');
     expect(frames[0].code).not.toBe('room_not_found');
   });
 
@@ -218,9 +229,15 @@ describe('the front door checks membership (S13-N2, closed in S1.3b)', () => {
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [id, 'sol']);
     const solToken = await issueTestCredential('sol', 'identity-test-door');
 
-    const outsider = await probe(`${server.wsBase}/rooms/${id}/ws?after=0&token=${solToken}`);
+    const outsider = await probe(
+      `${server.wsBase}/rooms/${id}/ws?after=0&ticket=${await mintTicket(server.httpBase, solToken, id)}`,
+    );
     const ghost = await probe(
-      `${server.wsBase}/rooms/definitely-no-such-room/ws?after=0&token=${solToken}`,
+      `${server.wsBase}/rooms/definitely-no-such-room/ws?after=0&ticket=${await mintTicket(
+        server.httpBase,
+        solToken,
+        'definitely-no-such-room',
+      )}`,
     );
 
     // SAME CLOSE CODE, SAME FRAME, and the room id is the only difference between the bytes.
@@ -255,7 +272,9 @@ describe('the front door checks membership (S13-N2, closed in S1.3b)', () => {
       id,
       'prince',
     ]);
-    const after = await probe(`${server.wsBase}/rooms/${id}/ws?after=0&token=${server.token}`);
+    const after = await probe(
+      `${server.wsBase}/rooms/${id}/ws?after=0&ticket=${await mintTicket(server.httpBase, server.token, id)}`,
+    );
     expect(after.code).toBe(4404);
     expect(after.frames[0]).toMatchObject({ type: 'error', code: 'room_not_found' });
   });
