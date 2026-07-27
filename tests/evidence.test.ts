@@ -57,8 +57,15 @@ function trackedFiles(): string[] {
     .filter((f) => f.length > 0 && f !== SELF);
 }
 
-/** Binary by intent — `.gitattributes` marks the PDF, and media is never source. */
-const BINARY = /\.(pdf|webm|png|jpe?g|ico|woff2?|mp4)$/i;
+/**
+ * Binary by intent — `.gitattributes` marks the PDF, and media is never source.
+ *
+ * `.gif` joined the list in S1.4, and the guard is why: committing the README's beat-5 GIF made the
+ * NUL-byte assertion fail on the first attempt, because a GIF is full of NUL bytes and this list did
+ * not name it. That is the check working — a new binary entering the tracked corpus SHOULD stop and
+ * ask — and the fix is to name the format rather than to soften the assertion.
+ */
+const BINARY = /\.(pdf|webm|png|jpe?g|gif|ico|woff2?|mp4)$/i;
 
 const TEXT_SOURCE = /\.(ts|tsx|js|mjs|cjs|sql|css|json|ya?ml|md|sh|txt)$/i;
 

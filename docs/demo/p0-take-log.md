@@ -245,3 +245,30 @@ opened with no stall). `269→176 tok · $0.00115` for Claude, `299→272 tok ·
 beats; no beat was added for interrupts. No selector edited.
 
 Take 10 is retained as the 1× fallback, per the rule that nothing is deleted.
+
+### S1.4, corrected — take 13 at 1x is the asset, and 2x was not supersampled
+
+| take   | scale | resolution | clip   | size  | fps  | sha256 (first 16)  | note                                      |
+| ------ | ----- | ---------- | ------ | ----- | ---- | ------------------ | ----------------------------------------- |
+| 12     | "2x"  | 2560x1600  | 55.64s | 6069K | 25.0 | `87e72a36792b9635` | padded, not supersampled — see below      |
+| **13** | 1x    | 1280x800   | 54.04s | 3501K | 25.0 | `135b144bbed2eea8` | **THE P0 ASSET**, and the README's source |
+
+**The 2x attempt did not do what it claimed, and this corrects the S14-4 entry above.** With
+`deviceScaleFactor: 2` and a doubled `recordVideo.size`, take 12's page content occupies the top-left
+1280x800 of a 2560x1600 frame; the remaining two thirds are grey padding. Measured rather than
+assumed — a frame pulled at 44s crops to 1280x800 of room at exactly take 10's sharpness.
+
+`deviceScaleFactor` reaches screenshots and **does not reach Playwright's video encoder**, which
+captures the CSS viewport and letterboxes it into whatever size is requested. The result was 54% more
+bytes for zero extra detail. Worse, so reported and reverted.
+
+A genuinely supersampled capture needs the LAYOUT at 2560 — a 2560x1600 viewport — which is a
+different shot with different line wrapping and a different amount of transcript on screen. That is a
+decision about what the film shows, not a capture setting, and it is left for the owner.
+
+**Take 13 is also the first take that shows the interrupt chip**, since take 10 predates S1.4. The
+README's GIF and still frame are cut from it: 7 seconds at 10 fps from 41.5s, scaled down to 900px
+wide with a 128-colour palette. Scaled DOWN, from captured pixels — never up, and never interpolated.
+
+`269→172 tok · $0.00113` for Claude, `299→211 tok · $0.00017` for Sol. Every beat held first run, no
+selector edited, frames 3/3 distinct.

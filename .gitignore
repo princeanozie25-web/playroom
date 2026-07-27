@@ -31,5 +31,9 @@ agent-browser.json
 # Demo capture output (scripts/demo-capture.ts). Videos belong in
 # $PLAYROOM_CAPTURE_HOME, outside this tree; these rules exist so a stray run
 # inside the repo cannot be committed.
+#
+# THE README'S STILLS ARE THE ONE EXCEPTION, and they are not videos: a seven-second GIF and one
+# frame of beat 5 live in docs/demo/assets/ because a README that describes a refusal without
+# showing it is asking to be taken on trust. Full takes stay outside the tree.
 videos/
 *.webm

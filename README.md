@@ -1,9 +1,245 @@
 # Playroom
 
-Playroom is a persistent multiplayer room where humans and AI agents — from any provider — are first-class, @-taggable members. They operate under signed, server-enforced, deny-by-default permissions, with signed receipts for anything commitment-shaped.
+[![CI](https://github.com/princeanozie25-web/playroom/actions/workflows/ci.yml/badge.svg)](https://github.com/princeanozie25-web/playroom/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/badge/tests-302%20passing-brightgreen)](#the-seam-demonstrated)
+[![licence](https://img.shields.io/badge/licence-AGPL--3.0%20core%20%2F%20Apache--2.0%20shared-blue)](#licence)
 
-The trust fabric is the chokepoint: no path from a room to a provider adapter bypasses it; adapters are the only place provider names may appear; the permission engine fails closed. Agents are silent until summoned.
+**A room where humans and other people's AI agents work together, and where an agent's authority is
+enforced outside the model.**
 
-The operating contract is [`docs/roadmap/playroom-master-roadmap-v1.pdf`](docs/roadmap/playroom-master-roadmap-v1.pdf) — v1.0, 24 July 2026, build-ready. A text transcription sits beside it at [`playroom-master-roadmap-v1.md`](docs/roadmap/playroom-master-roadmap-v1.md) so the contract is greppable and citable by section; the PDF is authoritative. Amendments land in `docs/roadmap/amendments/`, decisions in `docs/decisions/`.
+The sharp version: **a fully hijacked agent still cannot exceed its mandate.** Nothing about that
+depends on a model behaving. Permissions are evaluated server-side by a pure function before
+anything commitment-shaped happens, so the worst case for a compromised agent is that it asks for
+something and is refused — in writing, in front of everyone.
 
-Licence: owner decision pending.
+## The blocked merge
+
+Prince asks for a merge under Claude's mandate. That mandate **grants** `pr.merge` and also lists it
+as protected, so a human signature is required. The fabric returns `CO_SIGN`, the room renders what
+was decided and under which document, and an interrupt claims Prince's attention — showing what the
+claim cost the agent that made it.
+
+![The room refusing a merge: DECISION · CO_SIGN, pr.merge, requested by Prince under Claude's mandate, PROTECTED_ACTION, needs a signature from Prince, mandate hash sha256:1af314ca8427474e, and an interrupt reading "needs a decision — 5 left today"](docs/demo/assets/beat5-blocked-merge.gif)
+
+<sub>Cut from take 13 of the P0 film: one continuous take, production build, two live providers, real
+spend. Captured, never upscaled — see [the take log](docs/demo/p0-take-log.md). Static frame:
+[beat5-blocked-merge.png](docs/demo/assets/beat5-blocked-merge.png).</sub>
+
+**Everything in that frame came from a record.** The card can only be built from a `decision` row the
+evaluator produced. The scope text on each roster chip is the same array the evaluator checks. The
+hash names the document that was in force. There is no code path that renders a governance artifact
+the fabric did not produce — asserted by tests, not by this paragraph.
+
+## Try it
+
+```bash
+git clone https://github.com/princeanozie25-web/playroom.git
+cd playroom
+node scripts/bootstrap.mjs
+```
+
+One command from a clean clone: dependencies, a Postgres (via `docker compose`, or your own if
+`DATABASE_URL` is already set), migrations, a credential minted locally, a room, and both servers. It
+prints the URL. Verified from a clean clone both ways.
+
+**You do not need a provider key to see the interesting part.** With no keys at all you get the room,
+both agents' mandates, the summon refusals, the task states and **the blocked merge** — each one
+produced by Playroom rather than by a model. Tagging an agent whose key is missing gets you a visible
+failed turn and a held task, which is not a special case: it is exactly what the code does on a
+provider outage.
+
+Add keys to `.env` for live agent turns:
+
+```
+ANTHROPIC_API_KEY=...   # claude-main
+OPENAI_API_KEY=...      # sol
+```
+
+## Why this exists
+
+- **A model is not a security boundary.** Prompt injection, jailbreaks and confused agents are
+  assumed. Authority lives outside the model in a pure function with a 10 ms budget, and an agent
+  talked into asking for a merge is refused exactly as loudly as one that meant it.
+- **Two people's agents in one room is an authority problem, not a chat problem.** Sol speaks for
+  Jerry, Claude speaks for Prince, each under a mandate its own principal granted — and a handoff
+  between them **confers nothing**. The receiving agent acts under its own mandate, or the transfer
+  is refused.
+- **A refusal that cannot be told from an acceptance is not a refusal.** Every refusal travels as a
+  typed frame with its own reason code. The one that silently dropped a write is the first finding in
+  the ledger, and it is still there.
+- **Interrupting a person costs the agent something.** Interrupts are priced against a daily budget
+  read from the mandate, silence is free, and a recipient lowering a claim charges the agent that
+  made it.
+- **The room is the record.** Every projection — transcript, task chips, decision card — is
+  rebuildable from an append-only event log. One that cannot be rebuilt is a bug, and a test folds
+  the log and compares.
+
+## The invariants
+
+Bible §10, numbered so they can be cited in a review.
+
+| #         | Invariant                                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **PR-1**  | **Enforcement is server-side, never model-side.** The model is never the security boundary.                                          |
+| **PR-2**  | **No bypass path.** No route from a room to an adapter skips the fabric — a property of the layout, provable from the repository.    |
+| **PR-3**  | **Context never crosses principals.** Assembly reaches common ground and the summoned member's own store, and nothing else.          |
+| **PR-4**  | **Deny by default.** Anything not explicitly granted is blocked. Unknown action types are blocked. Engine unavailable means blocked. |
+| **PR-5**  | **Silence by default.** Agents never speak unprompted. Any feature of the form _agents could chat about…_ is rejected on sight.      |
+| **PR-6**  | **Receipts for anything commitment-shaped** — merges, acceptances, approvals, spends. Never prose.                                   |
+| **PR-7**  | **Provider-agnostic core.** Only adapters know provider names. The room, the fabric and the data model never do.                     |
+| **PR-8**  | **The room is authoritative; projections are derived.** A projection that cannot be rebuilt from the log is a bug.                   |
+| **PR-9**  | **Events are immutable.** Corrections append superseding events.                                                                     |
+| **PR-10** | **Spend is visible.** Per-summon cost and interrupt budget render in-thread; cost transparency doubles as babble suppression.        |
+| **PR-11** | **Append-only audit,** hash-chained, with the daily root mailed to principals. **Not yet built** — see Posture.                      |
+
+## The seam, demonstrated
+
+Real output, copied from executed runs rather than written by hand.
+
+**An unauthenticated caller learns nothing — not even whether a room exists:**
+
+```console
+$ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3001/rooms/playroom-p0
+401
+$ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3001/rooms/no-such-room
+401
+```
+
+**An authenticated member who is not in the room gets what a missing room gets, byte for byte:**
+
+```console
+$ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/rooms/$REAL_ROOM
+{"type":"error","code":"room_not_found","message":"room \"<room>\" does not exist","room_id":"<room>"}
+$ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/rooms/no-such-room-at-all
+{"type":"error","code":"room_not_found","message":"room \"<room>\" does not exist","room_id":"<room>"}
+```
+
+That first room existed and had a title. Room ids are not an oracle — the server's log records which
+of the two it was, where the caller cannot read it.
+
+**A socket ticket is worth exactly one connection:**
+
+```console
+first use of the ticket: ACCEPTED (hello)
+second use of the SAME : refused → ticket_invalid
+the old ?token= path   : refused → ticket_required
+a fabricated ticket    : refused → ticket_invalid
+```
+
+**And the merge, from a clean clone with no provider key at all:**
+
+```console
+TURN      failed: (claude-main could not respond)  error_class MissingApiKeyError
+TASK      → held: the turn failed: MissingApiKeyError
+DECISION  CO_SIGN · PROTECTED_ACTION · signer principal:prince · sha256:1af314ca8427474…
+INTERRUPT DECISION  claude-main → prince · 5 left today
+```
+
+The agent could not speak, and the governance still worked.
+
+## Architecture
+
+```
+  browser ──ticket──▶ ┌────────────────────────────────────────────────┐
+  (no credential      │  GATEWAY   apps/api                            │
+   ever in the page)  │  membership · identity · idempotency · fan-out  │
+                      └───────────────────┬────────────────────────────┘
+                                          │  every governed action, no exceptions
+                      ┌───────────────────▼────────────────────────────┐
+                      │  THE FABRIC   packages/fabric                  │
+                      │                                                │
+                      │   1. IDENTITY   who is this member, and which  │
+                      │                 principal do they speak for    │
+                      │   2. CONTEXT    what may be assembled —        │
+                      │                 never across principals        │
+                      │   3. MANDATE    ALLOW · CO_SIGN · BLOCK,       │
+                      │                 deny by default, <10 ms        │
+                      │   4. RECEIPT    record what was decided        │
+                      │                 (hash chain: not yet, PR-11)   │
+                      └───────────────────┬────────────────────────────┘
+                                          │  only after a verdict
+                      ┌───────────────────▼────────────────────────────┐
+                      │  ADAPTERS   packages/adapters                  │
+                      │  the ONLY files that know a provider name      │
+                      └───────────────────┬────────────────────────────┘
+                                          ▼
+                            ┌──────────────────────────┐
+                            │  append-only event log   │
+                            │  Postgres · monotonic    │
+                            │  seq · the room IS this  │
+                            └──────────────────────────┘
+
+  packages/shared — event types, AgentTurn, zod wire schemas. Apache-2.0, so an adapter
+  or host author can integrate without taking copyleft.
+```
+
+## Documentation
+
+| Document                                                                         | What it is                                                                        |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [Architecture Bible v1.1](docs/architecture/playroom-architecture-bible-v1.1.md) | The canonical contract. Numbered sections, cited from code comments and briefs.   |
+| [design.md](docs/design/design.md)                                               | The owner's design contract — what the room looks like, and why.                  |
+| [P0 claims sheet](docs/demo/p0-claims.md)                                        | **What the film proves and what it does not.** Read before showing anyone.        |
+| [Red-team log](docs/security/red-team-log.md)                                    | Findings against our own trust boundary, with severities and dispositions.        |
+| [Take log](docs/demo/p0-take-log.md)                                             | Film provenance: every take, its hash, and what each beat asserted.               |
+| [ADRs](docs/decisions/)                                                          | Decisions with their consequences — fail-closed engine, turns as events, latency. |
+| [Roadmap v1.0](docs/roadmap/playroom-master-roadmap-v1.md)                       | Superseded by the Bible, retained as the historical record.                       |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                                               | How this repository is worked in, including why `--no-verify` is never used.      |
+| [SECURITY.md](SECURITY.md)                                                       | How to report something, and what gets priority.                                  |
+
+## Posture
+
+**Solo maintainer.** One person, working in slices that each end in something a camera can see. Every
+slice closes with a report naming what was built, what was measured, and what was left open.
+
+**No telemetry.** Playroom sends nothing anywhere. The only outbound calls are to the model providers
+you configure keys for, from `packages/adapters` and nowhere else.
+
+**Credentials are dev-only and local.** `pnpm bootstrap` mints one and writes it to gitignored env
+files; nothing is ever committed. The browser never holds it — it receives a single-use,
+thirty-second socket ticket instead.
+
+**Localhost by default.** No deployment, no public instance, no shared database. Several accepted
+findings in the ledger are survivable precisely because of that, and the ledger names the condition
+that re-opens each one.
+
+### The honest limits
+
+The current build's limits, not a to-do list dressed as caveats. These are the same limits the
+[claims sheet](docs/demo/p0-claims.md) states, and this section does not shrink them:
+
+- **Identity authenticates a process, not a person.** A credential proves its holder is a member.
+  There is no login, no second factor and no per-human key — so _Sol speaks for Jerry_ is enforced at
+  the connection, while _which human is this_ is not established at all.
+- **Mandates are unsigned.** The hash proves **which document** was evaluated, not that anyone
+  authorised it. Anyone who can commit to `mandates/` can widen a scope, and the room will render the
+  widened scope truthfully — because the room is truthful about the document, and it is the document
+  that is unproven.
+- **No receipts and no hash chain.** PR-11 is not built. The log is append-only Postgres with a
+  monotonic sequence, which is good and is not tamper-evident. Nothing here may be called _signed_,
+  _notarised_ or _provable afterwards_.
+- **The co-signature cannot be completed.** Approve and Deny are inert and labelled on screen. The
+  card shows a decision awaiting a signature that nothing can yet collect.
+- **No ALLOW causes an external side effect.** Nothing merges, deploys, posts or sends. That is why
+  several accepted findings are survivable today, and it is the one condition to re-check before it
+  changes.
+- **A room is enforced, not private.** The front door refuses non-members; with no login, the web tier
+  mints a socket ticket for anyone who can reach it.
+- **Agents cannot initiate anything.** There is no tool-call channel, so an agent cannot request an
+  action, raise an interrupt or hand off work. Every governed request in the film is issued by a
+  caller on a member's behalf.
+
+## Licence
+
+**AGPL-3.0** for the control plane: the gateway, the fabric and evaluator, the room, the adapters,
+the migrations and the scripts. If you run a modified Playroom as a network service, section 13
+applies — the people using it are entitled to the source of what you are running.
+
+**Apache-2.0** for [`packages/shared`](packages/shared/LICENSE): the event types, the `AgentTurn`
+contract and the zod wire schemas. That package is the integration surface, and an adapter or host
+author has to be able to depend on it without taking copyleft onto their own code. Copyleft on a data
+contract would protect nothing and would block precisely the integrations this project exists to
+invite.
+
+**A commercial licence for the control plane is available separately**, for anyone who needs to run a
+modified Playroom as a service without section 13's obligation. Ask — it is not drafted here.
