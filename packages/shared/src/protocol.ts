@@ -422,6 +422,43 @@ export const InterruptDowngradedEvent = z.object({
 });
 export type InterruptDowngradedEvent = z.infer<typeof InterruptDowngradedEvent>;
 
+/**
+ * SOMEONE MOVED A PRIVATE ITEM INTO THIS ROOM — Bible §7.2, and RA-005.
+ *
+ * ── WHY THIS IS NOT A `message` ──
+ *
+ * It would be easier to render if it were, and that is the trap. Barrier 1 of the activation
+ * boundary reads text from `message` events and from nothing else, so a promoted `@sol` inside a
+ * message would summon Sol: a member pastes their private note, and an agent belonging to a
+ * different principal takes a turn because of text neither of them wrote. Carrying the disclosure
+ * on its own event type makes the span INERT by construction rather than by a rule someone has to
+ * remember — see RA-005, which is the criterion this satisfies.
+ *
+ * The payload is the record's fields, not a rendered sentence. §5.2 wants a promotion to look
+ * different from native content, and a reader that receives who / why / how-much can say so in its
+ * own vocabulary — a pre-formatted string would fix the phrasing in the log forever and force the
+ * next surface to parse English.
+ */
+export const ContextPromotedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('context.promoted'),
+  payload: z.object({
+    promotion_id: z.string(),
+    /** Whose private context this was. The room can say whose without reading the store. */
+    source_principal: z.string(),
+    /** 'verbatim' or 'summary' — HOW MUCH was disclosed, visible to everyone who can read it. */
+    representation: z.string(),
+    /** Why, in the promoter's words. Never a template. */
+    purpose: z.string(),
+    /** The human member who consented. A promotion with no named approver is not a promotion. */
+    approved_by: z.string(),
+    /** SHA-256 of `content`, so the line shown can be checked against the record. */
+    content_hash: z.string(),
+    content: z.string(),
+  }),
+});
+export type ContextPromotedEvent = z.infer<typeof ContextPromotedEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -435,6 +472,7 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   TaskHandoffEvent,
   InterruptRaisedEvent,
   InterruptDowngradedEvent,
+  ContextPromotedEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;

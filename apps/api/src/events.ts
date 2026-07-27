@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { ServerEvent, type AgentMessage } from '@playroom/shared';
 
 export interface RoomRow {
@@ -378,6 +378,25 @@ export async function appendInterruptEvent(
      VALUES ($1, $2, ${ACTOR_MEMBER(2)}, $3, $4)
      RETURNING ${EVENT_COLS}`,
     [roomId, actorId, eventType, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+/**
+ * The room-visible half of a promotion. Takes a CLIENT, not the pool, deliberately: the record and
+ * the copy are one transaction (see promotions.ts), so this has to be able to run inside it.
+ */
+export async function appendPromotionEvent(
+  client: PoolClient,
+  roomId: string,
+  actorId: string,
+  payload: unknown,
+): Promise<ServerEvent> {
+  const { rows } = await client.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'context.promoted', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
   );
   return rowToServerEvent(rows[0]);
 }

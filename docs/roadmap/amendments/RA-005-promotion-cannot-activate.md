@@ -1,6 +1,35 @@
 # RA-005 — Roadmap amendment: promoted content cannot activate a summon
 
-**Amends:** Bible §21.2, the S1.7 exit criterion · **Status:** Logged, not scheduled · **Raised by:** RT-004 (S0.5b)
+**Amends:** Bible §21.2, the S1.7 exit criterion · **Status:** **Accepted; satisfied for §7.2
+promotion in S1.5, still binding on S1.7's import** · **Raised by:** RT-004 (S0.5b)
+
+## Landed in S1.5 — earlier than expected, and by a mechanism this amendment did not predict
+
+S1.5 built §7.2 promotion: moving an item from a principal's private store into a room. That is
+content promotion, so this amendment's criterion applied at that commit rather than at S1.7.
+
+**It is satisfied for that path, and by construction rather than by a rule.** A promotion is a
+`context.promoted` event. Barrier 1 of the activation boundary is an allowlist — `memberAuthoredText`
+returns text for `message` and `null` for everything else — so a promoted `@sol` resolves to
+`NOT_ROOM_CONTENT` and summons nobody. **Nothing in `agent.ts` changed to achieve this.** The barrier
+was built as an allowlist in S0.5b precisely so that a later event type would be inert until somebody
+deliberately admitted it, and that is what happened.
+
+Asserted in `apps/api/test/promotions.test.ts`: a private note containing a resolvable token for
+another principal's agent is promoted verbatim, run through the real `summonRuling`, and summons
+nobody — alongside the contrast case that the same words inside a `message` still do activate.
+
+**What this amendment got wrong, stated plainly:** it assumed promoted spans would arrive inside
+member-authored messages, and therefore that closing the gap would require span provenance inside
+`MessageEvent`. It did not, because promotion did not have to be a message. The reasoning above —
+that a rule scoped to `@` tokens would be re-litigated at the next activating token — is unaffected
+and is why the event type carries the whole payload rather than a rendered sentence.
+
+**Still binding, unchanged, on S1.7.** S1.7 imports wholesale foreign transcripts, and if any of that
+arrives as message text then span provenance is unavoidable and the must-fail test
+(`quoted content in a MESSAGE activates`) fails as designed. The pin stays and so does its trigger.
+S1.5 did not close RT-004's accepted gap and does not claim to: pasting quoted text into an ordinary
+message still activates.
 
 ## The gap
 

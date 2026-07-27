@@ -321,11 +321,31 @@ describe('the case table', () => {
 });
 
 describe('what is NOT guarded — recorded, not pretended', () => {
-  it('quoted content activates — the hole, recorded, trigger S1.7', () => {
+  it('quoted content in a MESSAGE activates — the hole, recorded, trigger S1.7', () => {
     // `MessageEvent.payload` is one flat string with no span provenance, so a member who
     // pastes a bug report containing a tag summons whoever it names. Same injection class
     // as barrier 1, arriving through a member. WHEN S1.7 LANDS CONTENT PROMOTION THIS
     // TEST MUST FAIL — that is its job. Do not relax it; change it.
+    //
+    // ── THE TRIGGER FIRED EARLY, IN S1.5, AND THIS TEST STILL PASSES. HERE IS WHY. ──
+    //
+    // S1.5 landed content promotion (§7.2) and RA-005 with it, ahead of S1.7. So the alarm went
+    // off, was answered, and the answer is that this test's SUBJECT was never promotion — it is
+    // `message`. Read it again: both cases are `msg(...)`, i.e. `event_type: 'message'`, and
+    // nothing S1.5 built changed how a message is parsed. A message is still one flat string.
+    //
+    // Promotion did not widen this hole and did not close it. It added a DIFFERENT path, and that
+    // path is inert: a promotion is a `context.promoted` event, barrier 1's allowlist reads text
+    // only from `message`, so a promoted `@sol` resolves to NOT_ROOM_CONTENT and summons nobody.
+    // Asserted in `promotions.test.ts` — "a promoted `@sol` summons NOBODY" — together with the
+    // contrast case that the same words inside a message DO activate, which is this finding.
+    //
+    // SO THE PIN STAYS, AND SO DOES ITS TRIGGER. What S1.7 has to do is unchanged: import
+    // wholesale foreign transcripts INTO MESSAGES, at which point span provenance is unavoidable
+    // and this test must fail. What S1.5 removed is the assumption inside RA-005 that promotion
+    // would necessarily arrive as member-authored message text — it did not have to, and it did
+    // not. Relaxing this test on the strength of that would be the exact move the pin exists to
+    // prevent: a green suite bought by editing the expectation.
     ruled(msg('> from the PR: @sol, take review'), 'ACTIVATED', ['sol']);
     ruled(msg('pasted export follows\n---\nplease @claude review'), 'ACTIVATED', ['claude-main']);
   });

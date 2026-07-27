@@ -789,3 +789,43 @@ isolation holds there only because `SET LOCAL ROLE` drops to a role that cannot 
 tests assert rather than assume. Anyone with the owner credential can read every store directly.
 This isolates PRINCIPALS FROM EACH OTHER through the application; it does not isolate either of them
 from the database owner, and nothing in this design claims it does.
+
+### CLOSED FOR ONE PATH — RA-005: a promoted span cannot activate a summon
+
+S1.5 landed §7.2 promotion, which is content promotion, so RA-005's criterion applied at this commit
+rather than at S1.7 as scheduled. It is satisfied **for the promotion path**, by construction:
+
+A promotion is a `context.promoted` event, not a `message`. Barrier 1's allowlist reads text from
+`message` and returns null for everything else, so a promoted `@sol` rules `NOT_ROOM_CONTENT` and
+summons nobody. **Nothing in `agent.ts` changed.** The allowlist was written in S0.5b so that a new
+event type would be inert until somebody deliberately admitted it, and that is exactly what it did
+eleven slices later — the single best argument for allowlists over denylists this project has
+produced.
+
+Asserted with the payload that makes it worth asserting: a private note containing a resolvable token
+for **another principal's agent**, promoted verbatim, run through the real `summonRuling`. It is
+refused before token resolution even happens, so the refusal does not depend on the roster.
+
+**RT-004'S ACCEPTED GAP IS NOT CLOSED, and the must-fail test still passes.** Its subject is
+`message`: a member pasting quoted text still summons whoever it names, because `message.payload` is
+still one flat string with no span provenance. Promotion added an inert path; it did not make the
+other path safe. The pinned test now carries the full reasoning inline, because a passing must-fail
+test whose trigger has fired is exactly the situation in which someone edits the expectation and
+moves on. **Trigger unchanged: S1.7, when wholesale import lands.**
+
+**What RA-005 itself got wrong,** recorded because the amendment is a document that claimed
+something: it assumed promoted spans would arrive inside member-authored messages, and therefore that
+closing the gap needed span provenance inside `MessageEvent`. It did not. Promotion did not have to be
+a message, and the cheapest correct answer was to not make it one.
+
+### NOTED — an agent cannot promote its own principal's context, and this is a real restriction
+
+`promoteContent` refuses an agent approver (`not_a_human`). The reason is not tidiness: an agent reads
+its own principal's store on every turn (§7.1), so an agent that could also promote could be talked
+into publishing that store — barrier 1's injection path with a private store as the payload. Consent
+for a disclosure is a human act or it is not consent.
+
+**The cost, stated:** an agent that legitimately needs to share something from its principal's notes
+cannot do it, and must ask. That is a worse product and a better boundary, and it is the owner's call
+to revisit. If it is revisited, the thing to add is a co-signed promotion (§12.1's shape), not an
+`allow_agents` flag.
