@@ -26,7 +26,8 @@ Severity is about the trust boundary, not user annoyance:
 | M-N1   | 25 Jul 2026 | critical | logged at the mandate slice                   | identity must be stamped by the boundary, not asserted by the caller; `actor_id` arrived from the wire as a free string                           | fixed                                    | `7fc279a` |
 | S04-N2 | 25 Jul 2026 | high     | logged at the mandate slice                   | a mandate is an unsigned file, so _this principal granted this authority_ is asserted by the document, not proven                                 | open, narrowed — trigger **S2.6**        | —         |
 | S12-N2 | 26 Jul 2026 | medium   | S1.2 closeout, while writing the roster scope | a governed request's subject must be justified by a record, not asserted by the caller — and it was not even checked to be a member               | fixed                                    | `S13-3`   |
-| S13-N2 | 27 Jul 2026 | high     | S1.3 Phase 0, reading the handshake           | room membership is the product's boundary; the handshake checks that a room EXISTS, not that the caller is IN it                                  | accepted until the first pilot           | —         |
+| S13-N2 | 27 Jul 2026 | high     | S1.3 Phase 0, reading the handshake           | room membership is the product's boundary; the handshake checks that a room EXISTS, not that the caller is IN it                                  | fixed                                    | `S13b-2`  |
+| S12-N1 | 26 Jul 2026 | low      | S1.2, while scoping the roster read           | an oracle anywhere undoes silence everywhere; room existence was readable without a credential                                                    | fixed                                    | `S13b-3`  |
 | S13-N3 | 27 Jul 2026 | medium   | S1.3 Phase 0, reading Room.tsx                | a credential must not travel where logs collect it; the browser's token is in the WebSocket query string, and the code cited the wrong finding id | accepted until a proxy or access logging | —         |
 
 ## RT-001 — a refused write was indistinguishable from an accepted one
@@ -462,6 +463,31 @@ client.** The fix is a subprotocol-based handshake or a short-lived ticket excha
 socket — both more machinery than S1.2 should have introduced, which is why the comment was right
 to say so and wrong about which finding it was.
 
+### S13-N3, re-examined in S1.3b — the constraint is real, and there are TWO faces
+
+**Checked whether it could move, and it cannot without machinery this slice should not carry.** A
+browser's `WebSocket` constructor takes a URL and a subprotocol list — there is no header argument,
+by specification. So the options are:
+
+- **A short-lived single-use ticket.** `POST /ws-ticket` authenticated by `Authorization: Bearer`,
+  returning a ticket with a seconds-long TTL that the socket presents once. A leaked access-log line
+  is then worthless by the time anyone reads it. **This is the correct fix** and it needs a store, an
+  expiry and a consume-once rule — a small slice of its own, not a paragraph in this one.
+- **Subprotocol smuggling** — `new WebSocket(url, ['playroom.token.' + token])`, so the credential
+  travels in `Sec-WebSocket-Protocol` instead of the query string. Cheaper, and it moves a secret
+  from one logged place to a less-logged one rather than making the secret worthless. A workaround,
+  and the brief was right that saying so beats shipping it.
+
+**And the finding has a second face that was never written down.** The token is read on the server
+and handed to a client component as a prop, so it is **serialised into the page's HTML payload** —
+anyone who can read the page can connect as that member. That is not the query string; it is the same
+credential in a second place, and it is the honest limit of a credential without a login (S04-N2).
+The ticket fix closes both faces at once, because a ticket in the HTML is worthless after seconds.
+
+Severity stays **medium** for the same reasons: no access log is configured, no proxy sits in front
+of the api, and the deployment is localhost. Both faces are now recorded, and the code comments that
+described them cite this finding rather than an unrelated one.
+
 ### FIXED — S12-N3: test credentials accumulated
 
 479 active credentials for `prince` had piled up in the test database — one per `startTestServer`,
@@ -567,3 +593,51 @@ against a file explicitly marked `-text`.
 `decision.test.ts` created five rooms per run and deleted none, from S0.3 onward — 20 rooms by the
 end of S1.3, and 20 tasks once S1.3 gave every delegated task a row. Fixed and measured: 0 rooms and
 0 tasks remain after a run.
+
+---
+
+## S1.3b — the front door, and the third oracle
+
+### FIXED — S13-N2: the handshake now checks membership
+
+An authenticated member could open a socket on any room id they could guess and write into it. The
+roster rule was enforced on the handoff and on the roster read and **not at the front door**, which
+made it the widest thing an authenticated member could assert with no record behind it.
+
+**A room you are not in is a room that does not exist** — one refusal for both, same close code 4404,
+same typed frame, and the frames are asserted byte-identical once the room id is normalised out. The
+log carries `reason: no_room | not_in_room` and the member id, server-side, where the caller cannot
+read it.
+
+**One query, not two.** `roomAccess` asks existence and membership in a single round trip, because
+`getRoom` followed by `isRoomMember` would have cost one query for a missing room and two for a room
+the caller cannot see — the oracle rebuilt out of latency after being closed in the response. The
+roster route was consolidated onto the same helper for the same reason.
+
+A member removed from a room loses the front door on their next connection, with no restart: the
+check reads the table, and membership has been data since S1.1b.
+
+### FIXED — S12-N1, and a third oracle nobody had logged
+
+`GET /rooms/:id` now requires `Authorization: Bearer` and membership, refusing exactly as a
+non-existent room does. A token in the query string is refused here, as on the roster route.
+
+**And `POST /rooms` was worse than either.** It returned the room ROW, and it is idempotent on id —
+so an unauthenticated caller who guessed `jerrys-review` got back **its title and its creation
+date**. Not an existence oracle: a content one, and it was never written down. It now returns
+`{ id }` only, so a collision and a fresh create are indistinguishable. Closing it needed no
+credential and deliberately does not use one: creation stays unauthenticated, which is **RT-002,
+still open on its own terms**.
+
+The silence is asserted END TO END rather than route by route — the socket, both HTTP reads and the
+create route, in one test — because the ruling's condition is that an oracle anywhere undoes silence
+everywhere.
+
+### STILL OPEN — RT-002, now the last unauthenticated write
+
+Anyone who can reach the api can still CREATE a room. As of this slice it leaks nothing, and it is
+the only route left that changes state without a credential. Its acceptance was "until S1.1", which
+has landed — so it is overdue rather than deferred. It is small: the browser's create form is the
+only client that would need a credential threaded through it, which is shell-slice work.
+
+**Trigger: the first pilot, or the first non-localhost exposure — whichever comes first.**

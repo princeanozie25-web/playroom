@@ -216,3 +216,69 @@ describe('who may read a roster (S1.2)', () => {
     await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
   });
 });
+
+describe('the oracle is closed everywhere, not just at the front door (S12-N1)', () => {
+  it('GET /rooms/:id requires a credential, and refuses a token in the query string', async () => {
+    const roomId = `oracle-auth-${Date.now()}`;
+    expect((await httpCreateRoom(server.httpBase, roomId)).status).toBe(201);
+
+    const none = await fetch(`${server.httpBase}/rooms/${roomId}`);
+    expect(none.status).toBe(401);
+    expect(await none.json()).toMatchObject({ type: 'error', code: 'credential_required' });
+
+    // A token in the wrong PLACE is not a credential — it would be written to every access log
+    // and browser history on the way. Same rule as the roster route.
+    const inUrl = await fetch(`${server.httpBase}/rooms/${roomId}?token=${server.token}`);
+    expect(inUrl.status).toBe(401);
+
+    const ok = await fetch(`${server.httpBase}/rooms/${roomId}`, {
+      headers: { authorization: `Bearer ${server.token}` },
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ id: roomId });
+
+    await pool.query('DELETE FROM rooms WHERE id = $1', [roomId]);
+  });
+
+  it('THE SILENCE HOLDS END TO END — every route answers a non-member the same way', async () => {
+    // The ruling's condition: "an oracle anywhere undoes silence everywhere". The handshake going
+    // quiet is worth nothing if a sibling route answers the same question one request later, so
+    // this asserts the whole surface at once rather than each route in isolation.
+    const roomId = `oracle-end-${Date.now()}`;
+    expect((await httpCreateRoom(server.httpBase, roomId)).status).toBe(201);
+    await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
+      roomId,
+      'sol',
+    ]);
+    const solToken = await issueTestCredential('sol', 'roster-outsider');
+    const bearer = { authorization: `Bearer ${solToken}` };
+    const ghostId = 'oracle-no-such-room';
+
+    for (const path of ['', '/members']) {
+      const outsider = await fetch(`${server.httpBase}/rooms/${roomId}${path}`, {
+        headers: bearer,
+      });
+      const ghost = await fetch(`${server.httpBase}/rooms/${ghostId}${path}`, { headers: bearer });
+      expect(outsider.status, `GET /rooms/:id${path} status`).toBe(404);
+      expect(ghost.status).toBe(404);
+      const normalise = (body: string, id: string): string => body.replaceAll(id, '<room>');
+      expect(normalise(await outsider.text(), roomId), `GET /rooms/:id${path} body`).toBe(
+        normalise(await ghost.text(), ghostId),
+      );
+    }
+
+    // AND THE CREATE ROUTE, which used to return an existing room's title and creation date to
+    // anyone who guessed the id — an oracle for content, not merely for existence.
+    const collide = await fetch(`${server.httpBase}/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: roomId, title: 'a title I chose' }),
+    });
+    expect(collide.status).toBe(201);
+    // Only the id comes back, so a collision and a fresh create are indistinguishable.
+    expect(await collide.json()).toEqual({ id: roomId });
+
+    await pool.query("DELETE FROM member_credentials WHERE label = 'roster-outsider'");
+    await pool.query('DELETE FROM rooms WHERE id = $1', [roomId]);
+  });
+});

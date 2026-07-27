@@ -18,7 +18,12 @@ export default async function RoomRoute({ params }: { params: Promise<{ id: stri
   // WebSocket handshake. It is a member credential — issued with `pnpm tsx
   // scripts/issue-credential.ts prince browser` — and it reaches the page, which means anyone
   // who can read the page can connect as that member. That is the honest limit of a credential
-  // without a login, and it is recorded as S12-N1.
+  // without a login, and it is recorded as S13-N3.
+  //
+  // THIS COMMENT CITED S12-N1 UNTIL S1.3b, which is the room-existence oracle — a different
+  // finding, now closed. The second mislabel of the same kind in two slices: a concern documented
+  // at the code under a label pointing somewhere else is a concern that is not in the ledger at
+  // all, which is what a ledger exists to prevent.
   //
   // Absent rather than defaulted: with no token the socket is refused at the handshake with a
   // typed reason, which is the correct behaviour and visibly different from a room that works.

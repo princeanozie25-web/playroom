@@ -171,3 +171,24 @@ fails instead of shipping. Beyond the per-beat checks above:
   so no take inherits a previous take's messages (A4's rule) and nothing is left in the
   database. The drift query reads zero on both numbers afterwards.
 - Harness: `../playroom-capture/film.mjs`, outside the tree, no new dependency.
+
+### S1.3b — re-shot through the enforced front door — 27 Jul 2026
+
+| take   | beats | clip   | size  | sha256 (first 16)  | frames | note                          |
+| ------ | ----- | ------ | ----- | ------------------ | ------ | ----------------------------- |
+| **10** | 5     | 54.80s | 3365K | `9c08905e06a4c9e7` | 3/3    | **THE P0 ASSET**, S1.3b build |
+
+**The frame is stronger than it was, and nothing on screen changed to make it so.** The socket the
+film opens is now refused for a member who is not enrolled in the room, and the two HTTP reads it
+depends on require a credential — so the beats a viewer sees arrive through a door that checks
+membership rather than one that checks only that the room exists. THE HARNESS NEEDED NOTHING: every
+room enrols every current member at creation, so `prince` was already a member of `playroom-p0`.
+
+**Numbers moved slightly, and the reason is the prompt.** `269→199 tok · $0.00126` for Claude and
+`299→146 tok · $0.00013` for Sol, against S1.3's `262→188` and `292→151`. The system prompt changed
+in S13b-1 — it said "you are summoned by name (for example, `@claude`)", which told Sol another
+member's tag as its own example — so the input token count moved and the models answered at slightly
+different lengths. Prompt hash changes with it; nothing pins the value.
+
+Warm-up 697ms (database 102ms, claude-main 321ms, sol 695ms). Beat 1 opened with no stall. No
+selector edited. Frame-verified 3/3 distinct.

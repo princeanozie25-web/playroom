@@ -124,7 +124,17 @@ describe('a room that does not exist', () => {
     const server = await startTestServer();
     const ghost = uniqueRoomId('ghost-http');
     try {
-      const res = await fetch(`${server.httpBase}/rooms/${ghost}`);
+      // WITH A CREDENTIAL, as of S1.3b: this route requires one, because an unauthenticated
+      // existence check here would have undone the handshake's silence one request later
+      // (S12-N1). Unauthenticated now answers 401 — asserted first, so the 404 below is the
+      // refusal a legitimate member gets for a room that does not exist, not an auth failure
+      // wearing the same status.
+      const noCredential = await fetch(`${server.httpBase}/rooms/${ghost}`);
+      expect(noCredential.status).toBe(401);
+
+      const res = await fetch(`${server.httpBase}/rooms/${ghost}`, {
+        headers: { authorization: `Bearer ${server.token}` },
+      });
       expect(res.status).toBe(404);
 
       // Same shape as the WebSocket refusal: one refusal contract, two transports.

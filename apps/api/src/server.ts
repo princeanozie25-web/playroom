@@ -23,7 +23,7 @@ import { eventsAfter, getRoom, lastSeq } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
 import { authenticate, type AuthFailure, type AuthResult } from './credentials.js';
-import { isRoomMember, listMembers, listRoomMembers, roomAccess } from './members.js';
+import { listMembers, listRoomMembers, roomAccess } from './members.js';
 import { setKnownMemberTokens } from './agent.js';
 
 export interface BuildOptions {
@@ -296,10 +296,18 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       // The distinction is not lost, it is MOVED: the log below says which of the two it was,
       // server-side, where the caller cannot read it. An operator debugging a 404 has the
       // answer; a caller probing for rooms does not.
-      const exists = await getRoom(db(), id);
-      if (!exists || !(await isRoomMember(db(), id, auth.auth.member_id))) {
+      // ONE QUERY, not two (S1.3b). This asked `getRoom` and then `isRoomMember`, which meant a
+      // missing room cost one round trip and an unauthorised room cost two — the refusals were
+      // byte-identical and separable by a stopwatch. `roomAccess` does both in one, so the timing
+      // matches the bytes.
+      const access = await roomAccess(db(), id, auth.auth.member_id);
+      if (!access.room_exists || !access.is_member) {
         app.log.warn(
-          { room_id: id, member: auth.auth.member_id, reason: exists ? 'not_in_room' : 'no_room' },
+          {
+            room_id: id,
+            member: auth.auth.member_id,
+            reason: access.room_exists ? 'not_in_room' : 'no_room',
+          },
           'roster refused',
         );
         reply.code(404);
@@ -325,7 +333,26 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       return warmUp({ pool: db(), adapterFactory, log: app.log });
     });
 
-    // POST /rooms { id?, title } → 201 with the room row (idempotent on id).
+    // POST /rooms { id?, title } → 201 with THE ID ONLY (idempotent on id).
+    //
+    // ── THE THIRD ORACLE, AND THE LAST ONE THE HANDSHAKE'S SILENCE DEPENDS ON ─────────────
+    //
+    // It returned the room ROW. Idempotent on id means a POST against an id that already exists
+    // returns the EXISTING room — so an unauthenticated caller who guessed `jerrys-review` got
+    // back its title and its creation date. Worse than the existence oracle S12-N1 described:
+    // not "this room exists" but a fragment of its content.
+    //
+    // Closing it did not need a credential, and deliberately does not use one: creation stays
+    // unauthenticated (that is RT-002, still open, still accepted for its own reasons) and the
+    // browser's create flow keeps working without threading a token through a client form. What
+    // changed is that the RESPONSE no longer carries anything a caller did not already supply —
+    // just the id, which is either the slug they asked for or one that was generated for them.
+    // A fresh create and a collision are now indistinguishable, which is the same property the
+    // handshake and the two GETs have.
+    //
+    // The two consumers used only `id` (the capture harness and the home page's form), so this
+    // costs nothing. RT-002's own risk is unchanged: an unauthenticated caller can still CREATE
+    // rooms, and that is the finding to close, not this one.
     fastify.post('/rooms', async (req, reply) => {
       const body = (req.body ?? {}) as { id?: unknown; title?: unknown };
       const room = await executeCommand(
@@ -338,15 +365,48 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         deps,
       );
       reply.code(201);
-      return room;
+      return { id: room.id };
     });
 
     // GET /rooms/:id → the room row, or a typed 404. The body shape matches the
     // WebSocket error frame so a client has one refusal shape to handle, not two.
+    //
+    // ── CREDENTIAL AND MEMBERSHIP, BECAUSE AN ORACLE ANYWHERE UNDOES SILENCE EVERYWHERE ──
+    //
+    // S12-N1, closed. This route answered "does room X exist" to anyone who could reach the
+    // port, which made S13b-2's silent handshake pointless one request later: a caller refused
+    // at the socket could simply ask here. The two had to close together or neither was worth
+    // building, and the owner's ruling says exactly that.
+    //
+    // Same shape as `GET /rooms/:id/members`: `Authorization: Bearer`, never a token in a query
+    // parameter, and a non-member gets what a non-existent room gets — down to the body, which
+    // `roomNotFound` produces for both.
     fastify.get('/rooms/:id', async (req, reply) => {
       const { id } = req.params as { id: string };
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        app.log.warn({ room_id: id, code: auth.failure }, 'room refused: no usable credential');
+        reply.code(401);
+        return credentialRefusal(auth.failure, id);
+      }
+      // ONE QUERY for both questions, so the two refusals cost the same (see `roomAccess`).
+      const access = await roomAccess(db(), id, auth.auth.member_id);
+      if (!access.room_exists || !access.is_member) {
+        app.log.warn(
+          {
+            room_id: id,
+            member: auth.auth.member_id,
+            reason: access.room_exists ? 'not_in_room' : 'no_room',
+          },
+          'room refused',
+        );
+        reply.code(404);
+        return roomNotFound(id);
+      }
       const room = await getRoom(db(), id);
       if (!room) {
+        // Deleted between the two reads. Refused identically rather than returning null — the
+        // race is real and its answer is the same one every other miss gets.
         reply.code(404);
         return roomNotFound(id);
       }
