@@ -44,8 +44,24 @@ async function roomWithTask(
   await c.open();
   c.send(tag, `seed-${id}`);
   await c.waitForType('agent.turn.completed');
-  const tasks = await tasksInRoom(pool, id);
+
+  // WAIT FOR THE TASK TO SETTLE, not just for the turn to finish.
+  //
+  // The turn appends `completed` and THEN moves its task to `done`, so a test that reads the row
+  // the moment the turn event arrives can legitimately see `working`. Locally that race is won
+  // every time and in CI it is not — this test failed there once, on a machine slow enough to lose
+  // it, which is precisely the flake class S13c-N1 warns about: asserting that something ARRIVED
+  // within a window rather than that a state has SETTLED.
+  //
+  // Every case built on this helper begins from a settled task, so none of them has to know.
+  const until = Date.now() + 10_000;
+  let tasks = await tasksInRoom(pool, id);
+  while ((tasks.length === 0 || tasks[0].state === 'working') && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 50));
+    tasks = await tasksInRoom(pool, id);
+  }
   expect(tasks).toHaveLength(1);
+  expect(tasks[0].state, 'the seeded task never left `working`').not.toBe('working');
   return { id, c, taskId: tasks[0].id };
 }
 
