@@ -244,6 +244,29 @@ async function fetchTicket(roomId: string): Promise<string> {
   return body.ticket;
 }
 
+/**
+ * Fetch a bounded page of history through the same-origin BFF (S16b).
+ *
+ * No `before` → THE RECENT WINDOW (events after the summary floor, the span the agent's context also
+ * uses). A `before` cursor → the OLDER PAGE just below it. `has_older` says whether there is more to
+ * page to. This is how the client loads a long room without replaying it whole (S16-N2) and without a
+ * stale cursor truncating it (S16-N1) — a WINDOW of a log whose rest is all still one request away.
+ */
+async function fetchHistory(
+  roomId: string,
+  before?: number,
+): Promise<{ events: ServerEvent[]; has_older: boolean }> {
+  const qs = new URLSearchParams({ room: roomId });
+  if (before !== undefined) qs.set('before', String(before));
+  const res = await fetch(`/api/history?${qs.toString()}`);
+  if (!res.ok) throw new Error(`no history: HTTP ${res.status}`);
+  const body: { events?: ServerEvent[]; has_older?: boolean } = await res.json();
+  return {
+    events: Array.isArray(body.events) ? body.events : [],
+    has_older: Boolean(body.has_older),
+  };
+}
+
 export function Room({
   roomId,
   roster,
@@ -276,6 +299,11 @@ export function Room({
   // `baselineSeq` add to it below and cannot double-count what the baseline already includes.
   const [baselineSpend, setBaselineSpend] = useState(0);
   const [baselineSeq, setBaselineSeq] = useState(0);
+  // WINDOWED LOAD (S16b). `hasOlder` is whether history exists below what is loaded — the "load
+  // earlier" control appears only when it would do something. `loadingOlder` makes the fetch VISIBLE
+  // as loading rather than a freeze.
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   // THE WELCOME SCREEN SHOWS ONCE, and only for somebody who arrived through redemption — the join
   // route redirects with `?welcome=1`. Read from the URL rather than from storage so it cannot
   // reappear on a later visit, and so my own browser and the capture harness never see it: take 13
@@ -330,13 +358,21 @@ export function Room({
   }, [events, agents]);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const lastSeqRef = useRef<number>(0); // last seq seen — the resume cursor
+  // THE RESUME CURSOR, IN MEMORY ONLY (S16b). It was persisted to sessionStorage, which is what
+  // made a RELOAD resume from a stale point and show a truncated room (S16-N1). It now lives only for
+  // the life of this mount — used to resume a DROPPED socket (which retains its events), never to
+  // decide what a fresh open loads. A fresh open loads the window, always.
+  const lastSeqRef = useRef<number>(0);
+  const oldestSeqRef = useRef<number>(0); // oldest event loaded — the cursor for the next older page
   const seenRef = useRef<Set<number>>(new Set());
   const backoffRef = useRef<number>(500);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef<boolean>(false);
   const pendingRef = useRef<string>(''); // last body sent, restored if it is refused
   const tailRef = useRef<HTMLDivElement | null>(null);
+  // Set when a page of OLDER history is prepended, so the "keep the newest in frame" effect below
+  // does NOT yank the reader to the bottom on a load-older — the one items change that must not scroll.
+  const prependingRef = useRef<boolean>(false);
 
   /**
    * ONE TAP. The frame carries only the interrupt id: who is lowering it is the socket's
@@ -353,6 +389,36 @@ export function Room({
       }),
     );
   }, []);
+
+  /**
+   * Load the page of history just before the oldest event held — S16b, item 10.
+   *
+   * WINDOWED, NOT TRUNCATED: the older messages were never lost, only not loaded, and this reaches
+   * them. It prepends and flags `prependingRef` so the newest-in-frame effect leaves the reader where
+   * they are. `has_older` from the response decides whether the control stays.
+   */
+  const loadOlder = useCallback((): void => {
+    if (loadingOlder || oldestSeqRef.current <= 1) return;
+    setLoadingOlder(true);
+    void (async (): Promise<void> => {
+      try {
+        const { events: page, has_older } = await fetchHistory(roomId, oldestSeqRef.current);
+        if (stoppedRef.current) return;
+        const fresh = page.filter((ev) => !seenRef.current.has(ev.seq));
+        if (fresh.length > 0) {
+          for (const ev of fresh) seenRef.current.add(ev.seq);
+          oldestSeqRef.current = fresh[0].seq;
+          prependingRef.current = true;
+          setEvents((prev) => [...fresh, ...prev].sort((a, b) => a.seq - b.seq));
+        }
+        setHasOlder(has_older);
+      } catch {
+        // Leave the control in place: a failed page is a retry, not a dead end.
+      } finally {
+        setLoadingOlder(false);
+      }
+    })();
+  }, [roomId, loadingOlder]);
 
   const connect = useCallback((): void => {
     if (!roomId) return;
@@ -414,10 +480,10 @@ export function Room({
         if (msg.type !== 'event') return;
         if (seenRef.current.has(msg.seq)) return; // dedupe on seq
         seenRef.current.add(msg.seq);
-        if (msg.seq > lastSeqRef.current) {
-          lastSeqRef.current = msg.seq;
-          sessionStorage.setItem(`playroom:last:${roomId}`, String(msg.seq));
-        }
+        // In-memory only now (S16b): the cursor resumes a dropped socket, and is never persisted, so a
+        // reload cannot resume from it and truncate the room (S16-N1). The oldest cursor only moves
+        // BACKWARD, via loadOlder — a live event is always newer than the window, never older than it.
+        if (msg.seq > lastSeqRef.current) lastSeqRef.current = msg.seq;
         setEvents((prev) => [...prev, msg].sort((a, b) => a.seq - b.seq));
       };
       ws.onclose = (e: CloseEvent): void => {
@@ -436,10 +502,36 @@ export function Room({
 
   useEffect(() => {
     if (!roomId) return;
-    lastSeqRef.current = Number(sessionStorage.getItem(`playroom:last:${roomId}`) || 0);
+    // A FRESH OPEN LOADS THE WINDOW, NOT THE LOG (S16b). Reset, fetch the recent window over HTTP,
+    // then connect the socket for the live tail from where the window ends. The client mirror of what
+    // the summary already did for the agent: a bounded recent span, the rest reachable via loadOlder.
+    // No stale cursor to truncate from (N1), no whole-room replay (N2).
+    lastSeqRef.current = 0;
+    oldestSeqRef.current = 0;
     seenRef.current = new Set();
     stoppedRef.current = false;
-    connect();
+    setEvents([]);
+    setHasOlder(false);
+    void (async (): Promise<void> => {
+      try {
+        const { events: recent, has_older } = await fetchHistory(roomId);
+        if (stoppedRef.current) return;
+        for (const ev of recent) seenRef.current.add(ev.seq);
+        if (recent.length > 0) {
+          oldestSeqRef.current = recent[0].seq;
+          lastSeqRef.current = recent[recent.length - 1].seq;
+        }
+        setEvents([...recent].sort((a, b) => a.seq - b.seq));
+        setHasOlder(has_older);
+      } catch {
+        // The window failed to load — connect anyway (from 0) so the room still opens rather than
+        // showing nothing. That degrades to the pre-S16b full replay, which is no worse; the history
+        // route shares a tier with the ticket route, so this is rare.
+      }
+      // THEN the live tail, resuming from where the window ended (lastSeqRef). Not after=0 on a loaded
+      // window — the socket replays only the gap since the fetch, not the whole room.
+      if (!stoppedRef.current) connect();
+    })();
     return () => {
       stoppedRef.current = true;
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -450,6 +542,13 @@ export function Room({
   // Keep the newest turn in frame. The transcript scrolls, not the page, so this
   // never drags the composer out of shot mid-take.
   useEffect(() => {
+    // ON A LOAD-OLDER PREPEND, do not scroll to the tail: the reader is up in the history, and yanking
+    // them to the newest message is the opposite of what they asked for. Every other items change —
+    // the window loading, a live event — keeps the newest in frame.
+    if (prependingRef.current) {
+      prependingRef.current = false;
+      return;
+    }
     tailRef.current?.scrollIntoView({ block: 'end' });
   }, [items]);
 
@@ -527,6 +626,22 @@ export function Room({
       )}
 
       <ul className="transcript" {...pr(HOOK.transcript)}>
+        {/* LOAD EARLIER — the top of a WINDOW, not the top of the room (S16b). It appears only when
+            history exists below what is loaded, and reaching it is one request, never a lost message.
+            An explicit control rather than scroll-detection: loading behaviour, no new UI look. */}
+        {hasOlder && (
+          <li className="load-older">
+            <button
+              type="button"
+              className="load-older-btn"
+              onClick={loadOlder}
+              disabled={loadingOlder}
+              {...pr(HOOK.loadOlder)}
+            >
+              {loadingOlder ? 'loading earlier messages…' : 'load earlier messages'}
+            </button>
+          </li>
+        )}
         {items.map((it) =>
           it.kind === 'message' ? (
             <li key={it.key} {...pr(HOOK.message)} data-pr-author={it.author}>

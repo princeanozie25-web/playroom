@@ -386,6 +386,32 @@ body {
   margin: 0;
 }
 
+/* ── LOAD EARLIER (S16b) ──────────────────────────────────────────────────────
+   The top of a WINDOWED transcript. Quiet and centred — a control, not content, so it does not read
+   as a message. Loading behaviour, not a new surface: a plain pill that says what it is doing. */
+.load-older {
+  display: flex;
+  justify-content: center;
+}
+.load-older-btn {
+  font: inherit;
+  font-size: var(--t-xs);
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.load-older-btn:hover:not(:disabled) {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+.load-older-btn:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
 .turn-head {
   display: flex;
   align-items: center;

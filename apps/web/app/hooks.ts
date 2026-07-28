@@ -34,6 +34,8 @@ export const HOOK = {
   mandateDetail: 'mandate-detail',
   /** The transcript list. */
   transcript: 'transcript',
+  /** The "load earlier messages" control at the top of a windowed transcript (S16b). */
+  loadOlder: 'load-older',
   /** A human message row. */
   message: 'message',
   /** An agent turn row. Carries `data-pr-member`. */
