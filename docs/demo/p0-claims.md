@@ -9,8 +9,9 @@ from memory which parts of what is on screen are enforced and which are drawn.
 **The rule that governs every frame: the film may not imply a capability that does not
 exist.** Four slices went into making governance structurally unfakeable in the product —
 the DECISION card has exactly one possible input, `appendAgentEvent` will not compile
-without a summon, the co-sign buttons are inert by construction. A caption can undo all of
-it in ninety seconds, and no test will catch that.
+without a summon, and a co-signature completes only for the human bound to the decision's
+principal — an agent can never sign (S2.2). A caption can undo all of it in ninety seconds,
+and no test will catch that.
 
 Recorded take: **take 13**, 54.04s, five beats, one continuous take, production build, 1280×800.
 Take 12 attempted a 2× capture and produced a padded frame rather than a supersampled one — the
@@ -128,9 +129,15 @@ against the caption; the caption still has to be right.
 A fake `ed25519:` string would have been worse than an absent one. The hash on screen proves
 _which document was evaluated_, not that anyone authorised it. S2.1.
 
-**3. The co-signature cannot be completed.** Approve and Deny are `disabled` and labelled
-`S2.2` on screen. There is no co-sign flow, no signing key and no way to act on the
-decision. The card shows a decision **awaiting** a signature that nothing can yet collect.
+**3. The co-signature IS completable now (S2.2) — and merge execution is still absent.** Approve
+and Deny are live for the REQUIRED SIGNER — the human bound to the decision's principal, and no one
+else; an agent can never complete one. A signed approval releases the decision's action exactly
+once. But on this `pr.merge` decision the release records the sign-off and runs **NOTHING**: there
+is no executor until S2.6, so no merge occurs and RT-005 holds. The completion is demonstrated on an
+INTERNAL action — a protected summon that fires on approval — in the heartbeat clip, a separate
+asset (`docs/demo/s22-cosign-completes.md`); take 13 shows the paused card, which is still a true
+moment: a decision awaiting a signature. A caption may say _a human signs and the paused action
+proceeds_; it may **not** say that anything merged, because nothing did.
 
 **4. There is no receipt and no hash chain.** §19's `audit` table does not exist. Nothing on
 screen may be described as _signed_, _notarised_, _tamper-evident_, or _provable
@@ -181,18 +188,18 @@ demonstrated anywhere in this film and must not be narrated.
 
 Other wordings to avoid across the whole cut:
 
-| do not say                                      | because                                                                                                               | say instead                                                                      |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| "signed receipt", "provable", "notarised"       | no chain, no signatures exist (S2.3)                                                                                  | "recorded in an append-only log"                                                 |
-| "verified identity", "we know who the human is" | a credential authenticates a PROCESS acting as a member; no login, no per-human key (S04-N2)                          | "each connection authenticates as a member, and members are bound to principals" |
-| "the room is private", "only Prince can see it" | membership is enforced and there is no login: the web tier mints a socket ticket for anyone who can reach it (S04-N2) | "the room admits only its own members"                                           |
-| "the mandate is authorised", "signed authority" | the mandate is an unsigned file; the hash proves which document, not who granted it (S2.1)                            | "the mandate that was evaluated is recorded by hash"                             |
-| "Claude requested the merge"                    | the requester is authenticated, the subject it names is not (S12-N2)                                                  | "a merge was requested under Claude's mandate"                                   |
-| "the agent was blocked from merging"            | the agent never requested it, and could not                                                                           | "a merge request against that member's mandate is refused"                       |
-| "the card shows Claude attempted a merge"       | the card has not said that since UI2-4, and it was never true                                                         | "the card shows who requested what, and under whose mandate"                     |
-| "approve it here"                               | the buttons are inert and labelled S2.2                                                                               | "the co-signature step lands in S2.2"                                            |
-| "agents can't be tricked"                       | quoted and imported content still activates (RT-004, S1.7)                                                            | "an agent's own output cannot summon another agent"                              |
-| "isolated context per principal"                | one shared 30-message window today (S1.5)                                                                             | "one shared room context"                                                        |
+| do not say                                      | because                                                                                                               | say instead                                                                             |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| "signed receipt", "provable", "notarised"       | no chain, no signatures exist (S2.3)                                                                                  | "recorded in an append-only log"                                                        |
+| "verified identity", "we know who the human is" | a credential authenticates a PROCESS acting as a member; no login, no per-human key (S04-N2)                          | "each connection authenticates as a member, and members are bound to principals"        |
+| "the room is private", "only Prince can see it" | membership is enforced and there is no login: the web tier mints a socket ticket for anyone who can reach it (S04-N2) | "the room admits only its own members"                                                  |
+| "the mandate is authorised", "signed authority" | the mandate is an unsigned file; the hash proves which document, not who granted it (S2.1)                            | "the mandate that was evaluated is recorded by hash"                                    |
+| "Claude requested the merge"                    | the requester is authenticated, the subject it names is not (S12-N2)                                                  | "a merge was requested under Claude's mandate"                                          |
+| "the agent was blocked from merging"            | the agent never requested it, and could not                                                                           | "a merge request against that member's mandate is refused"                              |
+| "the card shows Claude attempted a merge"       | the card has not said that since UI2-4, and it was never true                                                         | "the card shows who requested what, and under whose mandate"                            |
+| "approve it here" (in take 13)                  | take 13 predates S2.2 and shows the paused card; completing a co-sign is a separate asset                             | "a decision awaiting a signature; the co-signature completes in S2.2, shown separately" |
+| "agents can't be tricked"                       | quoted and imported content still activates (RT-004, S1.7)                                                            | "an agent's own output cannot summon another agent"                                     |
+| "isolated context per principal"                | one shared 30-message window today (S1.5)                                                                             | "one shared room context"                                                               |
 
 **One further honesty note about the recording itself.** The five beats are one continuous
 take with no cuts, but the _pacing_ is set by the harness: holds are deliberate, and the two

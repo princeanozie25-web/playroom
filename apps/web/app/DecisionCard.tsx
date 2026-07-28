@@ -1,3 +1,5 @@
+'use client';
+
 import type { DecisionEvent } from '@playroom/shared';
 import { MemberName } from './MemberChip';
 import type { Principal, RosterMember } from './roster';
@@ -25,9 +27,12 @@ import { HOOK, pr } from './hooks';
 // never demonstrated, and the film's claims sheet had to spend a paragraph counteracting a
 // label instead. A wording change was the whole fix, and it belonged in a slice about wording.
 //
-// Approve / deny are DISABLED and labelled S2.2. They are not wired to anything and must not
-// be: acting on a decision is the co-sign flow, and pretending to sign one would be exactly
-// the fake governance this component exists to make impossible.
+// Approve / deny are LIVE now (S2.2), but only for the REQUIRED SIGNER — the human bound to the
+// decision's required principal. Everyone else sees them inert, with the signer named; an agent never
+// sees a live button. The affordance is a courtesy, not the authority: even a forged frame is refused
+// server-side (commands/signDecision.ts), so showing the button to the right person is UX, and the
+// check is elsewhere. Once answered, the card shows the OUTCOME in place of the buttons — the same
+// decision, now approved or denied, never a second card.
 
 // reason_code is DATA; these sentences are PRESENTATION.
 //
@@ -49,12 +54,24 @@ const FALLBACK_REASON = 'This was refused.';
 
 export function DecisionCard({
   event,
+  resolution,
+  signedBy,
   roster,
   principals = [],
+  viewer,
+  onSign,
 }: {
   event: DecisionEvent;
+  /** The decision's answer once a human has signed (S2.2), or null while it is still pending. */
+  resolution: 'APPROVED' | 'DENIED' | null;
+  /** The member who signed, once answered. */
+  signedBy: string | null;
   roster: RosterMember[];
   principals?: Principal[];
+  /** The member reading this page, so the card can offer the button only to the required signer. */
+  viewer: string | null;
+  /** Send the co-signature. Optional so the dev fixture (a server component) can render without one. */
+  onSign?: (decisionId: string, resolution: 'APPROVED' | 'DENIED') => void;
 }) {
   const p = event.payload;
   const subject = roster.find((m) => m.id === p.subject);
@@ -66,6 +83,16 @@ export function DecisionCard({
   // falling back to `principal:prince` — an internal identifier in front of a viewer is the
   // same category error `mandate_label` was.
   const signer = principals.find((x) => x.id === p.required_signer);
+  // Is the VIEWER the required signer — the human bound to the decision's required principal? Only
+  // then is the button live. Mirrors the server's check (commands/signDecision.ts); it is a courtesy
+  // affordance, not the authority, so a wrong guess here is refused rather than obeyed. An agent that
+  // happens to share the principal is excluded by the human-kind check, exactly as on the server.
+  const viewerMember = roster.find((m) => m.id === viewer);
+  const isSigner =
+    !!p.required_signer &&
+    viewerMember?.kind === 'human' &&
+    viewerMember.principal === p.required_signer;
+  const signedByMember = signedBy ? roster.find((m) => m.id === signedBy) : undefined;
 
   return (
     <section className="decision" aria-label="decision required" {...pr(HOOK.decision)}>
@@ -130,13 +157,38 @@ export function DecisionCard({
       </p>
 
       <div className="decision-actions" {...pr(HOOK.decisionActions)}>
-        <button type="button" disabled>
-          Approve
-        </button>
-        <button type="button" disabled>
-          Deny
-        </button>
-        <span className="decision-pending">co-signing arrives in S2.2</span>
+        {resolution ? (
+          // ANSWERED — the card shows the outcome, not the buttons. The decision is done, in place.
+          <span className="decision-resolved" data-pr-resolution={resolution}>
+            {resolution === 'APPROVED' ? 'Approved' : 'Denied'}
+            {signedByMember ? <> by {signedByMember.display_name}</> : null}
+          </span>
+        ) : isSigner ? (
+          // LIVE, and only for the required signer (S2.2). The frame carries no identity claim — who
+          // is signing is the socket's authenticated member, which the server reads for itself.
+          <>
+            <button type="button" onClick={() => onSign?.(p.decision_id, 'APPROVED')}>
+              Approve
+            </button>
+            <button type="button" onClick={() => onSign?.(p.decision_id, 'DENIED')}>
+              Deny
+            </button>
+          </>
+        ) : (
+          // INERT for everyone else, and the signer is NAMED — a claim on someone specific, so the
+          // room says who rather than dangling a button that would be refused.
+          <>
+            <button type="button" disabled>
+              Approve
+            </button>
+            <button type="button" disabled>
+              Deny
+            </button>
+            <span className="decision-pending">
+              {signer ? <>Awaiting {signer.display_name}</> : <>Awaiting the named principal</>}
+            </span>
+          </>
+        )}
       </div>
     </section>
   );

@@ -618,6 +618,7 @@ body {
   align-items: center;
   gap: var(--s-2);
 }
+/* LIVE now (S2.2) — the required signer's Approve/Deny are actionable. */
 .decision-actions button {
   font: inherit;
   font-size: var(--t-sm);
@@ -625,15 +626,19 @@ body {
   padding: var(--s-2) var(--s-4);
   border-radius: var(--radius);
   border: 1px solid var(--line);
-  background: var(--paper-2);
-  color: var(--ink-3);
-  cursor: not-allowed;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.decision-actions button:hover {
+  border-color: var(--ink-3);
 }
 /* A disabled control must LOOK disabled wherever the card is mounted. The :disabled
    qualifier is not decoration — it outranks any ambient `<container> button` rule
    (e.g. .home button on the fixture route) that would otherwise paint these as live
-   primary buttons. Approve/deny are inert until S2.2, and a button that reads as
-   actionable while doing nothing is the fake governance this surface must not ship. */
+   primary buttons. Since S2.2 the buttons are inert for everyone EXCEPT the required
+   signer, and a button that reads as actionable to someone who cannot sign is the fake
+   governance this surface must not ship — so a non-signer's buttons stay visibly dead. */
 .decision-actions button:disabled {
   background: var(--paper-2);
   color: var(--ink-3);
@@ -644,6 +649,16 @@ body {
 .decision-pending {
   font-size: var(--t-xs);
   color: var(--ink-3);
+}
+/* The OUTCOME, once answered — shown in place of the buttons. A denied decision reads a touch
+   quieter than an approved one, but both are legible without relying on colour alone (the word). */
+.decision-resolved {
+  font-size: var(--t-sm);
+  font-weight: 650;
+  color: var(--ink);
+}
+.decision-resolved[data-pr-resolution='DENIED'] {
+  color: var(--ink-2);
 }
 
 /* ── home ──────────────────────────────────────────────────────────────── */

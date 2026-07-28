@@ -899,6 +899,25 @@ there, not the evaluator.
 test of that line away from this machine. Deploy did not happen, so it was not tested there. Recorded
 as unmet rather than as satisfied by a code read.
 
+### RE-CHECKED at S2.2 — the condition survives a COMPLETABLE co-sign
+
+S2.2 made the co-signature completable: a human can now approve a paused decision, and an approval
+RELEASES the decision's action. That is exactly the kind of new "something can now happen" that
+RT-005's condition exists to be re-read against — so it was, and it holds, with the sentence widened
+by one word. The condition is now: **no ALLOW, and no APPROVAL, causes any external side effect.**
+
+- On an INTERNAL action — a protected summon — an approval fires the summon, which causes an agent
+  turn: an HTTP request to a provider and a charge. That is the same not-a-governed-action spend the
+  S-LIVE note already carved out (`agent.turn` is not governed; the ceiling is its control), not a new
+  external effect, and it is internal to Playroom either way.
+- On `pr.merge` — the action the condition is really about — an approval records the resolution and
+  executes NOTHING: there is no executor, so no branch is pushed, no PR is touched, nothing leaves the
+  system. `signDecision` routes an approved decision with no executable `pending_action` to a system
+  notice that says exactly that, and a test asserts no summon, no turn, and no "merged" wording.
+
+So completing a co-sign did not weaken the condition; it is still S2.6, the GitHub bridge, that ends
+it. Whoever builds S2.6 must find this line before they merge it.
+
 ### NOTED — S15-N2 does not exist in this ledger, so its reasoning cannot be re-read
 
 The brief asks that S15-N2's inference channel be re-read now that external callers exist. **There is

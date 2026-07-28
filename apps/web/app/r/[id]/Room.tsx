@@ -56,9 +56,16 @@ type AgentItem = {
   tokens_out?: number | null;
   cost_usd?: number | null;
 };
-// A decision item exists only because a `decision` row arrived in the log. There is
-// no constructor for one anywhere else in the room.
-type DecisionItem = { kind: 'decision'; key: string; event: DecisionEvent };
+// A decision item exists only because a `decision` row arrived in the log. There is no constructor
+// for one anywhere else in the room. Its `resolution` is mutated in place when a `decision.resolved`
+// row arrives (S2.2) — the same card, now answered, never a second one; the same discipline as an
+// interrupt lowered in place.
+type DecisionItemView = {
+  event: DecisionEvent;
+  resolution: 'APPROVED' | 'DENIED' | null;
+  signedBy: string | null;
+};
+type DecisionItem = { kind: 'decision'; key: string; view: DecisionItemView };
 // A task chip exists because `task.created` arrived. Its state is mutated in place by later
 // `task.state` and `task.handoff` events — one chip per task, where the work was asked for.
 type TaskItem = { kind: 'task'; key: string; view: TaskItemView };
@@ -102,6 +109,7 @@ function buildItems(events: ServerEvent[], agentIds: Set<string>): Item[] {
   const turns = new Map<string, AgentItem>();
   const tasks = new Map<string, TaskItemView>();
   const interrupts = new Map<string, InterruptItemView>();
+  const decisions = new Map<string, DecisionItemView>();
   const order: Item[] = [];
   for (const ev of events) {
     if (ev.event_type === 'message') {
@@ -122,7 +130,18 @@ function buildItems(events: ServerEvent[], agentIds: Set<string>): Item[] {
         });
       }
     } else if (ev.event_type === 'decision') {
-      order.push({ kind: 'decision', key: `d${ev.seq}`, event: ev });
+      const view: DecisionItemView = { event: ev, resolution: null, signedBy: null };
+      decisions.set(ev.payload.decision_id, view);
+      order.push({ kind: 'decision', key: `d${ev.seq}`, view });
+    } else if (ev.event_type === 'decision.resolved') {
+      // THE SAME CARD, ANSWERED (S2.2). A resolution is not a new row; it turns the pending card into
+      // an approved or denied one, in place. A card whose decision this room never showed produces
+      // nothing — the resolution has no card of its own.
+      const view = decisions.get(ev.payload.decision_id);
+      if (view) {
+        view.resolution = ev.payload.resolution === 'APPROVED' ? 'APPROVED' : 'DENIED';
+        view.signedBy = ev.payload.signed_by;
+      }
     } else if (ev.event_type === 'task.created') {
       const view: TaskItemView = {
         task_id: ev.payload.task_id,
@@ -429,6 +448,28 @@ export function Room({
   }, []);
 
   /**
+   * COMPLETE A CO-SIGNATURE (S2.2). The frame carries only the decision id and the answer: WHO is
+   * signing is the socket's authenticated member, which the server reads for itself and refuses if it
+   * is not the human bound to the decision's required principal. The button is offered only to that
+   * signer (see DecisionCard), but the server is the authority — the affordance is not the check.
+   */
+  const signDecision = useCallback(
+    (decisionId: string, resolution: 'APPROVED' | 'DENIED'): void => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(
+        JSON.stringify({
+          type: 'sign_decision',
+          client_msg_id: `sign-${decisionId}-${resolution}`,
+          decision_id: decisionId,
+          resolution,
+        }),
+      );
+    },
+    [],
+  );
+
+  /**
    * Load the page of history just before the oldest event held — S16b, item 10.
    *
    * WINDOWED, NOT TRUNCATED: the older messages were never lost, only not loaded, and this reaches
@@ -694,7 +735,15 @@ export function Room({
             </li>
           ) : it.kind === 'decision' ? (
             <li key={it.key}>
-              <DecisionCard event={it.event} roster={roster} principals={principals} />
+              <DecisionCard
+                event={it.view.event}
+                resolution={it.view.resolution}
+                signedBy={it.view.signedBy}
+                roster={roster}
+                principals={principals}
+                viewer={viewer}
+                onSign={signDecision}
+              />
             </li>
           ) : it.kind === 'task' ? (
             <li key={it.key}>

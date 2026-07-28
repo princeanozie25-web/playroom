@@ -218,16 +218,21 @@ The current build's limits, not a to-do list dressed as caveats. These are the s
 - **No receipts and no hash chain.** PR-11 is not built. The log is append-only Postgres with a
   monotonic sequence, which is good and is not tamper-evident. Nothing here may be called _signed_,
   _notarised_ or _provable afterwards_.
-- **The co-signature cannot be completed.** Approve and Deny are inert and labelled on screen. The
-  card shows a decision awaiting a signature that nothing can yet collect.
-- **No ALLOW causes an external side effect.** Nothing merges, deploys, posts or sends. That is why
-  several accepted findings are survivable today, and it is the one condition to re-check before it
-  changes.
+- **A merge has no executor.** A co-signature can be completed now (S2.2) — the required human signs
+  and the paused action is released — but a `pr.merge` approval executes nothing: there is no GitHub
+  bridge until S2.6, so approving one records the sign-off and performs no merge. The release is real,
+  and it is proven on an internal action (a summon that fires on approval), not on a merge.
+- **No ALLOW, and no approval, causes an external side effect.** Nothing merges, deploys, posts or
+  sends. That is why several accepted findings are survivable today, and it is the one condition to
+  re-check before it changes (RT-005, whose slice is S2.6).
 - **A room is enforced, not private.** The front door refuses non-members; with no login, the web tier
   mints a socket ticket for anyone who can reach it.
-- **Agents cannot initiate anything.** There is no tool-call channel, so an agent cannot request an
-  action, raise an interrupt or hand off work. Every governed request in the film is issued by a
-  caller on a member's behalf.
+- **An agent's initiations are bounded, never free.** Since S1.8 an agent CAN emit a structured
+  action — a summon — through the tool-call channel, but only within its mandate, depth-capped, and if
+  the action is marked protected it pauses for a human co-signature (S2.2) rather than running. An
+  agent still cannot raise an interrupt or hand off work, and it can **never** complete a co-signature.
+  The film (take 13) predates the channel, so every governed request in it is issued by a caller on a
+  member's behalf.
 
 ## Licence
 
