@@ -3,7 +3,7 @@ import { evaluate } from '@playroom/fabric';
 import { isAgentActor, SUMMON_INITIATE_ACTION } from '../agent.js';
 import { appendMessage, appendRouteSelected, appendSummon } from '../events.js';
 import { mandateFor } from '../mandates.js';
-import { listRoomMembers, resolveRoomAgent } from '../members.js';
+import { listRoomMembers, matchRoomAgent } from '../members.js';
 import { selectRoute } from '../routes.js';
 import { ensureTask, taskCreatedEvent, transitionTask } from '../tasks.js';
 import type { CommandContext, CommandDeps, SummonChain, TurnSpans } from './context.js';
@@ -48,7 +48,7 @@ const SUMMON_DEPTH_CAP = 1;
 
 export interface SummonInput {
   roomId: string;
-  /** The member `summonRuling` (human path) or `resolveRoomAgent` (agent path) resolved. Never a raw token. */
+  /** The member `summonRuling` (human path) or `matchRoomAgent` (agent path) resolved. Never a raw token. */
   member: string;
   /** The event that asked. Half the natural key migration 005 makes unique. */
   causeSeq: number;
@@ -95,13 +95,16 @@ export async function summonCommand(
     //
     // Standing before request (RA-007): the mandate — may this agent summon AT ALL — is checked
     // before the depth, which is a property of this particular summon.
-    const roster = (await listRoomMembers(deps.pool, input.roomId)).map((m) => m.id);
+    // ONE read of the room's members, used for BOTH the evaluator's roster AND target resolution
+    // below — reading it twice cost a redundant DB round-trip before B's turn, enough to push the
+    // summon-path first token over §11's P95 on the tightest member (docs/demo/s18-*).
+    const roomMembers = await listRoomMembers(deps.pool, input.roomId);
     const verdict = evaluate(
       { type: SUMMON_INITIATE_ACTION, resource: `member:${input.member}` },
       ctx.actorId,
       mandateFor(ctx.actorId),
       undefined,
-      roster,
+      roomMembers.map((m) => m.id),
     );
     if (verdict.decision !== 'ALLOW') {
       deps.log.warn(
@@ -146,11 +149,11 @@ export async function summonCommand(
       return;
     }
     // 3. TARGET IN ROOM (control a). `input.member` is a RAW string the model emitted; resolve it
-    // against the room's AGENT members. A target that is not an agent in this room is refused — the
-    // structured path's "cannot summon a member outside the room", enforced at the choke point rather
-    // than trusted to the caller. Resolved AFTER the mandate check so an unauthorised agent learns
-    // nothing about the room's membership from a resolution result.
-    const resolved = await resolveRoomAgent(deps.pool, input.roomId, input.member);
+    // against the room's AGENT members — the SAME list read above, not a second query. A target that
+    // is not an agent in this room is refused — the structured path's "cannot summon a member outside
+    // the room", enforced at the choke point rather than trusted to the caller. Resolved AFTER the
+    // mandate check so an unauthorised agent learns nothing about the room's membership from a result.
+    const resolved = matchRoomAgent(roomMembers, input.member);
     if (!resolved) {
       deps.log.warn(
         { room_id: input.roomId, requested_by: ctx.actorId, target: input.member },

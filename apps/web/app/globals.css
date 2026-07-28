@@ -748,8 +748,11 @@ body {
 }
 
 /* A handoff is an act, so it reads slightly stronger than a state chip — a top rule to separate
-   it from the turn above, and nothing else. Still quieter than a message. */
-.handoff-row {
+   it from the turn above, and nothing else. Still quieter than a message. A summon (S1.8) is the
+   same class of thing — one member acting upon another — so it shares the rule verbatim rather than
+   inventing a second look: the "existing member colour and shape system", unchanged. */
+.handoff-row,
+.summon-row {
   border-top: 1px solid var(--line);
   padding-top: var(--s-2);
   margin-top: var(--s-1);

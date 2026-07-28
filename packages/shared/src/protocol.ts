@@ -232,8 +232,9 @@ export const DecisionEvent = z.object({
 // resolved later, because members are not in the database until S1.1 and so there is
 // nothing for SQL to look them up in.
 //
-// `depth` is CARRIED here and enforced in S0.5b. It is always 0 today: only
-// human-rooted summons exist, and an agent cannot yet raise one.
+// `depth` is CARRIED here and enforced in S0.5b. It is 0 for a human-rooted summon; since
+// S1.8 an agent can raise one through the tool-call channel, which sits at depth 1 and is
+// capped there — `root_actor` / `root_is_human` still name the HUMAN at the head of the chain.
 export const SummonEvent = z.object({
   ...eventBase,
   event_type: z.literal('summon'),

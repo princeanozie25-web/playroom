@@ -135,3 +135,40 @@ export function HandoffRow({
     </div>
   );
 }
+
+/**
+ * THE SUMMON ROW — one agent brought another into its turn (S1.8, the tool-call channel).
+ *
+ * This renders ONLY an agent-initiated summon, and it is the same shape as the handoff row above
+ * on purpose: both are ACTS BY A MEMBER upon another member, and the room already reads that shape.
+ * A human summon is NOT rendered — it is already visible as the @-mention in the human's own
+ * message, and a second row for it would be the "two representations of one visible fact" mistake
+ * the transcript is built to avoid (see buildItems' allowlist in Room.tsx).
+ *
+ * It carries no mandate hash and no action code: a summon is not a task handoff and confers no
+ * authority — the summoned agent acts under its OWN mandate, which its turn already shows. The row
+ * is labelling and nothing more, using the existing member colour and marker system unchanged.
+ */
+export interface SummonItemView {
+  by: string;
+  member: string;
+}
+
+export function SummonRow({
+  summon,
+  roster,
+}: {
+  summon: SummonItemView;
+  roster: Map<string, RosterMember>;
+}) {
+  return (
+    <div className="task-chip summon-row" {...pr(HOOK.summon)} data-pr-to={summon.member}>
+      <span className="task-kicker">summon</span>
+      <MemberName member={roster.get(summon.by)} name={summon.by} />
+      <span className="handoff-arrow" aria-label="summons">
+        →
+      </span>
+      <MemberName member={roster.get(summon.member)} name={summon.member} />
+    </div>
+  );
+}

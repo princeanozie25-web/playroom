@@ -19,7 +19,14 @@ import {
 } from '@playroom/shared';
 import { MemberChip, MemberName } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
-import { HandoffRow, TaskChip, type HandoffItemView, type TaskItemView } from '../../TaskChip';
+import {
+  HandoffRow,
+  SummonRow,
+  TaskChip,
+  type HandoffItemView,
+  type SummonItemView,
+  type TaskItemView,
+} from '../../TaskChip';
 import { InterruptChip, type InterruptItemView } from '../../InterruptChip';
 import { PromotionRow, type PromotionItemView } from '../../PromotionRow';
 import { Welcome } from '../../Welcome';
@@ -65,18 +72,33 @@ type InterruptItem = { kind: 'interrupt'; key: string; view: InterruptItemView }
 // unlike a task or an interrupt there is no later event that changes it, because a disclosure has
 // no second state — it cannot be lowered, moved or undone.
 type PromotionItem = { kind: 'promotion'; key: string; view: PromotionItemView };
+// An AGENT-INITIATED summon (S1.8): agent A summoned agent B through the tool-call channel. That is a
+// visible ACT, unlike a human tag — which is already visible as the @-mention in the human's message.
+// So ONLY agent-rooted summons render here; a human summon (requested_by is a human) does not.
+type SummonItem = { kind: 'summon'; key: string; view: SummonItemView };
 type Item =
-  MessageItem | AgentItem | DecisionItem | TaskItem | HandoffItem | InterruptItem | PromotionItem;
+  | MessageItem
+  | AgentItem
+  | DecisionItem
+  | TaskItem
+  | HandoffItem
+  | InterruptItem
+  | PromotionItem
+  | SummonItem;
 
 /**
  * Group the event log into renderable items.
  *
  * AN ALLOWLIST, with no fallthrough: an event type this chain does not name produces no item.
- * That is deliberate and it is what keeps the transcript honest as the log grows — `summon`
- * and `route.selected` are records of how a turn came to happen, not things a member said, and
- * an `else` branch would have rendered them as agent bubbles the moment they were added.
+ * That is deliberate and it is what keeps the transcript honest as the log grows — `route.selected`
+ * is a record of how a turn came to happen, not a thing a member said, and an `else` branch would
+ * have rendered it as an agent bubble the moment it was added.
+ *
+ * `summon` is the one that renders CONDITIONALLY: an agent-initiated summon (requested_by is an
+ * agent, per `agentIds`) is a visible act and gets a row; a human summon is already visible as the
+ * @-mention it was, so it is skipped — the same "not a second representation of a visible fact" rule.
  */
-function buildItems(events: ServerEvent[]): Item[] {
+function buildItems(events: ServerEvent[], agentIds: Set<string>): Item[] {
   const turns = new Map<string, AgentItem>();
   const tasks = new Map<string, TaskItemView>();
   const interrupts = new Map<string, InterruptItemView>();
@@ -89,6 +111,16 @@ function buildItems(events: ServerEvent[]): Item[] {
         author: ev.actor_id,
         body: ev.payload.body,
       });
+    } else if (ev.event_type === 'summon') {
+      // ONLY agent-initiated summons: a human tag is already the visible @-mention. `depth` and
+      // `root_actor` are provenance the log keeps; the row shows the ACT — this agent summoned that one.
+      if (agentIds.has(ev.payload.requested_by)) {
+        order.push({
+          kind: 'summon',
+          key: `s${ev.seq}`,
+          view: { by: ev.payload.requested_by, member: ev.payload.member },
+        });
+      }
     } else if (ev.event_type === 'decision') {
       order.push({ kind: 'decision', key: `d${ev.seq}`, event: ev });
     } else if (ev.event_type === 'task.created') {
@@ -313,7 +345,13 @@ export function Room({
       typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('welcome'),
   );
 
-  const items = useMemo<Item[]>(() => buildItems(events), [events]);
+  // Agent ids, for deciding which summons render — only agent-initiated ones (S1.8). From the roster
+  // prop, so it is available before `items` is built.
+  const agentIdSet = useMemo(
+    () => new Set(roster.filter((m) => m.kind === 'agent').map((m) => m.id)),
+    [roster],
+  );
+  const items = useMemo<Item[]>(() => buildItems(events, agentIdSet), [events, agentIdSet]);
   const conn: Conn = refusal ? 'refused' : status === 'open' ? 'connected' : 'reconnecting';
 
   // WHAT THIS ROOM HAS SPENT: the authoritative baseline plus every completed turn and summary the
@@ -674,6 +712,10 @@ export function Room({
           ) : it.kind === 'handoff' ? (
             <li key={it.key}>
               <HandoffRow handoff={it.view} roster={byId} />
+            </li>
+          ) : it.kind === 'summon' ? (
+            <li key={it.key}>
+              <SummonRow summon={it.view} roster={byId} />
             </li>
           ) : it.kind === 'promotion' ? (
             <li key={it.key}>

@@ -76,6 +76,8 @@ export const HOOK = {
   taskMandate: 'task-mandate',
   /** A handoff row — the act of moving a task. Carries `data-pr-to`. */
   handoff: 'handoff',
+  /** A summon row — one agent summoned another through the channel (S1.8). Carries `data-pr-to`. */
+  summon: 'summon',
   /** An interrupt chip. Carries `data-pr-urgency` — BLOCKER | DECISION | FYI. */
   interrupt: 'interrupt',
   /** The urgency, in words. */
