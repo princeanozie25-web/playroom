@@ -7,6 +7,7 @@ import {
   MandatePrincipalMismatchError,
   UnknownMandateMemberError,
 } from '../src/members.js';
+import { resetMandateCache } from '../src/mandates.js';
 import { testPool } from './support.js';
 
 // MANDATES POINT AT RECORDS, AND SAY SO WHEN THEY DO NOT.
@@ -44,9 +45,14 @@ function withExtraMandate<T>(name: string, body: unknown, fn: () => Promise<T>):
   writeFileSync(join(dir, name), JSON.stringify(body));
   const previous = process.env.PLAYROOM_MANDATES_DIR;
   process.env.PLAYROOM_MANDATES_DIR = dir;
+  // S2.2: mandates are cached at boot, so pointing at a new directory is a "config changed" event —
+  // which in production is a restart. Reset the cache to model that restart; without it the cached
+  // default-dir map would be returned and the injected orphan/mismatch would never be seen.
+  resetMandateCache();
   return fn().finally(() => {
     if (previous === undefined) delete process.env.PLAYROOM_MANDATES_DIR;
     else process.env.PLAYROOM_MANDATES_DIR = previous;
+    resetMandateCache(); // back to the real directory for the next test — another modelled restart.
     rmSync(dir, { recursive: true, force: true });
   });
 }
@@ -66,6 +72,7 @@ const validMandate = (member: string, principal: string) => ({
 
 afterEach(() => {
   delete process.env.PLAYROOM_MANDATES_DIR;
+  resetMandateCache(); // belt-and-braces: no cached temp-dir map survives into the next test.
 });
 
 describe('a mandate naming a member that does not exist', () => {

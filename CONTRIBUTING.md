@@ -64,6 +64,11 @@ in [ADR-006](docs/decisions/ADR-006-terminology-and-document-precedence.md).
 `mandates/`, field `effective_mandate_hash`. The superseded term survives only inside
 historical documents, which are not edited.
 
+**Mandates load once, at boot, and are cached.** Editing a `mandates/*.json` file takes
+effect on the next server start — there is no file-watcher and no hot-reload, by design.
+Making a live authority change a governed act (rather than a side effect of saving a file)
+is S2.1's work; until then, a mandate change requires a restart.
+
 ## Closed unions vs. open strings
 
 Both are house style; which one is correct depends on who controls the values.

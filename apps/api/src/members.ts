@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { getAdapterConfig } from '@playroom/adapters';
-import { loadMandates } from '@playroom/fabric';
+import { allMandates } from './mandates.js';
 import { setRoomTokens } from './agent.js';
 
 /**
@@ -92,7 +92,10 @@ export async function listMembers(pool: Pool): Promise<MemberRecord[]> {
       ORDER BY p.ordinal, m.id`,
   );
 
-  const mandates = loadMandates();
+  // The cached mandate map (S2.2) — read from disk once at boot, not on every roster read. This was
+  // the last per-call `loadMandates()` in apps/api (the S18 finding); every `listMembers`/
+  // `listRoomMembers` caller now shares one load. A mandate change requires a restart — see mandates.ts.
+  const mandates = allMandates();
   const known = rows.map((r) => r.id);
 
   // VALIDATED HERE because this is the first moment both halves are in one place. A mandate
