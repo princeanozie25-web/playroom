@@ -396,6 +396,20 @@ export async function appendMessage(
   return rowToServerEvent(existing.rows[0]);
 }
 
+/**
+ * The executable action a PENDING (CO_SIGN) decision holds, so an approval can fire it (S2.2). Present
+ * only for an action with an internal executor — a summon (S1.8). See DecisionEvent.pending_action.
+ */
+export interface PendingSummonAction {
+  kind: 'summon.initiate';
+  member: string;
+  cause_seq: number;
+  intent: string;
+  root_actor: string;
+  root_is_human: boolean;
+  depth: number;
+}
+
 // The decision payload, as the fabric produced it. Structurally this can only be
 // built from a Verdict (see commands/requestAction.ts) — there is no other constructor
 // and no default, so a decision row cannot exist without an evaluation behind it.
@@ -413,6 +427,8 @@ export interface DecisionPayload {
   required_signer: string | null;
   effective_mandate_hash: string | null;
   policy_version: string | null;
+  /** S2.2: the executable action a CO_SIGN holds. Absent for a ruling with no executor (pr.merge). */
+  pending_action?: PendingSummonAction;
 }
 
 // Append a decision event. No migration was needed: `payload` is JSONB and
@@ -433,6 +449,64 @@ export async function appendDecision(
     [roomId, actorId, JSON.stringify(payload)],
   );
   return rowToServerEvent(rows[0]);
+}
+
+// ── THE CO-SIGNATURE, COMPLETED (S2.2) ─────────────────────────────────────────────────
+//
+// A `decision.resolved` event answers a CO_SIGN decision: a human APPROVED or DENIED it. Single-use is
+// the database's job, not this function's — migration 020's partial unique index refuses a second
+// resolution for one decision_id, so a racing double-approve makes the loser's INSERT throw here
+// rather than firing an approved action twice. The signing command catches that as "already resolved".
+export interface DecisionResolvedPayload {
+  decision_id: string;
+  resolution: 'APPROVED' | 'DENIED';
+  signed_by: string; // the human member who signed
+  signer_principal: string; // the required_signer principal they signed as
+}
+
+export async function appendDecisionResolved(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: DecisionResolvedPayload,
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'decision.resolved', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+/** The CO_SIGN decision event with this id, or null. Its payload carries the pending action to fire. */
+export async function decisionEventById(
+  pool: Pool,
+  roomId: string,
+  decisionId: string,
+): Promise<ServerEvent | null> {
+  const { rows } = await pool.query<EventRow>(
+    `SELECT ${EVENT_COLS} FROM events
+      WHERE room_id = $1 AND event_type = 'decision' AND payload ->> 'decision_id' = $2
+      LIMIT 1`,
+    [roomId, decisionId],
+  );
+  return rows[0] ? rowToServerEvent(rows[0]) : null;
+}
+
+/** The resolution of this decision, or null if it is still unresolved (PENDING or EXPIRED). */
+export async function decisionResolutionEvent(
+  pool: Pool,
+  roomId: string,
+  decisionId: string,
+): Promise<ServerEvent | null> {
+  const { rows } = await pool.query<EventRow>(
+    `SELECT ${EVENT_COLS} FROM events
+      WHERE room_id = $1 AND event_type = 'decision.resolved' AND payload ->> 'decision_id' = $2
+      LIMIT 1`,
+    [roomId, decisionId],
+  );
+  return rows[0] ? rowToServerEvent(rows[0]) : null;
 }
 
 /**

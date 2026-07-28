@@ -221,6 +221,29 @@ export const DecisionEvent = z.object({
     required_signer: z.string().nullable(), // null unless a human must sign
     effective_mandate_hash: z.string().nullable(),
     policy_version: z.string().nullable(),
+    /**
+     * THE EXECUTABLE ACTION A PENDING CO-SIGN HOLDS (S2.2).
+     *
+     * A CO_SIGN decision used to end at a ruling: `action` and `resource` are two opaque strings and
+     * `arguments_hash` is a hash — none executable. So an approval had nothing to fire. This carries
+     * what an approval needs to actually run the action, and it is present ONLY when the action has an
+     * internal executor: a summon (S1.8). A `pr.merge` decision OMITS it — there is no executor until
+     * S2.6, and approving one records the sign-off and runs nothing (RT-005 holds: no external effect).
+     *
+     * Optional, so every decision written before S2.2 — and every `pr.merge` since — parses unchanged.
+     * The one `kind` is `summon.initiate`; a discriminated union is how a second executable kind lands.
+     */
+    pending_action: z
+      .object({
+        kind: z.literal('summon.initiate'),
+        member: z.string(), // the RESOLVED target — a room agent id, not a raw token
+        cause_seq: z.number(), // the emitting turn's event, so the fired summon answers what asked
+        intent: z.string(), // the sentence the summon's task records (tasks.intent is NOT NULL)
+        root_actor: z.string(), // the human at the head of the chain, preserved across the pause
+        root_is_human: z.boolean(),
+        depth: z.number(), // the summon's own depth, already incremented and cap-checked
+      })
+      .optional(),
   }),
 });
 
@@ -503,6 +526,33 @@ export const RoomSummaryEvent = z.object({
 });
 export type RoomSummaryEvent = z.infer<typeof RoomSummaryEvent>;
 
+/**
+ * A CO-SIGNATURE COMPLETED (S2.2) — the transition a decision was missing.
+ *
+ * A CO_SIGN decision event is a PENDING decision; this is a person ANSWERING it: APPROVE or DENY,
+ * signed by a human member acting as the required principal. There is no status column that mutates —
+ * a decision's status is DERIVED from whether this event exists (see decisions.ts): PENDING when it
+ * does not, APPROVED/DENIED when it does, EXPIRED only when the window passed with none. So nothing
+ * times out INTO a resolution (§15.3) — a resolution is only ever an event a human wrote.
+ *
+ * Single-use is a DATABASE fact (migration 020): at most one `decision.resolved` per decision_id per
+ * room. An approved action therefore fires at most once. In the union for the same reason the summary
+ * is: `rowToServerEvent` parses every replayed row through the strict union, so a room holding one
+ * would not open at all if the type were unknown here. The client renders it in S2.2's final commit;
+ * until then `buildItems`' allowlist ignores it, which is degradation-free.
+ */
+export const DecisionResolvedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('decision.resolved'),
+  payload: z.object({
+    decision_id: z.string(), // the CO_SIGN decision this answers
+    resolution: z.string(), // APPROVED | DENIED — open string on the wire, dispatched-on in the engine
+    signed_by: z.string(), // the HUMAN member who signed; an agent can never appear here (S2.2)
+    signer_principal: z.string(), // the required_signer principal they signed as
+  }),
+});
+export type DecisionResolvedEvent = z.infer<typeof DecisionResolvedEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -511,6 +561,7 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   AgentTurnDelta,
   AgentTurnCompleted,
   DecisionEvent,
+  DecisionResolvedEvent,
   TaskCreatedEvent,
   TaskStateEvent,
   TaskHandoffEvent,
