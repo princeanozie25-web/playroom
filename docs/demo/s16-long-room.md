@@ -41,6 +41,8 @@ here rather than in the red-team log (whose rule is a violated principle).
   S1.6's whole reason to exist — long rooms — is what makes it the first thing a member notices.
   **Trigger:** the first member who reloads a long room, or the first pilot. **Fix:** re-fetch from 0 on
   a fresh mount (or paginate), keeping the cursor only for in-session reconnects.
+  **RESOLVED in S1.6b** — the client windows on open and the cursor is in-memory only; see
+  `s16b-windowed-load.md`.
 
 - **S16-N2 — replay is O(room lifetime); the summary bounds the agent's context, not the client's load.**
   A fresh connect replays EVERY event (`eventsAfter(roomId, 0)`). The rolling summary bounds what a turn
@@ -50,6 +52,8 @@ here rather than in the red-team log (whose rule is a violated principle).
   solved one layer over. **Trigger:** the first genuinely long room, or a pilot. **Fix:** windowed
   replay — the recent window plus the summary first, older on scroll — the client mirror of what the
   server does for the agent.
+  **RESOLVED in S1.6b** — measured 40x fewer events to open a 1000-message room; see
+  `s16b-windowed-load.md`.
 
 - **S16-N3 — the summary is lossy, and it compounds.** Each fold re-summarises (previous summary + new
   batch) under a fixed output cap, dropping the least important older detail. Over a week — dozens of
