@@ -186,12 +186,18 @@ describe('claims a closeout asserted by grep', () => {
     // `appendDecision` takes a Verdict, so a decision cannot be invented without an evaluation.
     // That is a property of the signature; this is the property of the LAYOUT — one caller, so the
     // audit line, the reason code and the mandate hash are written in one readable place.
+    //
+    // S2.2 MOVED that one place. There are now TWO things that pause for a co-signature — a pr.merge
+    // request and a protected summon (commands/summon.ts) — and rather than let each build a decision,
+    // both hand their payload to `writeCoSignDecision` in commands/coSign.ts, which is the sole caller
+    // of `appendDecision`. So the invariant holds unchanged; the single site simply moved to the
+    // shared constructor the moment a second caller would otherwise have existed.
     const callers = source
       .filter(
         (f) => /^(apps|packages)\//.test(f) && !f.includes('.test.') && !f.endsWith('events.ts'),
       )
       .filter((f) => /\bappendDecision\s*\(/.test(code(f)));
-    expect(callers).toEqual(['apps/api/src/commands/requestAction.ts']);
+    expect(callers).toEqual(['apps/api/src/commands/coSign.ts']);
   });
 
   it('S0.5a — EXACTLY ONE writer of agent turn events', () => {

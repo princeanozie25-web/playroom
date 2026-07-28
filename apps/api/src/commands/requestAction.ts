@@ -1,14 +1,14 @@
-import { randomUUID, createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { evaluate } from '@playroom/fabric';
-import { ERROR_INTERRUPT_BUDGET, ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
+import { ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
 // The process-wide mandate cache, shared with the handoff and the turn stamp (S1.3). It used to
 // live here as a module-local `let`, which meant every new reader grew its own.
 import { mandateFor } from '../mandates.js';
-import { appendDecision } from '../events.js';
-import { humanMembersOfPrincipal, listRoomMembers } from '../members.js';
-import { raiseInterrupt } from '../interrupts.js';
+import { listRoomMembers } from '../members.js';
 import { subjectBasis } from '../tasks.js';
+// The shared co-sign machinery (S2.2): the one decision constructor and the DECISION interrupt, so a
+// pr.merge co-sign here and a protected-summon co-sign in commands/summon.ts are written one way.
+import { raiseDecisionInterrupts, writeCoSignDecision } from './coSign.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // ============================================================================
@@ -23,11 +23,6 @@ import type { CommandContext, CommandDeps } from './context.js';
 // Bible §8: no commitment-bearing action reaches an external system without traversing
 // the fabric. Bible §9.2: every outcome is audited with the mandate hash.
 // ============================================================================
-
-function argumentsHash(args: Record<string, unknown>): string {
-  const canonical = JSON.stringify(args, Object.keys(args).sort());
-  return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
-}
 
 /**
  * Evaluate a requested action and record the decision.
@@ -131,34 +126,19 @@ export async function requestActionCommand(
   // approvals for actions that never ran, which reads as work having happened.
   if (verdict.decision === 'ALLOW') return { ok: true };
 
-  // THE EVENT'S ACTOR IS THE REQUESTER, NOT THE SUBJECT.
-  //
-  // It was the subject until S1.2, which was wrong in two ways. The actor of an event is who
-  // CAUSED it, and a decision is caused by whoever asked — the subject is the member whose
-  // mandate was evaluated, which is what the payload already records. And because `subject` is
-  // still a claim from the frame, using it as the actor meant a caller could write an event
-  // attributed to a name that is not a member at all: migration 010's constraint — every event
-  // names a member or is the room speaking — could not hold while that was true.
-  const event = await appendDecision(deps.pool, input.roomId, ctx.actorId, {
-    decision_id: `dec_${randomUUID().replace(/-/g, '').slice(0, 16)}`,
+  // THE EVENT'S ACTOR IS THE REQUESTER, NOT THE SUBJECT (the requester CAUSED it; the subject is
+  // whose mandate was evaluated, recorded in the payload). Built through the shared constructor
+  // (commands/coSign.ts) so a decision here and a protected-summon decision are written one way, in
+  // one place — `writeCoSignDecision` takes the Verdict, so nothing can invent a decision (M-3).
+  const event = await writeCoSignDecision(deps, {
+    roomId: input.roomId,
     subject: input.subject,
-    // BOTH HALVES, in the payload rather than only in the envelope: whose mandate was evaluated,
-    // and who asked. The card can now say a true sentence instead of an ambiguous one.
-    requested_by: ctx.actorId,
-    subject_basis: basis,
-    principal: mandate?.mandate.principal ?? 'unknown',
+    requestedBy: ctx.actorId,
+    subjectBasis: basis,
     action: input.action,
     resource: input.resource,
-    arguments_hash: argumentsHash({ action: input.action, resource: input.resource }),
-    decision: verdict.decision,
-    reason_code: verdict.reason_code,
-    required_signer: verdict.required_signer,
-    effective_mandate_hash: verdict.effective_mandate_hash,
-    policy_version: verdict.policy_version,
+    verdict,
   });
-
-  // §12 ordering law: persisted before it fans out.
-  deps.bus.publish(input.roomId, event);
 
   // ── A CO_SIGN IS AN INTERRUPT (Bible §12.1) ─────────────────────────────────────────
   //
@@ -180,37 +160,13 @@ export async function requestActionCommand(
   // for the next raise. Rolling the decision back because a notification was too expensive would
   // be the tail wagging the dog.
   if (verdict.decision === 'CO_SIGN' && verdict.required_signer) {
-    for (const human of await humanMembersOfPrincipal(
-      deps.pool,
-      input.roomId,
-      verdict.required_signer,
-    )) {
-      const raised = await raiseInterrupt(deps.pool, {
-        roomId: input.roomId,
-        urgency: 'DECISION',
-        raisedBy: input.subject,
-        addressedTo: human,
-        aboutKind: 'decision',
-        aboutId: event.event_type === 'decision' ? event.payload.decision_id : input.clientMsgId,
-        summary: `${input.action} needs a signature`,
-      });
-      if (!raised.ok) {
-        deps.log.warn(
-          {
-            room_id: input.roomId,
-            raised_by: input.subject,
-            addressed_to: human,
-            spent: raised.budget.spent,
-            limit: raised.budget.limit,
-            code: ERROR_INTERRUPT_BUDGET,
-          },
-          'interrupt refused: no budget left today',
-        );
-        continue;
-      }
-      if (raised.event) deps.bus.publish(input.roomId, raised.event);
-      if (raised.halt) deps.bus.publish(input.roomId, raised.halt);
-    }
+    await raiseDecisionInterrupts(deps, {
+      roomId: input.roomId,
+      subject: input.subject,
+      requiredSigner: verdict.required_signer,
+      decisionId: event.event_type === 'decision' ? event.payload.decision_id : input.clientMsgId,
+      action: input.action,
+    });
   }
 
   return { ok: true };

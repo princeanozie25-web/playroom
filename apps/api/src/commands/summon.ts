@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { evaluate } from '@playroom/fabric';
+import { evaluate, type Verdict } from '@playroom/fabric';
 import { isAgentActor, SUMMON_INITIATE_ACTION } from '../agent.js';
-import { appendMessage, appendRouteSelected, appendSummon } from '../events.js';
+import {
+  appendMessage,
+  appendRouteSelected,
+  appendSummon,
+  type PendingSummonAction,
+} from '../events.js';
 import { mandateFor } from '../mandates.js';
 import { listRoomMembers, matchRoomAgent } from '../members.js';
 import { selectRoute } from '../routes.js';
 import { ensureTask, taskCreatedEvent, transitionTask } from '../tasks.js';
+import { raiseDecisionInterrupts, writeCoSignDecision } from './coSign.js';
 import type { CommandContext, CommandDeps, SummonChain, TurnSpans } from './context.js';
 
 /**
@@ -106,7 +112,11 @@ export async function summonCommand(
       undefined,
       roomMembers.map((m) => m.id),
     );
-    if (verdict.decision !== 'ALLOW') {
+    // BLOCK is the injection defense: an agent whose mandate does not grant summon.initiate at all is
+    // refused here, whatever its context said. ALLOW and CO_SIGN both proceed — CO_SIGN is an agent
+    // that MAY summon but whose summons are PROTECTED (S2.2), and it pauses for a human below rather
+    // than being refused. The validity checks (depth, target) run for both before that split.
+    if (verdict.decision === 'BLOCK') {
       deps.log.warn(
         {
           room_id: input.roomId,
@@ -172,6 +182,25 @@ export async function summonCommand(
     member = resolved;
     rootActor = input.chain.rootActor;
     rootIsHuman = input.chain.rootIsHuman;
+
+    // CO_SIGN → PAUSE (S2.2). An agent that MAY summon but whose summons are PROTECTED does not fire
+    // one; it writes a decision and waits for a human signature. The held summon rides on the
+    // decision's pending_action so an approval fires exactly this summon later — WITHOUT re-evaluating,
+    // which would return CO_SIGN again and never complete. BLOCK was refused above; ALLOW falls through
+    // to fire immediately. This is the whole of the routine/pivotal split at the summon channel.
+    if (verdict.decision === 'CO_SIGN') {
+      await pauseSummonForCoSign(deps, ctx, {
+        roomId: input.roomId,
+        member,
+        verdict,
+        causeSeq: input.causeSeq,
+        intent: input.intent,
+        rootActor,
+        rootIsHuman,
+        depth,
+      });
+      return;
+    }
   } else {
     // HUMAN-ROOTED. Barrier 2, unchanged: only a human may root a summon. `ctx.actorId` is the root
     // being recorded, so a non-human here would mean writing root_is_human: true about an agent.
@@ -188,6 +217,45 @@ export async function summonCommand(
     depth = HUMAN_ROOT_DEPTH;
   }
 
+  // Authority is decided; fire the summon. The two entrances to fireSummon — this immediate
+  // ALLOW/human path and an APPROVED co-sign (signDecision) — are the only two, and both arrive here
+  // already authorised, which is why fireSummon does not re-evaluate.
+  await fireSummon(deps, {
+    roomId: input.roomId,
+    member,
+    requestedBy: ctx.actorId,
+    rootActor,
+    rootIsHuman,
+    depth,
+    causeSeq: input.causeSeq,
+    intent: input.intent,
+    spans: input.spans,
+  });
+}
+
+/** A summon whose authority is already decided — the input `fireSummon` needs. */
+export interface FireSummonInput {
+  roomId: string;
+  member: string; // the resolved target
+  requestedBy: string; // who asked — a human, or the emitting agent (S1.8)
+  rootActor: string;
+  rootIsHuman: boolean;
+  depth: number;
+  causeSeq: number;
+  intent: string;
+  spans?: TurnSpans;
+}
+
+/**
+ * FIRE A SUMMON — reachability, the task, the summon event, the route, and the turn trigger.
+ *
+ * Extracted from summonCommand's tail (S2.2) so it has EXACTLY TWO callers, and both reach it only
+ * AFTER the summon was authorised: an immediate ALLOW/human summon, and an APPROVED co-sign releasing
+ * its held summon (commands/signDecision.ts). It therefore does NOT re-evaluate — re-checking a
+ * co-signed summon would return CO_SIGN again and it would never fire. THE ONLY PLACE A SUMMON IS
+ * BUILT stays true: the authority decision happens before these two entrances, never inside this one.
+ */
+export async function fireSummon(deps: CommandDeps, input: FireSummonInput): Promise<void> {
   // ── IS THIS MEMBER REACHABLE? ─────────────────────────────────────────────────────────
   //
   // A member record says they EXIST; a route says they are REACHABLE. Checked HERE rather than
@@ -205,32 +273,33 @@ export async function summonCommand(
   // be in that state — the failure path would have returned already, and `input-required` would
   // stay what it has been since S1.1c, a state the Bible names and the code cannot reach.
   //
-  // So the work becomes a record as soon as a human asks for it, and route selection decides
-  // which state it starts in. NOT created as `working` and corrected: that writes a state the
-  // task was never in, and this log is read as a history.
+  // So the work becomes a record as soon as it is asked for, and route selection decides which
+  // state it starts in. NOT created as `working` and corrected: that writes a state the task was
+  // never in, and this log is read as a history.
   //
   // `action` is null. Answering in a room is not a governed action and no mandate scope covers
   // it; a placeholder like 'chat.reply' would invent a scope nobody grants. A handoff is what
   // sets it, because a handoff has to say what work is being handed over.
-  const selection = await selectRoute(deps.pool, member);
+  const selection = await selectRoute(deps.pool, input.member);
   const { task, created } = await ensureTask(deps.pool, {
     roomId: input.roomId,
-    assignee: member,
+    assignee: input.member,
     state: selection.route ? 'working' : 'input-required',
     action: null,
     intent: input.intent,
-    createdBy: ctx.actorId,
+    createdBy: input.requestedBy,
     causeSeq: input.causeSeq,
   });
   // Only when the row was actually inserted. A replayed frame resolves to the task that
   // already exists, and a second `task.created` for it would put one task in the log twice.
-  if (created) deps.bus.publish(input.roomId, await taskCreatedEvent(deps.pool, task, ctx.actorId));
+  if (created)
+    deps.bus.publish(input.roomId, await taskCreatedEvent(deps.pool, task, input.requestedBy));
 
   if (!selection.route) {
     deps.log.warn(
       {
         room_id: input.roomId,
-        member,
+        member: input.member,
         reason: selection.reason,
         failed_constraint: selection.failed_constraint,
       },
@@ -255,8 +324,8 @@ export async function summonCommand(
       deps.pool,
       input.roomId,
       'system',
-      `sys-noroute-${input.causeSeq}-${member}`,
-      `${member} cannot be reached: ${selection.failed_constraint}.`,
+      `sys-noroute-${input.causeSeq}-${input.member}`,
+      `${input.member} cannot be reached: ${selection.failed_constraint}.`,
     );
     deps.bus.publish(input.roomId, notice);
     return;
@@ -269,14 +338,15 @@ export async function summonCommand(
     { task_id: task.id },
     {
       summon_id: summonId,
-      member,
-      // WHO ASKED is the actor — the human on the human path, the emitting agent on the structured
+      member: input.member,
+      // WHO ASKED is the requester — the human on the human path, the emitting agent on the structured
       // path (S1.8). WHO IS AT THE HEAD of the chain is `root_actor`, and it is a human on both paths:
-      // an agent-emitted summon inherits the human root of the turn that emitted it.
-      requested_by: ctx.actorId,
-      root_actor: rootActor,
-      root_is_human: rootIsHuman,
-      depth,
+      // an agent-emitted summon inherits the human root of the turn that emitted it. On an approved
+      // co-sign the requester is still the emitting agent — the human APPROVED it, they did not ask.
+      requested_by: input.requestedBy,
+      root_actor: input.rootActor,
+      root_is_human: input.rootIsHuman,
+      depth: input.depth,
       cause_seq: input.causeSeq,
     },
   );
@@ -287,7 +357,7 @@ export async function summonCommand(
   // agent turns from one human ask. One call site, one branch, no convention to forget.
   if (!summon) {
     deps.log.info(
-      { room_id: input.roomId, member, cause_seq: input.causeSeq },
+      { room_id: input.roomId, member: input.member, cause_seq: input.causeSeq },
       'summon already exists for this cause',
     );
     return;
@@ -304,7 +374,7 @@ export async function summonCommand(
       { task_id: task.id },
       {
         summon_id: summonId,
-        member,
+        member: input.member,
         route_id: selection.route.id,
         route_type: selection.route.type,
         reason: selection.reason,
@@ -314,11 +384,11 @@ export async function summonCommand(
 
   void deps
     .execute(
-      { actorId: member, mode: 'hosted' },
+      { actorId: input.member, mode: 'hosted' },
       {
         kind: 'triggerAgentTurn',
         roomId: input.roomId,
-        adapterId: member,
+        adapterId: input.member,
         summonId,
         taskId: task.id,
         spans: input.spans,
@@ -326,8 +396,77 @@ export async function summonCommand(
         // summon of its own, that is the chain it extends — so the depth cap sees one more hop, and
         // the human root at the head is preserved down the chain. A human-rooted turn (depth 0)
         // passes depth 0; an agent-emitted turn passes its depth, and the constructor increments.
-        chain: { rootActor, rootIsHuman, depth },
+        chain: { rootActor: input.rootActor, rootIsHuman: input.rootIsHuman, depth: input.depth },
       },
     )
     .catch(() => {}); // runAgentTurn writes its own error event; this guards the fire-and-forget
+}
+
+/**
+ * PAUSE a protected summon for a co-signature (S2.2).
+ *
+ * Writes a CO_SIGN decision — reusing the DECISION card and the interrupt machinery unchanged — whose
+ * `pending_action` carries the HELD summon, then raises the DECISION interrupt. No summon is written
+ * and no turn is triggered: the emission stops here until a human signs, and the approval fires
+ * exactly this held summon (signDecision → fireSummon), never a re-derived one.
+ */
+async function pauseSummonForCoSign(
+  deps: CommandDeps,
+  ctx: CommandContext,
+  p: {
+    roomId: string;
+    member: string;
+    verdict: Verdict;
+    causeSeq: number;
+    intent: string;
+    rootActor: string;
+    rootIsHuman: boolean;
+    depth: number;
+  },
+): Promise<void> {
+  const resource = `member:${p.member}`;
+  // The HELD summon rides on the decision's pending_action — everything an approval needs to fire
+  // exactly this summon later, without re-deriving it.
+  const pending: PendingSummonAction = {
+    kind: 'summon.initiate',
+    member: p.member,
+    cause_seq: p.causeSeq,
+    intent: p.intent,
+    root_actor: p.rootActor,
+    root_is_human: p.rootIsHuman,
+    depth: p.depth,
+  };
+  // Built through the one decision constructor (M-3) — the subject is the emitting agent, summoning
+  // under its own mandate (`self`).
+  const decision = await writeCoSignDecision(deps, {
+    roomId: p.roomId,
+    subject: ctx.actorId,
+    requestedBy: ctx.actorId,
+    subjectBasis: 'self',
+    action: SUMMON_INITIATE_ACTION,
+    resource,
+    verdict: p.verdict,
+    pendingAction: pending,
+  });
+  const decisionId = decision.event_type === 'decision' ? decision.payload.decision_id : '';
+
+  if (p.verdict.required_signer) {
+    await raiseDecisionInterrupts(deps, {
+      roomId: p.roomId,
+      subject: ctx.actorId,
+      requiredSigner: p.verdict.required_signer,
+      decisionId,
+      action: SUMMON_INITIATE_ACTION,
+    });
+  }
+  deps.log.info(
+    {
+      room_id: p.roomId,
+      requested_by: ctx.actorId,
+      member: p.member,
+      decision_id: decisionId,
+      required_signer: p.verdict.required_signer,
+    },
+    'summon paused for co-sign',
+  );
 }

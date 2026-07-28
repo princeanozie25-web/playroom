@@ -7,10 +7,16 @@ import {
   ERROR_SIGNER_NOT_HUMAN,
   ERROR_WRONG_SIGNER,
 } from '@playroom/shared';
-import { appendDecisionResolved, decisionEventById, decisionResolutionEvent } from '../events.js';
+import {
+  appendDecisionResolved,
+  appendMessage,
+  decisionEventById,
+  decisionResolutionEvent,
+} from '../events.js';
 import { humanMembersOfPrincipal, memberRecord } from '../members.js';
 import { mandateFor } from '../mandates.js';
 import { decisionExpiryMs, isExpired } from '../decisions.js';
+import { fireSummon } from './summon.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // ============================================================================
@@ -171,5 +177,47 @@ export async function signDecisionCommand(
     { ...base, resolution: input.resolution, signed_by: ctx.actorId, principal: d.required_signer },
     'decision resolved',
   );
+
+  // 8. EXECUTE THE ANSWER (S2.2) — the ONLY place a co-signed action is released, and it runs at most
+  //    once because the resolution above is single-use (migration 020). A DENIAL runs nothing and the
+  //    room says so; an APPROVAL fires the held action, or records honestly that there is no executor.
+  if (input.resolution === 'DENIED') {
+    // No silent death, no automatic retry — the room states the denial, and the action must be
+    // requested again if it is still wanted.
+    const notice = await appendMessage(
+      deps.pool,
+      input.roomId,
+      'system',
+      `sys-denied-${input.decisionId}`,
+      `${d.action} was denied and will not run.`,
+    );
+    deps.bus.publish(input.roomId, notice);
+  } else if (d.pending_action?.kind === 'summon.initiate') {
+    // APPROVED, and the decision holds an executable summon (S1.8). Fire it via fireSummon — NEVER
+    // summonCommand — so it is not re-evaluated: the co-signature IS the authorisation. The emitting
+    // agent is still the requester; the human approved it, they did not ask.
+    const pa = d.pending_action;
+    await fireSummon(deps, {
+      roomId: input.roomId,
+      member: pa.member,
+      requestedBy: d.subject,
+      rootActor: pa.root_actor,
+      rootIsHuman: pa.root_is_human,
+      depth: pa.depth,
+      causeSeq: pa.cause_seq,
+      intent: pa.intent,
+    });
+  } else {
+    // APPROVED, but there is NO EXECUTOR — a pr.merge, whose bridge is S2.6 (RT-005). The room must
+    // not imply a merge occurred, so it says exactly what happened and no more: approved, not run.
+    const notice = await appendMessage(
+      deps.pool,
+      input.roomId,
+      'system',
+      `sys-approved-noexec-${input.decisionId}`,
+      `${d.action} was approved. No executor exists yet, so nothing was performed (S2.6).`,
+    );
+    deps.bus.publish(input.roomId, notice);
+  }
   return { ok: true };
 }
