@@ -538,6 +538,18 @@ export const ServerHello = z.object({
    * decides what is worth drawing.
    */
   member_id: z.string(),
+  /**
+   * WHAT THIS ROOM HAS SPENT, to date — the per-room meter's authoritative baseline (S1.6).
+   *
+   * Summed server-side at connect over the room's turns and summaries, so the meter is correct the
+   * instant the room opens — even on a phone that just reloaded and holds none of the older events.
+   * The client shows this and increments it live from completed turns and summaries arriving with
+   * `seq > last_seq`; the two never double-count, because the baseline covers everything up to
+   * `last_seq` and the increment covers only what comes after. It is INFORMATION, not the daily
+   * ceiling: this accrues per room and only shows spend, where the ceiling is one daily number that
+   * refuses (item 13).
+   */
+  room_spent_usd: z.number(),
 });
 export type ServerHello = z.infer<typeof ServerHello>;
 

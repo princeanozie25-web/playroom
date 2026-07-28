@@ -243,6 +243,8 @@ export class Client {
   readonly events: ServerEventT[] = [];
   readonly errors: ServerErrorFrameT[] = [];
   hello: number | undefined;
+  /** The per-room spend baseline `hello` carried (S1.6). Undefined until the hello frame lands. */
+  helloSpend: number | undefined;
   private readonly seen = new Set<number>();
   private waiters: Array<() => void> = [];
 
@@ -297,7 +299,9 @@ export class Client {
     ws.on('message', (data) => {
       const raw = JSON.parse(data.toString());
       if (raw?.type === 'hello') {
-        this.hello = ServerHello.parse(raw).last_seq;
+        const h = ServerHello.parse(raw);
+        this.hello = h.last_seq;
+        this.helloSpend = h.room_spent_usd;
       } else if (raw?.type === 'error') {
         // REFUSALS ARE COLLECTED, not discarded. A helper that drops them makes every
         // refusal look like silence from the test's point of view, which is the observation

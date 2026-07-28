@@ -186,6 +186,18 @@ body {
   margin-top: var(--s-3);
 }
 
+/* ── THE PER-ROOM METER (S1.6) ───────────────────────────────────────────────
+   Ambient, the same quiet weight as the per-turn spend footer and the interrupt budget: small,
+   muted, tabular so the digits do not jitter as spend accrues. It informs, it does not warn — no
+   colour change, no threshold, no growth. Distinct from the daily ceiling, which speaks only when
+   it refuses. */
+.room-meter {
+  margin-top: var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
 /* An element carrying an accent resolves it to --accent/--accent-soft/--accent-line, so
    every rule below reads one variable regardless of which principal it belongs to. A member
    with NO principal in config gets no data-accent and falls back to the neutral ink — it

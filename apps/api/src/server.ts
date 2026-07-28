@@ -31,6 +31,7 @@ import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } fro
 import { RedeemRefused, redeemRoomCode } from './room-codes.js';
 import { listMembers, listRoomMembers, roomAccess } from './members.js';
 import { setKnownMemberTokens } from './agent.js';
+import { roomSpend } from './spend.js';
 
 export interface BuildOptions {
   databaseUrl?: string;
@@ -654,11 +655,17 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           return null;
         }
         const helloSeq = await lastSeq(db(), roomId);
+        // The per-room meter's authoritative baseline, summed once at connect (S1.6). Scoped to
+        // `helloSeq`: it is the spend up to the high-water mark the client is told, so the client's
+        // live increment (turns/summaries after that seq) picks up exactly where this leaves off,
+        // with no gap and no double count.
+        const roomSpent = await roomSpend(db(), roomId);
         send(
           ServerHello.parse({
             type: 'hello',
             last_seq: helloSeq,
             member_id: result.auth.member_id,
+            room_spent_usd: roomSpent,
           }),
         );
         const backlog = await eventsAfter(db(), roomId, after);

@@ -90,6 +90,30 @@ export async function spendToday(pool: Pool): Promise<SpendState> {
 }
 
 /**
+ * WHAT HAS BEEN SPENT IN ONE ROOM, over its whole life — the per-room meter's number (S1.6).
+ *
+ * A DIFFERENT THING from `spendToday`, and deliberately so (item 13). The ceiling is one number for
+ * the whole deployment, resets at midnight, and REFUSES. This is per-room, cumulative over the room's
+ * life, and only INFORMS — an ambient count a member can watch accrue. They must not be conflated:
+ * a member hitting the daily ceiling and a member watching a room's spend are two distinct moments.
+ *
+ * The same sum, scoped to one room: every model call the room caused — turns its members asked for,
+ * summaries it folded on their behalf — from the `cost_usd` column. Not date-bounded: "what has this
+ * room cost" is a fact about the room, not about today.
+ */
+export async function roomSpend(pool: Pool, roomId: string): Promise<number> {
+  const { rows } = await pool.query<{ spent: string | null }>(
+    `SELECT sum(cost_usd) AS spent
+       FROM events
+      WHERE room_id = $1
+        AND event_type IN ('agent.turn.completed', 'room.summary')
+        AND cost_usd IS NOT NULL`,
+    [roomId],
+  );
+  return Number(rows[0]?.spent ?? 0);
+}
+
+/**
  * The sentence the room shows when the ceiling is reached.
  *
  * WRITTEN FOR THE PERSON WHO JUST TAGGED SOMEBODY, not for me. It says what happened, that it is not

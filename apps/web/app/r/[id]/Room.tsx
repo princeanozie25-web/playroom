@@ -270,6 +270,12 @@ export function Room({
   // WHICH MEMBER THIS SOCKET IS, from `hello`. Used only to decide whether to draw a control the
   // server would accept — the authorisation itself is the socket's, never this value.
   const [viewer, setViewer] = useState<string | null>(null);
+  // THE PER-ROOM METER'S BASELINE (§18, S1.6), from `hello`: the room's spend to date, summed
+  // server-side, and the high-water seq it was summed through. Authoritative, so a phone that just
+  // reloaded shows the right number without holding the older events. Live turns and summaries after
+  // `baselineSeq` add to it below and cannot double-count what the baseline already includes.
+  const [baselineSpend, setBaselineSpend] = useState(0);
+  const [baselineSeq, setBaselineSeq] = useState(0);
   // THE WELCOME SCREEN SHOWS ONCE, and only for somebody who arrived through redemption — the join
   // route redirects with `?welcome=1`. Read from the URL rather than from storage so it cannot
   // reappear on a later visit, and so my own browser and the capture harness never see it: take 13
@@ -281,6 +287,23 @@ export function Room({
 
   const items = useMemo<Item[]>(() => buildItems(events), [events]);
   const conn: Conn = refusal ? 'refused' : status === 'open' ? 'connected' : 'reconnecting';
+
+  // WHAT THIS ROOM HAS SPENT: the authoritative baseline plus every completed turn and summary the
+  // client has seen SINCE it. A fact, not a warning — it shows what was spent and never predicts,
+  // nags, or moralises. Distinct from the daily ceiling, which is one number that refuses; this is
+  // per-room and only informs.
+  const roomSpent = useMemo(() => {
+    let live = 0;
+    for (const e of events) {
+      if (e.seq <= baselineSeq) continue;
+      if (e.event_type === 'agent.turn.completed' && e.payload.cost_usd != null) {
+        live += e.payload.cost_usd;
+      } else if (e.event_type === 'room.summary' && e.payload.cost_usd != null) {
+        live += e.payload.cost_usd;
+      }
+    }
+    return baselineSpend + live;
+  }, [events, baselineSpend, baselineSeq]);
 
   // EVERY member, for resolving NAMES — humans included as of S1.3, so a byline and the decision
   // card show "Prince" rather than the raw id.
@@ -382,6 +405,10 @@ export function Room({
         }
         if (msg.type === 'hello') {
           setViewer(msg.member_id);
+          // Re-baseline on every hello, including a reconnect: the server's number is authoritative
+          // and supersedes whatever the client had accrued.
+          setBaselineSpend(msg.room_spent_usd);
+          setBaselineSeq(msg.last_seq);
           return;
         }
         if (msg.type !== 'event') return;
@@ -464,6 +491,15 @@ export function Room({
             <MemberChip key={h} member={byId.get(h)} name={h} />
           ))}
         </div>
+        {/* THE PER-ROOM METER (§18, S1.6). Ambient and quiet — a member can see spend accruing
+            before they hit the ceiling, but it never nags. Shown only once there is spend to show,
+            so a fresh room carries nothing. It reads "this room" to stay distinct from the daily
+            ceiling, which is a different number on a different surface (the refusal, when hit). */}
+        {roomSpent > 0 && (
+          <div className="room-meter" {...pr(HOOK.roomSpend)}>
+            this room · ${roomSpent.toFixed(4)}
+          </div>
+        )}
         {/* INSIDE THE HEADER, not as a fourth child of `.room`. The room is a three-row grid
             (header / transcript / composer) and a fourth child takes `1fr` off the transcript and
             pushes the composer into an implicit row — the layout collapses rather than shifting,

@@ -46,6 +46,8 @@ export const HOOK = {
   caret: 'caret',
   /** The quiet spend + token line on a completed turn. */
   spend: 'spend',
+  /** The ambient per-room spend meter in the header (§18, S1.6). Distinct from the daily ceiling. */
+  roomSpend: 'room-spend',
   /** The DECISION card. */
   decision: 'decision',
   /** The decision verdict (ALLOW | CO_SIGN | BLOCK). */
