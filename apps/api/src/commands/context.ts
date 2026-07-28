@@ -70,6 +70,15 @@ export type Command =
       action: string;
       resource: string;
     }
+  // Complete a co-signature (S2.2): a human approves or denies a pending decision. `actorId` is the
+  // SIGNER, authenticated by the socket — an agent can never reach a landing resolution through here.
+  | {
+      kind: 'signDecision';
+      roomId: string;
+      clientMsgId: string;
+      decisionId: string;
+      resolution: 'APPROVED' | 'DENIED';
+    }
   // Fold the room's older messages into its rolling summary, if the tail has grown past the window
   // (S1.6). Dispatched fire-and-forget from postMessage so the summary is maintained AHEAD of the
   // next summon, never on the summon's own first-token path. Idempotent and cheap when there is

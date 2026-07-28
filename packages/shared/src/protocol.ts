@@ -102,12 +102,32 @@ export const ClientDowngrade = z.object({
 });
 export type ClientDowngrade = z.infer<typeof ClientDowngrade>;
 
+/**
+ * Client → server: COMPLETE a co-signature — approve or deny a pending decision (S2.2).
+ *
+ * The act the DECISION card was always missing. `resolution` is the human's answer; the server
+ * authenticates the socket's member as the SIGNER and refuses anyone who is not the human bound to
+ * the decision's required principal — an agent can never send a resolution that lands, whatever this
+ * frame says, because the check is against who the socket authenticated as, not what the frame claims.
+ *
+ * Unlike `request_action`/`handoff`, this frame names no subject and no mandate: the decision already
+ * carries whose authority it evaluated. All this frame supplies is WHICH decision and WHICH answer.
+ */
+export const ClientSignDecision = z.object({
+  type: z.literal('sign_decision'),
+  client_msg_id: z.string().min(1),
+  decision_id: z.string().min(1),
+  resolution: z.enum(['APPROVED', 'DENIED']),
+});
+export type ClientSignDecision = z.infer<typeof ClientSignDecision>;
+
 /** Every frame a client may send. Parsed as a union; an unknown `type` is dropped. */
 export const ClientFrame = z.discriminatedUnion('type', [
   ClientSend,
   ClientRequestAction,
   ClientHandoff,
   ClientDowngrade,
+  ClientSignDecision,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
@@ -682,6 +702,33 @@ export const ERROR_HANDOFF_MANDATE = 'handoff_mandate_does_not_admit';
  * travels to the caller and leaves the room's log alone.
  */
 export const ERROR_SUBJECT_NOT_JUSTIFIED = 'subject_not_justified';
+
+/**
+ * THE CO-SIGN REFUSALS (S2.2), kept apart because they are different mistakes — the same discipline
+ * as the four handoff refusals. A signature refused for the wrong reason sends someone to fix the
+ * wrong thing: an expired card must be RE-REQUESTED, a stale one means the authority moved, a wrong
+ * signer means it is not yours to sign, and an agent trying to sign is the one that must never work.
+ */
+/** No such decision to sign — an id from another room, or a decision that was never written. */
+export const ERROR_DECISION_UNKNOWN = 'decision_unknown';
+/** The decision is not awaiting a signature (an ALLOW/BLOCK, not a CO_SIGN). Nothing to complete. */
+export const ERROR_DECISION_NOT_SIGNABLE = 'decision_not_signable';
+/**
+ * AN AGENT TRIED TO SIGN. Its own code, and the one refusal that must never become an ALLOW: the
+ * co-signature is the human in the loop, and an agent completing it would defeat the entire machine.
+ */
+export const ERROR_SIGNER_NOT_HUMAN = 'signer_not_human';
+/** A human signed, but not the one bound to the decision's required principal. Names the signer. */
+export const ERROR_WRONG_SIGNER = 'wrong_signer';
+/** The decision was already approved or denied — single-use, and the log already has its answer. */
+export const ERROR_DECISION_ALREADY_RESOLVED = 'decision_already_resolved';
+/** The co-sign window passed. Nothing timed out INTO a verdict; the action must be re-requested. */
+export const ERROR_DECISION_EXPIRED = 'decision_expired';
+/**
+ * The mandate evaluated is no longer the member's current mandate (hashes differ). Approving would
+ * endorse authority that was not the authority evaluated — refused; the action must be re-requested.
+ */
+export const ERROR_DECISION_STALE = 'decision_stale';
 
 /**
  * Valid JSON, and not a frame this server accepts.

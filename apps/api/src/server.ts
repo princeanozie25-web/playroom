@@ -844,6 +844,38 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
               }
               return;
             }
+            if (msg.type === 'sign_decision') {
+              // COMPLETE A CO-SIGNATURE (S2.2). The actor is the authenticated member, and that IS
+              // the authorisation: the command refuses anyone who is not the human bound to the
+              // decision's required principal — so an agent socket cannot sign, whatever it sends.
+              const result = await executeCommand(
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+                {
+                  kind: 'signDecision',
+                  roomId,
+                  clientMsgId: msg.client_msg_id,
+                  decisionId: msg.decision_id,
+                  resolution: msg.resolution,
+                },
+                deps,
+              );
+              // Refused to the CALLER, typed, its own code, a sentence naming the constraint —
+              // wrong signer names the required signer (not an oracle: the card shows it). The socket
+              // stays open; this is one signature refused, not an identity problem.
+              if (!result.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: result.refusal.code,
+                      message: result.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
+              return;
+            }
             if (msg.type === 'downgrade') {
               // ONE TAP, and it costs the raiser (Bible §21.3). The actor is the authenticated
               // member, which is also the authorisation: only the member an interrupt is

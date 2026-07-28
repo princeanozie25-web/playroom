@@ -119,23 +119,32 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     expect(dispatchers).toEqual(['commands/summon.ts']);
   });
 
-  it('NO CLIENT FRAME can start a turn — the wire admits exactly four', () => {
+  it('the wire admits exactly five frames, and only a signed co-sign puts an agent to work', () => {
     // Read off the schema at runtime rather than grepped, so this cannot pass against a stale
     // build or a comment. A new frame type makes this test fail, which is the point: adding one
     // is then a decision about the activation boundary rather than an addition to a union.
     //
     // IT FIRED. S1.3 added `handoff` and this line failed, which is exactly the conversation the
     // assertion exists to force: does a handoff start a turn? It does NOT — see the case below,
-    // and commands/handoff.ts, which says why. An agent cannot ask for work (there is no
-    // tool-call channel), so a transfer that triggered a turn would be the first path where
-    // something other than a human summon put an agent to work.
+    // and commands/handoff.ts, which says why. An agent cannot ask for work through a handoff, so a
+    // transfer that triggered a turn would be the first path where something other than a human
+    // summon put an agent to work.
     //
     // IT FIRED AGAIN in S1.4, for `downgrade`, and the answer is the same shape as the handoff's:
     // lowering an interrupt's claim on your attention changes what a member is ASKED to notice,
     // never what an agent is asked to DO. It cannot summon, and the case below asserts that
     // rather than trusting the argument.
+    //
+    // IT FIRED AGAIN in S2.2, for `sign_decision`, and this one's answer is DIFFERENT and is the
+    // point of the slice. This commit only RECORDS a human's approve/deny as a decision.resolved
+    // event and starts no turn. But whether an APPROVED decision then releases its held action — a
+    // summon fires — is the co-sign EXECUTION, the next commit. When it does, that turn is
+    // HUMAN-ROOTED by construction: a person signed it. So the boundary holds — every agent turn
+    // still traces to a human — it simply gained a human-gated door that a paused, evaluated
+    // decision passes through only when the required person signs. An agent can never send a
+    // resolution that lands (commands/signDecision.ts), which is what keeps this a door and not a hole.
     const types = ClientFrame.options.map((o) => o.shape.type.value).sort();
-    expect(types).toEqual(['downgrade', 'handoff', 'request_action', 'send']);
+    expect(types).toEqual(['downgrade', 'handoff', 'request_action', 'send', 'sign_decision']);
   });
 });
 
