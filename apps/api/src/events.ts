@@ -156,6 +156,60 @@ export async function eventsAfter(
   return rows.map(rowToServerEvent);
 }
 
+/** History page size — the default a client gets, and the ceiling it cannot exceed (S16b, item 6). */
+export const HISTORY_PAGE_DEFAULT = 60;
+export const HISTORY_PAGE_MAX = 200;
+
+/**
+ * A bounded page of history — the `limit` events with the HIGHEST seq below `before`, oldest-first.
+ *
+ * The READ SIDE of what the socket already does for the live tail (S16b): the client loads a recent
+ * window on open and pages OLDER history on demand, instead of replaying the whole room. This is one
+ * page of that — the events just before a cursor, in the same shape the transcript already renders, so
+ * a paged-in message is indistinguishable from one that streamed in.
+ *
+ * `ORDER BY seq DESC LIMIT` takes the page closest to the cursor; the reverse hands it back oldest-first
+ * so the caller can prepend it in reading order.
+ */
+export async function eventsBefore(
+  pool: Pool,
+  roomId: string,
+  before: number,
+  limit: number,
+): Promise<ServerEvent[]> {
+  const { rows } = await pool.query<EventRow>(
+    `SELECT ${EVENT_COLS} FROM events
+     WHERE room_id = $1 AND seq < $2
+     ORDER BY seq DESC
+     LIMIT $3`,
+    [roomId, before, limit],
+  );
+  return rows.reverse().map(rowToServerEvent);
+}
+
+/** Whether any event precedes `seq` in this room — so a page can tell the client there is more. */
+export async function hasEventsBefore(pool: Pool, roomId: string, seq: number): Promise<boolean> {
+  const { rows } = await pool.query<{ e: boolean }>(
+    'SELECT EXISTS(SELECT 1 FROM events WHERE room_id = $1 AND seq < $2) AS e',
+    [roomId, seq],
+  );
+  return rows[0].e;
+}
+
+/**
+ * The recent window's FLOOR: the seq the rolling summary covers up to, or 0 when the room has no
+ * summary (it is short — the whole room IS the window).
+ *
+ * This is the ONE number that keeps the client window and the agent's context window the same span
+ * (S16b, item 15): assembly reads the messages AFTER this floor (summary.ts), and the client loads the
+ * events AFTER this floor. Same floor, same recent span — the client shows exactly what the summary
+ * folded up to, never a different one.
+ */
+export async function roomWindowFloor(pool: Pool, roomId: string): Promise<number> {
+  const summary = await latestRoomSummary(pool, roomId);
+  return summary?.covers_through_seq ?? 0;
+}
+
 // THE ROOM'S COMMON GROUND: the last N chat messages, oldest first. Agent turn events are
 // excluded — the agent sees the conversation, not its own event stream (PM7 cap).
 //

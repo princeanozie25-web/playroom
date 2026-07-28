@@ -22,7 +22,16 @@ import { createAdapter } from '@playroom/adapters';
 import type { Pool } from 'pg';
 import { makePool } from './db.js';
 import { RoomBus } from './bus.js';
-import { eventsAfter, getRoom, lastSeq } from './events.js';
+import {
+  eventsAfter,
+  eventsBefore,
+  getRoom,
+  hasEventsBefore,
+  lastSeq,
+  roomWindowFloor,
+  HISTORY_PAGE_DEFAULT,
+  HISTORY_PAGE_MAX,
+} from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
 import { authenticate, type AuthFailure } from './credentials.js';
@@ -541,6 +550,63 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         return roomNotFound(id);
       }
       return room;
+    });
+
+    // GET /rooms/:id/history — a bounded page of the transcript, from the event log (S16b).
+    //
+    // ── THE READ SIDE OF THE SOCKET'S OWN REPLAY ──
+    //
+    // S1.6 moved the AGENT off full-transcript replay — the summary folds the older span and a turn
+    // sees a bounded window. This does the same for the CLIENT: it loads a recent window on open and
+    // pages older history on demand, instead of the socket replaying every event of a long room
+    // (S16-N2) or resuming from a stale cursor and showing a truncated room (S16-N1).
+    //
+    //   no `before`    → THE RECENT WINDOW: events after the summary's coverage floor — the SAME floor
+    //                    the assembly window uses, so the client shows exactly the span the summary
+    //                    folded up to, never a different recent set (item 15).
+    //   ?before=<seq>  → AN OLDER PAGE: the events just before that cursor, bounded by `limit`.
+    //
+    // `has_older` says whether a further page exists, so the client only offers "load older" when it
+    // would do something. Windowed-by-design, not truncated-by-accident: everything below the window is
+    // still in the log and still one request away.
+    //
+    // BEARER AND MEMBERSHIP, exactly as `GET /rooms/:id` — and NOT the ticket path: a page is an
+    // ordinary authenticated read, not a socket, so it authenticates the way every other read does.
+    fastify.get('/rooms/:id/history', async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        app.log.warn({ room_id: id, code: auth.failure }, 'history refused: no usable credential');
+        reply.code(401);
+        return credentialRefusal(auth.failure, id);
+      }
+      const access = await roomAccess(db(), id, auth.auth.member_id);
+      if (!access.room_exists || !access.is_member) {
+        app.log.warn(
+          {
+            room_id: id,
+            member: auth.auth.member_id,
+            reason: access.room_exists ? 'not_in_room' : 'no_room',
+          },
+          'history refused',
+        );
+        reply.code(404);
+        return roomNotFound(id);
+      }
+      const q = req.query as { before?: string; limit?: string };
+      const limit = Math.min(
+        Math.max(1, Number(q.limit) || HISTORY_PAGE_DEFAULT),
+        HISTORY_PAGE_MAX,
+      );
+      // A page before a cursor, or — with no cursor — the recent window: events after the summary
+      // floor, the same floor the agent's context window uses.
+      const events =
+        q.before !== undefined
+          ? await eventsBefore(db(), id, Number(q.before) || 0, limit)
+          : await eventsAfter(db(), id, await roomWindowFloor(db(), id));
+      const oldest = events[0]?.seq;
+      const has_older = oldest !== undefined ? await hasEventsBefore(db(), id, oldest) : false;
+      return { events, has_older };
     });
 
     // GET /rooms/:id/ws?after=<seq> — hello, then replay events seq > after in
