@@ -498,6 +498,11 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         if (tFirstDeltaCommitted === null) tFirstDeltaCommitted = performance.now(); // span: first delta committed
         publish(delta);
         if (tFirstFanout === null) tFirstFanout = performance.now(); // span: first delta frame written
+      } else if (chunk.kind === 'action') {
+        // CONSUMED IN S18-2, not here. This slice (S18-1) makes structured emission expressible,
+        // typed and surfaced by the adapters; the next converges it onto the summon constructor and
+        // the fabric. Until then an emitted action is inert — it neither activates nor errors the
+        // turn — which is what "nothing consumes the variant yet" means in code.
       } else if (chunk.kind === 'done') {
         tokensIn = chunk.tokens_in;
         tokensOut = chunk.tokens_out;

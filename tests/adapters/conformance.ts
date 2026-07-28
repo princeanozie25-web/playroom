@@ -18,6 +18,15 @@ export interface ConformanceCase {
   makeAdapter(): AgentAdapter;
   /** Same adapter, but the transport answers with an HTTP error status. */
   makeFailing(status: number): AgentAdapter;
+  /**
+   * The adapter wired to a stub whose MODEL emits a structured action (a provider tool call), in
+   * this provider's own wire shape (S1.8). An adapter that cannot surface a structured action fails
+   * the suite — emission is a required capability, not an optional one, because the summon channel
+   * and every later consumer depend on it.
+   */
+  makeActionAdapter(): AgentAdapter;
+  /** The action the stub emits, normalised — asserted against what the adapter surfaces. */
+  expectedAction: { action: string; arguments: Record<string, unknown> };
   /** Construct with the provider's key absent. Must throw a typed, named error. */
   constructWithoutKey(): void;
   /** The name of the error class thrown when the key is missing. */
@@ -39,11 +48,29 @@ export function runAdapterConformance(name: string, makeCase: () => ConformanceC
     it('yields provider-neutral AgentTurnChunks and nothing else', async () => {
       const c = makeCase();
       const chunks = await collect(c.makeAdapter(), [{ author: 'prince', body: 'hello' }]);
-      // Every chunk is one of the three declared kinds. A provider-specific shape
-      // leaking through here would mean the room can see the provider.
+      // Every chunk is one of the declared kinds. A provider-specific shape leaking through here
+      // would mean the room can see the provider. `action` joined the union in S1.8.
       for (const chunk of chunks) {
-        expect(['text_delta', 'done', 'error']).toContain(chunk.kind);
+        expect(['text_delta', 'action', 'done', 'error']).toContain(chunk.kind);
       }
+    });
+
+    it('SURFACES a structured action the model emitted, normalised to an `action` chunk', async () => {
+      // S1.8: the summon channel and every later consumer (pr.merge, Drift) depend on an adapter
+      // being able to surface a model's structured action. This asserts the adapter's REAL tool-call
+      // parsing against a stubbed transport — no live call — and that the action arrives
+      // provider-neutral, with its kind and arguments intact.
+      const c = makeCase();
+      const chunks = await collect(c.makeActionAdapter(), [{ author: 'prince', body: 'go' }]);
+      const actions = chunks.filter((x) => x.kind === 'action');
+      expect(actions).toHaveLength(1);
+      const a = actions[0];
+      if (a.kind !== 'action') throw new Error('expected an action chunk');
+      expect(a.action).toBe(c.expectedAction.action);
+      expect(a.arguments).toEqual(c.expectedAction.arguments);
+      // The action is NOT terminal: the stream still ends with exactly one `done`, after it.
+      expect(chunks[chunks.length - 1]?.kind).toBe('done');
+      expect(chunks.filter((x) => x.kind === 'done' || x.kind === 'error')).toHaveLength(1);
     });
 
     it('STREAMS: text arrives as multiple deltas, not one blob', async () => {

@@ -46,8 +46,13 @@ class StubApiError extends Error {
   }
 }
 
+// A structured action, in this provider's shape: a `tool_use` block in the completed message. The
+// adapter reads actions from finalMessage rather than reassembling input_json_delta, so the fixture
+// lives here (S1.8).
+const ACTION = { id: 'toolu_summon_1', name: 'summon', input: { member: 'sol' } };
+
 /** A stubbed provider client: async-iterable events plus a final message. */
-function stubClient(opts: { failWith?: Error } = {}) {
+function stubClient(opts: { failWith?: Error; action?: typeof ACTION } = {}) {
   const events = providerEvents();
   const makeStream = () => ({
     async *[Symbol.asyncIterator]() {
@@ -56,7 +61,22 @@ function stubClient(opts: { failWith?: Error } = {}) {
     },
     async finalMessage() {
       if (opts.failWith) throw opts.failWith;
-      return { usage: { input_tokens: TOKENS_IN, output_tokens: TOKENS_OUT }, stop_reason: STOP };
+      return {
+        usage: { input_tokens: TOKENS_IN, output_tokens: TOKENS_OUT },
+        stop_reason: opts.action ? 'tool_use' : STOP,
+        // `content` carries text blocks and tool_use blocks in a real message; the adapter reads
+        // only tool_use here (text already streamed), so the fixture provides just the tool call.
+        content: opts.action
+          ? [
+              {
+                type: 'tool_use',
+                id: opts.action.id,
+                name: opts.action.name,
+                input: opts.action.input,
+              },
+            ]
+          : [],
+      };
     },
   });
   return { messages: { stream: () => makeStream() } };
@@ -89,6 +109,9 @@ const CASE = (): ConformanceCase => ({
           stubClient({ failWith: new StubApiError(status) }) as unknown as Stub,
         ),
     ),
+  makeActionAdapter: () =>
+    withKey(() => new AnthropicAdapter(CFG, stubClient({ action: ACTION }) as unknown as Stub)),
+  expectedAction: { action: ACTION.name, arguments: ACTION.input },
   constructWithoutKey: () => {
     const prev = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;

@@ -6,10 +6,25 @@
 // display name — there is no identity model yet (S1.1).
 export type AgentMessage = { author: string; body: string };
 
-// A streamed unit of an agent turn: many text deltas, then exactly one terminal
-// chunk (`done` on success, `error` on failure).
+// A streamed unit of an agent turn: many text deltas and any structured actions the model
+// emitted, then exactly one terminal chunk (`done` on success, `error` on failure).
 export type AgentTurnChunk =
   | { kind: 'text_delta'; text: string }
+  /**
+   * A STRUCTURED ACTION the model asked to take — Bible §3.2, S1.8.
+   *
+   * Distinct from text: an agent can now request an action as a typed object rather than prose. This
+   * slice's only consumer is a summon (`action: 'summon'`); `pr.merge` emission is S2.1's. The shape
+   * is GENERAL on purpose — `action` + `arguments` carry a summon today and a `pr.merge` later
+   * without a second variant.
+   *
+   * THE CHANNEL DOES NOT BYPASS THE FABRIC BECAUSE IT IS STRUCTURED. An action emitted here is
+   * attributed to the emitting agent (the adapter running the turn — the gateway knows which), and
+   * it is evaluated against THAT agent's mandate. A structured emission is subject to every control a
+   * free-text activation is, and one more: it is only as authorised as the agent that emitted it. The
+   * carrier being typed makes it easier to route, never exempt from evaluation.
+   */
+  | { kind: 'action'; action: string; arguments: Record<string, unknown>; call_id?: string }
   | { kind: 'done'; tokens_in: number; tokens_out: number; stop_reason: string }
   | { kind: 'error'; error_class: string; message: string };
 

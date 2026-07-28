@@ -95,6 +95,24 @@ export class AnthropicAdapter implements AgentAdapter {
     }
 
     const final = await stream.finalMessage();
+
+    // STRUCTURED ACTIONS the model emitted — `tool_use` blocks in the completed message (S1.8).
+    // Surfaced as provider-neutral `action` chunks; the gateway attributes them to this member and
+    // hands them to the fabric, which decides whether they are allowed. Read from the FINAL message
+    // rather than reassembled from `input_json_delta` events on purpose: the SDK has already parsed
+    // the arguments, and a second partial-JSON parser is a second thing to keep correct. Yielded
+    // before `done`, so `done` remains the single terminal chunk and stays last.
+    for (const block of final.content ?? []) {
+      if (block?.type === 'tool_use') {
+        yield {
+          kind: 'action',
+          action: block.name,
+          arguments: (block.input ?? {}) as Record<string, unknown>,
+          call_id: block.id,
+        };
+      }
+    }
+
     yield {
       kind: 'done',
       tokens_in: final.usage.input_tokens,

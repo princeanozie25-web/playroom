@@ -23,7 +23,38 @@ const CFG: AdapterConfig = {
 // This provider's chunk shape — deltas carry text, and usage arrives on a final chunk
 // that has no choices at all. That asymmetry with the first provider is exactly the sort
 // of thing the shared suite exists to normalise over.
-function providerChunks(): unknown[] {
+// A structured action, in this provider's shape: a streamed tool call whose id and name arrive
+// once and whose arguments accumulate across deltas as JSON fragments (S1.8). The adapter reassembles
+// them, so the fixture streams them fragmented on purpose — a single-fragment fixture would not
+// exercise the accumulation the real stream requires.
+const ACTION = { id: 'call_summon_1', name: 'summon', input: { member: 'sol' } };
+
+function providerChunks(opts: { action?: typeof ACTION } = {}): unknown[] {
+  if (opts.action) {
+    return [
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: opts.action.id,
+                  function: { name: opts.action.name, arguments: '' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"member":' } }] } }],
+      },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"sol"}' } }] } }] },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+      { choices: [], usage: { prompt_tokens: TOKENS_IN, completion_tokens: TOKENS_OUT } },
+    ];
+  }
   return [
     ...TEXT_PARTS.map((content) => ({ choices: [{ delta: { content } }] })),
     { choices: [{ delta: {}, finish_reason: STOP }] },
@@ -40,8 +71,8 @@ class StubApiError extends Error {
   }
 }
 
-function stubClient(opts: { failWith?: Error } = {}) {
-  const chunks = providerChunks();
+function stubClient(opts: { failWith?: Error; action?: typeof ACTION } = {}) {
+  const chunks = providerChunks({ action: opts.action });
   return {
     chat: {
       completions: {
@@ -84,6 +115,9 @@ const CASE = (): ConformanceCase => ({
           stubClient({ failWith: new StubApiError(status) }) as unknown as Stub,
         ),
     ),
+  makeActionAdapter: () =>
+    withKey(() => new OpenAIAdapter(CFG, stubClient({ action: ACTION }) as unknown as Stub)),
+  expectedAction: { action: ACTION.name, arguments: ACTION.input },
   constructWithoutKey: () => {
     const prev = process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_API_KEY;

@@ -158,7 +158,10 @@ export async function maintainRoomSummary(
       maxOutputTokens: SUMMARY_MAX_OUTPUT_TOKENS,
     })) {
       if (chunk.kind === 'text_delta') text += chunk.text;
-      else if (chunk.kind === 'done') {
+      else if (chunk.kind === 'action') {
+        // A summariser compresses text; a structured action from it is not something to act on, and
+        // this path has no fabric to govern one through. Ignored (S1.8).
+      } else if (chunk.kind === 'done') {
         tokensIn = chunk.tokens_in;
         tokensOut = chunk.tokens_out;
       } else throw new Error(`${chunk.error_class}: ${chunk.message}`);

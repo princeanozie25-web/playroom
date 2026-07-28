@@ -28,7 +28,19 @@ export class MissingOpenAIKeyError extends Error {
 // conformance suite inject a stub without `any` — see transport.ts for why the boundary
 // is the client rather than HTTP.
 type ProviderStream = AsyncIterable<{
-  choices?: Array<{ delta?: { content?: string | null }; finish_reason?: string | null }>;
+  choices?: Array<{
+    delta?: {
+      content?: string | null;
+      // Tool calls stream incrementally: the id and function name arrive once, the arguments
+      // accumulate as JSON fragments across deltas, keyed by `index` (S1.8).
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        function?: { name?: string; arguments?: string };
+      }>;
+    };
+    finish_reason?: string | null;
+  }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number } | null;
 }>;
 type ProviderClient = {
@@ -88,17 +100,41 @@ export class OpenAIAdapter implements AgentAdapter {
     let tokensIn = 0;
     let tokensOut = 0;
     let stopReason = 'stop';
+    // Tool calls accumulate across deltas, keyed by `index` — the id and name arrive once, the
+    // arguments come as JSON fragments (S1.8). Assembled here, surfaced as `action` chunks after the
+    // stream so `done` stays the single terminal chunk.
+    const toolCalls = new Map<number, { id: string; name: string; args: string }>();
 
     for await (const part of stream) {
       const choice = part.choices?.[0];
       const text = choice?.delta?.content;
       if (text) yield { kind: 'text_delta', text };
+      for (const tc of choice?.delta?.tool_calls ?? []) {
+        const entry = toolCalls.get(tc.index) ?? { id: '', name: '', args: '' };
+        if (tc.id) entry.id = tc.id;
+        if (tc.function?.name) entry.name = tc.function.name;
+        if (tc.function?.arguments) entry.args += tc.function.arguments;
+        toolCalls.set(tc.index, entry);
+      }
       if (choice?.finish_reason) stopReason = choice.finish_reason;
       // Usage arrives on a final chunk that carries no choices.
       if (part.usage) {
         tokensIn = part.usage.prompt_tokens ?? 0;
         tokensOut = part.usage.completion_tokens ?? 0;
       }
+    }
+
+    // STRUCTURED ACTIONS the model emitted. A malformed arguments fragment parses to `{}` rather than
+    // throwing — a bad tool call becomes an action the fabric refuses on its arguments, not a crashed
+    // turn. The gateway attributes and governs it (S1.8).
+    for (const tc of toolCalls.values()) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = tc.args ? (JSON.parse(tc.args) as Record<string, unknown>) : {};
+      } catch {
+        args = {};
+      }
+      yield { kind: 'action', action: tc.name, arguments: args, call_id: tc.id };
     }
 
     yield { kind: 'done', tokens_in: tokensIn, tokens_out: tokensOut, stop_reason: stopReason };
