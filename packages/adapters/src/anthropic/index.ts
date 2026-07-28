@@ -81,10 +81,19 @@ export class AnthropicAdapter implements AgentAdapter {
     // agent's behaviour. No principal or role model yet (S1.x).
     const transcript = messages.map((m) => `${m.author}: ${m.body}`).join('\n');
 
+    // Tools the model may call this turn, translated to this provider's shape (S1.8). Omitted
+    // entirely when none are offered, so a text-only turn's request is byte-for-byte what it was.
+    const tools = opts?.tools?.map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.parameters,
+    }));
+
     const stream = this.client.messages.stream({
       model: this.model,
       max_tokens: opts?.maxOutputTokens ?? 1024,
       ...(opts?.systemPrompt ? { system: opts.systemPrompt } : {}),
+      ...(tools && tools.length ? { tools } : {}),
       messages: [{ role: 'user', content: transcript || '(no messages)' }],
     } as never);
 

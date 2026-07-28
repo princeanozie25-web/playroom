@@ -218,16 +218,21 @@ describe('claims a closeout asserted by grep', () => {
     expect(matches(scope, /permit/i, false)).toEqual([]);
   });
 
-  it('S0.5b — no `agent.summon` scope exists anywhere', () => {
-    // The scope that must not be invented: an agent authorised to summon another agent is the
-    // cross-principal conscription barrier 1 exists to prevent, and it must not arrive as a
-    // mandate field before there is a decision to make it one.
-    // Scoped to code, schema and config — NOT prose. The red-team ledger names this scope in the
-    // row recording that it does not exist, and the assertion caught its own documentation on the
-    // first run. Same trap as this file's self-exemption, and the same fix: the claim is about a
-    // mandate field and a code path, so that is what is searched.
+  it('S1.8 — the summon-initiation scope is the governed `summon.initiate`, never `agent.summon`', () => {
+    // S0.5b forbade an agent-summon scope UNTIL there was a decision to create one: "it must not
+    // arrive as a mandate field before there is a decision to make it one." S1.8 IS that decision — an
+    // agent may initiate a summon, GOVERNED: default-closed, granted deliberately (claude-main only),
+    // evaluated at the single summon constructor against the emitting agent's mandate, and bounded by
+    // the depth cap. So this asserts the SHAPE of that decision rather than its absence.
+    //
+    // Scoped to code, schema and config — NOT prose. The premature ungoverned name `agent.summon`
+    // still does not exist; the governed name does, and it is checked rather than dead authority text.
     const scope = source.filter((f) => !f.startsWith('docs/'));
-    expect(matches(scope, /agent\.summon/, false)).toEqual([]);
+    expect(matches(scope, /agent\.summon/, false), 'the premature ungoverned name').toEqual([]);
+    expect(
+      matches(scope, /summon\.initiate/, false).length,
+      'the governed scope should exist and be evaluated — not dead text in an authority document',
+    ).toBeGreaterThan(0);
   });
 
   it('§21.2 — no hardcoded member id or summon token in the room or the api', () => {

@@ -18,6 +18,17 @@ export interface TurnSpans {
   t1: number; // triggering message row committed
 }
 
+/**
+ * The provenance chain a turn carries and an agent-emitted summon extends (S1.8): the human at the
+ * head of the chain, and the depth of the summon that authorised this turn. A turn passes its own
+ * chain when it emits a summon; the constructor increments the depth and the cap sees one more hop.
+ */
+export interface SummonChain {
+  rootActor: string;
+  rootIsHuman: boolean;
+  depth: number;
+}
+
 // A room-mutating command. Reads (getRoom, replay) do not pass through the entry.
 export type Command =
   | { kind: 'createRoom'; id?: string; title?: string }
@@ -33,6 +44,9 @@ export type Command =
       causeSeq: number;
       intent: string;
       spans?: TurnSpans;
+      // Present ONLY when an agent emitted this summon (S1.8). Its presence is what admits an agent
+      // root; the constructor checks the emitting agent's mandate and the depth cap when it is set.
+      chain?: SummonChain;
     }
   | {
       kind: 'triggerAgentTurn';
@@ -41,6 +55,8 @@ export type Command =
       summonId: string;
       taskId: string;
       spans?: TurnSpans;
+      // The chain this turn carries, so if it emits a summon the constructor knows the root and depth.
+      chain?: SummonChain;
     }
   // Hand a task to another member (S1.3). Returns a refusal rather than throwing: four
   // preconditions, four reasons, and the caller turns them into typed frames.

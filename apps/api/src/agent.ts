@@ -3,20 +3,49 @@ import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import type { AgentAdapter, ServerEvent } from '@playroom/shared';
+import type { AgentAdapter, AgentTool, ServerEvent } from '@playroom/shared';
 import { costUsd, getAdapterConfig, listAdapters } from '@playroom/adapters';
 import type { RoomBus } from './bus.js';
 import { appendAgentEvent, appendMessage, type SummonRef, type TaskRef } from './events.js';
 import { assembleContext, assemblyShape, windowFor } from './assembly.js';
 import { RECENT_WINDOW_MESSAGES } from './summary.js';
+import { mandateFor } from './mandates.js';
 import { stampFor } from './stamp.js';
 import { ceilingMessage, spendToday } from './spend.js';
 import { getTask, transitionTask, type TaskState } from './tasks.js';
+import type { Command, CommandContext, SummonChain } from './commands/context.js';
 
 // The recent window handed to a turn: this many messages verbatim, PLUS the rolling summary of
 // everything older (S1.6). Before, it was a hard cap that DROPPED older messages; now the older
 // span is folded into a summary ahead of the summon, so the window is bounded without being lossy.
 const CONTEXT_MESSAGES = RECENT_WINDOW_MESSAGES;
+
+/**
+ * The mandate scope that authorises an agent to INITIATE a summon through the tool-call channel
+ * (S1.8). Default-closed: no mandate grants it unless deliberately written to. Checked at the summon
+ * constructor via the evaluator, and used here to decide whether a turn is even OFFERED the summon
+ * tool. Named `summon.initiate` — deliberately NOT the ungoverned agent-summon shape S0.5b refused
+ * and the evidence suite still forbids by that name; this is its governed successor.
+ */
+export const SUMMON_INITIATE_ACTION = 'summon.initiate';
+
+/** The provider-neutral tool a summon-authorised agent is offered, so its model can emit a summon. */
+export const SUMMON_TOOL: AgentTool = {
+  name: 'summon',
+  description:
+    'Summon another agent member of this room to take a turn. Use only when the work genuinely ' +
+    'needs another member; the summoned member acts under its own authority, at its own cost.',
+  parameters: {
+    type: 'object',
+    properties: {
+      member: {
+        type: 'string',
+        description: 'The id or display name of the agent member in this room to summon.',
+      },
+    },
+    required: ['member'],
+  },
+};
 
 // The system prompt and its SHA-256, read once from prompts/room-agent.v1.md.
 let promptCache: { text: string; hash: string } | undefined;
@@ -339,12 +368,20 @@ export interface AgentTurnDeps {
   roomId: string;
   adapterId: string;
   adapterFactory: (id: string) => AgentAdapter;
+  // RE-ENTER THE COMMAND ENTRY so an EMITTED summon converges on the single summon constructor
+  // (S1.8) — the same path a human tag uses, not a parallel one. Present because a turn can now
+  // dispatch a summon of its own.
+  execute: (ctx: CommandContext, command: Command) => Promise<unknown>;
   // The summon this turn answers. Required, so a turn cannot exist without one.
   summon: SummonRef;
   // The task this turn is work on. Required for the same reason (S1.3): the turn is what
   // finishes the work or fails to, so it is the only party that can move the task out of
   // `working`, and a turn with no task would leave one there forever.
   task: TaskRef;
+  // THE PROVENANCE CHAIN THIS TURN CARRIES (S1.8): its own summon's root and depth. When this turn
+  // emits a summon, this is the chain it extends — the constructor increments the depth. Absent is
+  // treated as a human root at depth 0 (the pre-S1.8 shape).
+  chain?: SummonChain;
   spans?: { t0: number; t1: number }; // S0.3c: command-entry + message-committed boundaries
 }
 
@@ -376,8 +413,13 @@ async function moveTask(
 // completed. Persist-before-fanout holds for every one (ADR-003). A failure is
 // written as completed{success:false} with an error_class — never a silent hang.
 export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
-  const { pool, bus, roomId, adapterId, adapterFactory, spans, summon, task } = deps;
+  const { pool, bus, roomId, adapterId, adapterFactory, execute, spans, summon, task } = deps;
   const publish = (ev: ServerEvent): void => bus.publish(roomId, ev);
+
+  // STRUCTURED SUMMONS this turn emitted, collected during the stream and dispatched AFTER it
+  // completes (S1.8) — so the emitting turn's own events (started/deltas/completed) are written
+  // first, and B's summon reads in the log after A's turn, in the order the decisions happened.
+  const emittedSummons: string[] = [];
 
   // ── THE DAILY SPEND CEILING, CHECKED BEFORE ANYTHING COSTS MONEY (§18, S-LIVE) ──
   //
@@ -447,14 +489,33 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     // an unstampable turn fails loudly as completed{success:false} rather than starting.
     const stamp = await stampFor(pool, adapterId);
 
-    publish(
-      await appendAgentEvent(pool, roomId, adapterId, summon, task, 'agent.turn.started', {
+    // THE STARTED EVENT'S SEQ IS THE CAUSE of any summon this turn emits (S1.8): it is the event that
+    // asked, half the natural key migration 005 makes unique, so a re-run of this turn cannot summon
+    // the same member twice. Captured here where the row is written, not derived later.
+    const startedEvent = await appendAgentEvent(
+      pool,
+      roomId,
+      adapterId,
+      summon,
+      task,
+      'agent.turn.started',
+      {
         turn_id: turnId,
         adapter_id: adapterId,
         principal_id: stamp.principal_id,
         mandate_hash: stamp.mandate_hash,
-      }),
+      },
     );
+    publish(startedEvent);
+    const startedSeq = startedEvent.seq;
+
+    // TOOLS OFFERED TO THIS TURN (S1.8). The summon tool is handed to the model ONLY when this
+    // member's mandate grants `summon.initiate` — an agent that cannot summon is not offered the
+    // tool, so an injection has nothing to call. The summon constructor re-checks the mandate
+    // regardless; offering is the near guard, the constructor's evaluation is the load-bearing one.
+    const maySummon =
+      mandateFor(adapterId)?.mandate.scope.includes(SUMMON_INITIATE_ACTION) ?? false;
+    const tools = maySummon ? [SUMMON_TOOL] : undefined;
 
     // §7.1 ASSEMBLY. This was `recentMessages(pool, roomId, CONTEXT_MESSAGES)` — the room's log and
     // nothing else, which satisfied the invariant only because no private store existed to violate
@@ -478,6 +539,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     for await (const chunk of adapter.stream(messages, {
       systemPrompt: windowSystem,
       maxOutputTokens: cfg.max_output_tokens,
+      tools,
     })) {
       if (chunk.kind === 'text_delta') {
         if (tFirstChunk === null) tFirstChunk = performance.now(); // span: first chunk from the SDK
@@ -499,10 +561,14 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         publish(delta);
         if (tFirstFanout === null) tFirstFanout = performance.now(); // span: first delta frame written
       } else if (chunk.kind === 'action') {
-        // CONSUMED IN S18-2, not here. This slice (S18-1) makes structured emission expressible,
-        // typed and surfaced by the adapters; the next converges it onto the summon constructor and
-        // the fabric. Until then an emitted action is inert — it neither activates nor errors the
-        // turn — which is what "nothing consumes the variant yet" means in code.
+        // A STRUCTURED ACTION the model emitted (S1.8). This slice's ONLY consumer is a summon; any
+        // other action is ignored here (pr.merge emission is S2.1's and is deliberately not built).
+        // A summon's raw target is collected and dispatched AFTER the turn completes, through the
+        // same constructor a human tag uses — never a parallel path, and governed there.
+        if (chunk.action === 'summon') {
+          const target = typeof chunk.arguments.member === 'string' ? chunk.arguments.member : '';
+          if (target) emittedSummons.push(target);
+        }
       } else if (chunk.kind === 'done') {
         tokensIn = chunk.tokens_in;
         tokensOut = chunk.tokens_out;
@@ -570,6 +636,39 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     // Written after the completed row, in the same order the decisions happened: the turn ends,
     // then the task it belonged to closes.
     await moveTask(deps, 'done', 'the turn completed', adapterId);
+
+    // ── EMITTED SUMMONS, DISPATCHED AFTER THE TURN (S1.8) ────────────────────────────────────
+    //
+    // This turn's own events are in the log now, so hand each summon it emitted to the SAME
+    // constructor a human tag uses — with the chain this turn carries, so the constructor increments
+    // the depth, re-checks the emitting agent's mandate, and resolves the target against the room.
+    // Deduped, so a model that names a member twice summons it once. Fire-and-forget: the summon
+    // triggers the summoned member's turn, which owns its own errors, exactly as a human-tag summon.
+    if (emittedSummons.length > 0) {
+      const chain = deps.chain;
+      if (!chain) {
+        // A turn with no chain has no known human root, and a summon must trace to one — so it cannot
+        // safely emit. This should not happen (every turn is triggered by the constructor with its
+        // chain); logged rather than dropped in silence.
+        console.warn(
+          `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} emitted ${emittedSummons.length} summon(s) with no chain — refused`,
+        );
+      } else {
+        for (const target of new Set(emittedSummons)) {
+          void execute(
+            { actorId: adapterId, mode: 'hosted' },
+            {
+              kind: 'summon',
+              roomId,
+              member: target,
+              causeSeq: startedSeq,
+              intent: `${adapterId} summoned ${target}`,
+              chain,
+            },
+          ).catch(() => {}); // the summon path logs its own refusals; this guards the fire-and-forget
+        }
+      }
+    }
   } catch (err) {
     // A SUMMON MAY START AT MOST ONE TURN (migration 006). This turn lost the race for
     // the `agent.turn.started` row, so another turn already answers this summon.

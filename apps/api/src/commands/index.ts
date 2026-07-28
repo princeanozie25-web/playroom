@@ -4,6 +4,7 @@ import {
   type Command,
   type CommandContext,
   type CommandDeps,
+  type SummonChain,
   type TurnSpans,
   CommandError,
 } from './context.js';
@@ -41,6 +42,7 @@ export function executeCommand(
     causeSeq: number;
     intent: string;
     spans?: TurnSpans;
+    chain?: SummonChain;
   },
   deps: CommandDeps,
 ): Promise<void>;
@@ -53,6 +55,7 @@ export function executeCommand(
     summonId: string;
     taskId: string;
     spans?: TurnSpans;
+    chain?: SummonChain;
   },
   deps: CommandDeps,
 ): Promise<void>;

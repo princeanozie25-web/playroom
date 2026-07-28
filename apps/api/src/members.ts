@@ -148,6 +148,29 @@ export async function listRoomMembers(pool: Pool, roomId: string): Promise<Membe
 }
 
 /**
+ * Resolve a raw summon TARGET — a string a model emitted (S1.8) — to an AGENT member of this room.
+ *
+ * The model names a target by id or display name; this normalises (a leading `@` stripped,
+ * lowercased) and matches it against the room's AGENT members. Returns the member id, or null when
+ * nothing in the room matches — which is the "cannot summon a member outside the room" refusal, the
+ * structured path's equivalent of the free-text boundary resolving `@tokens` against the room's own
+ * tokens. AGENTS ONLY: a summon starts an agent turn, so a human target has no adapter to run.
+ */
+export async function resolveRoomAgent(
+  pool: Pool,
+  roomId: string,
+  target: string,
+): Promise<string | null> {
+  const want = target.trim().replace(/^@/, '').toLowerCase();
+  if (!want) return null;
+  for (const m of await listRoomMembers(pool, roomId)) {
+    if (m.kind !== 'agent') continue;
+    if (m.id.toLowerCase() === want || m.display_name.toLowerCase() === want) return m.id;
+  }
+  return null;
+}
+
+/**
  * One member row, or null.
  *
  * The `kind` is what callers need: a handoff checks a mandate only for an AGENT, because mandates

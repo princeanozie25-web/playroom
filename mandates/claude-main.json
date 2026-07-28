@@ -2,7 +2,7 @@
   "mandate_id": "mnd_claude_main_review",
   "principal": "principal:prince",
   "member": "claude-main",
-  "scope": ["pr.review", "pr.comment", "pr.merge"],
+  "scope": ["pr.review", "pr.comment", "pr.merge", "summon.initiate"],
   "protected_actions": ["pr.merge", "deploy"],
   "co_sign": {
     "actions": ["pr.merge", "deploy"],

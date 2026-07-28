@@ -28,9 +28,28 @@ export type AgentTurnChunk =
   | { kind: 'done'; tokens_in: number; tokens_out: number; stop_reason: string }
   | { kind: 'error'; error_class: string; message: string };
 
+/**
+ * A tool the model may call — provider-neutral (S1.8). Adapters translate it into their own
+ * tool/function-calling wire format; the model's use of it arrives back as an `action` chunk.
+ *
+ * OFFERED, NEVER FORCED. Passing a tool lets the model emit the action; it does not make it. And a
+ * tool is offered to a member's turn only when that member's mandate authorises the action — an agent
+ * whose mandate does not grant a summon is not handed the summon tool, so the injection cannot even
+ * form. The summon constructor re-checks the mandate regardless: offering is the near guard, the
+ * evaluation at the choke point is the load-bearing one.
+ */
+export interface AgentTool {
+  name: string;
+  description: string;
+  /** JSON Schema for the arguments the model must supply when it calls the tool. */
+  parameters: Record<string, unknown>;
+}
+
 export interface AgentStreamOptions {
   systemPrompt?: string;
   maxOutputTokens?: number;
+  /** Tools the model may call this turn. Absent or empty = a text-only turn (the default). */
+  tools?: AgentTool[];
 }
 
 // Every adapter implements this. `id` is the adapters.yaml id (a member id),

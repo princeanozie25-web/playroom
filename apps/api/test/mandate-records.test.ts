@@ -131,7 +131,9 @@ describe('the compact summary still has exactly one source', () => {
     const members = await listMembers(pool);
 
     const claude = members.find((m) => m.id === 'claude-main');
-    expect(claude?.scope).toEqual(['pr.review', 'pr.comment', 'pr.merge']);
+    // `summon.initiate` joined claude-main's scope in S1.8 — the smallest honest grant that lets ONE
+    // agent initiate a summon through the tool-call channel; sol/ada/bo are default-closed.
+    expect(claude?.scope).toEqual(['pr.review', 'pr.comment', 'pr.merge', 'summon.initiate']);
     expect(claude?.protected_actions).toEqual(['pr.merge', 'deploy']);
     const sol = members.find((m) => m.id === 'sol');
     expect(sol?.scope).toEqual(['pr.review', 'pr.comment']);

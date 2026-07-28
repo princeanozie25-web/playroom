@@ -83,6 +83,13 @@ export class OpenAIAdapter implements AgentAdapter {
     // routes through either member" a real claim rather than a coincidence.
     const transcript = messages.map((m) => `${m.author}: ${m.body}`).join('\n');
 
+    // Tools the model may call this turn, translated to this provider's function-calling shape
+    // (S1.8). Omitted when none are offered, so a text-only turn's request is unchanged.
+    const tools = opts?.tools?.map((t) => ({
+      type: 'function',
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }));
+
     const stream = await this.client.chat.completions.create({
       model: this.model,
       max_tokens: opts?.maxOutputTokens ?? 1024,
@@ -91,6 +98,7 @@ export class OpenAIAdapter implements AgentAdapter {
       // counts at all, cost_usd would be null, and the in-thread spend line — the §18
       // "spend is visible" claim the demo shows — would be empty for this member only.
       stream_options: { include_usage: true },
+      ...(tools && tools.length ? { tools } : {}),
       messages: [
         ...(opts?.systemPrompt ? [{ role: 'system', content: opts.systemPrompt }] : []),
         { role: 'user', content: transcript || '(no messages)' },

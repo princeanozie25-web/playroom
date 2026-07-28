@@ -181,6 +181,8 @@ describe('the second drift number, enforced', () => {
       roomId: id,
       adapterId: 'claude-main',
       adapterFactory: (a: string) => reply(a),
+      // A no-op entry: this turn's scripted adapter emits no action, so nothing is dispatched (S1.8).
+      execute: () => Promise.resolve(),
       summon: { summon_id: summonId },
       task: { task_id: task.id },
     };

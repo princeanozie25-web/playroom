@@ -42,7 +42,9 @@ describe('listMembers', () => {
         principal_name: 'Prince',
         principal_ordinal: 0,
         adapter_id: 'claude-main',
-        scope: ['pr.review', 'pr.comment', 'pr.merge'],
+        // `summon.initiate` granted in S1.8 — the one agent that may initiate a summon; the others
+        // (sol, ada, bo) are default-closed, which is what makes this enumeration worth pinning.
+        scope: ['pr.review', 'pr.comment', 'pr.merge', 'summon.initiate'],
         protected_actions: ['pr.merge', 'deploy'],
       },
       {
