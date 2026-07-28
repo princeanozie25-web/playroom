@@ -459,6 +459,49 @@ export const ContextPromotedEvent = z.object({
 });
 export type ContextPromotedEvent = z.infer<typeof ContextPromotedEvent>;
 
+/**
+ * THE ROOM'S ROLLING SUMMARY (Bible §15, §21.3, and S1.6).
+ *
+ * A compression of the room's OLDER messages, so an agent summoned into a long room stays
+ * oriented without the window replaying every message — the older span is folded into this and
+ * only the recent window is carried verbatim. It is DERIVED ROOM STATE: reconstructible from the
+ * messages it compresses (which still exist), never the only copy of anything.
+ *
+ * ── WHY THIS IS A SERVER EVENT AND NOT A TABLE, AND WHY IT IS IN THE UNION ──
+ *
+ * Two reasons it lands here. First, the summary is common ground — a compression of the room's own
+ * log — so it belongs in that log like every other projection, rebuildable on replay. Second, and
+ * this is the one S-LIVE's rollback finding forces: `ServerEvent` is a STRICT discriminated union,
+ * and `rowToServerEvent` parses every replayed row through it. A `room.summary` row that the union
+ * did not know would throw inside replay, and a room holding one would not open at all — empty, not
+ * degraded. So the type has to exist here the moment the server can write one.
+ *
+ * The client does NOT render it: `buildItems` is an allowlist with no fallthrough, so a
+ * `room.summary` event produces no transcript item. It is context for the agent and cost for the
+ * meter, not something a member reads. `cost_usd` rides in the payload (as it does on a completed
+ * turn) so the meter can read a summary's cost off the wire without a second query.
+ */
+export const RoomSummaryEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('room.summary'),
+  payload: z.object({
+    summary_id: z.string(),
+    /** The highest message seq this summary represents. The window is the messages after it. */
+    covers_through_seq: z.number(),
+    /** How many messages are folded into `text`, cumulative — for the compression ratio (§15). */
+    covers_message_count: z.number(),
+    /** The compressed, attributed summary itself. Plain prose, common ground, nobody's private context. */
+    text: z.string(),
+    /** The summariser call's own cost, so it can be counted, never hidden (S1.6 item 8). */
+    tokens_in: z.number().nullable(),
+    tokens_out: z.number().nullable(),
+    cost_usd: z.number().nullable(),
+    /** Which summariser prompt produced it (§18.1 reproducibility). Null only if unreadable. */
+    prompt_hash: z.string().nullable(),
+  }),
+});
+export type RoomSummaryEvent = z.infer<typeof RoomSummaryEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -473,6 +516,7 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   InterruptRaisedEvent,
   InterruptDowngradedEvent,
   ContextPromotedEvent,
+  RoomSummaryEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;

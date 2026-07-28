@@ -116,5 +116,19 @@ export async function postMessageCommand(
     });
   }
 
+  // MAINTAIN THE ROLLING SUMMARY, AHEAD OF THE NEXT SUMMON (S1.6). This message just grew the room;
+  // folding its older messages into the summary is a background model call, and it must sit on
+  // neither this send's path nor the next summon's first token (§7, ADR-008). Fire-and-forget, with
+  // its OWN `system` context — the room maintaining itself, not an act attributed to the sender.
+  // Cheap and idempotent when the tail is still short, which is every message in a young room.
+  void deps
+    .execute(
+      { actorId: 'system', mode: 'system' },
+      { kind: 'maintainSummary', roomId: input.roomId },
+    )
+    .catch(() => {
+      /* maintainRoomSummary logs its own failure; this only guards the fire-and-forget */
+    });
+
   return event;
 }

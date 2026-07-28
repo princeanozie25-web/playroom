@@ -15,10 +15,11 @@ import type { Pool } from 'pg';
  *
  * ── IT IS COUNTED FROM THE LOG, NOT FROM A COUNTER ──
  *
- * `agent.turn.completed` already carries `cost_usd` for every turn ever run (S0.3). Summing those is
- * the same reasoning the interrupt budget follows: a separate counter is a second representation of
- * a fact the log already holds, and the two drift the first time a write fails between them. A
- * restart forgets a counter; it cannot forget the log.
+ * `agent.turn.completed` carries `cost_usd` for every turn ever run (S0.3), and `room.summary`
+ * carries it for every summariser call (S1.6) — BOTH are real model spend on a real key, so both
+ * count here. Summing them is the same reasoning the interrupt budget follows: a separate counter is
+ * a second representation of a fact the log already holds, and the two drift the first time a write
+ * fails between them. A restart forgets a counter; it cannot forget the log.
  *
  * The cost of that choice is honest: this is a query per summon rather than a variable read. It is
  * one indexed aggregate against rows from today, next to a provider call that takes a second.
@@ -69,11 +70,14 @@ export interface SpendState {
  */
 export async function spendToday(pool: Pool): Promise<SpendState> {
   const ceiling = ceilingUsd();
+  // The `cost_usd` COLUMN, not the payload — both agent turns and summaries set it (events.ts), and
+  // the column is the typed number the ceiling is a limit on. Every model call counts: a turn a
+  // member asked for, and a summary the room folded on its behalf.
   const { rows } = await pool.query<{ spent: string | null }>(
-    `SELECT sum((payload ->> 'cost_usd')::numeric) AS spent
+    `SELECT sum(cost_usd) AS spent
        FROM events
-      WHERE event_type = 'agent.turn.completed'
-        AND payload ->> 'cost_usd' IS NOT NULL
+      WHERE event_type IN ('agent.turn.completed', 'room.summary')
+        AND cost_usd IS NOT NULL
         AND ts >= date_trunc('day', now() AT TIME ZONE 'UTC')`,
   );
   const spent = Number(rows[0]?.spent ?? 0);

@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { AgentMessage } from '@playroom/shared';
-import { recentMessages } from './events.js';
+import { latestRoomSummary, messagesAfterSeq } from './events.js';
+import { ROOM_SUMMARY_AUTHOR, SUMMARY_TRIGGER_BATCH } from './summary.js';
 import { withPrincipalStore } from './principal-store.js';
 import type { TaskRow } from './tasks.js';
 
@@ -196,9 +197,36 @@ export interface AssembleInput {
 export async function assembleContext(pool: Pool, input: AssembleInput): Promise<Assembly> {
   const parts: AssemblyPart[] = [];
 
-  // 1. COMMON GROUND — the room's own log. Shared by construction: every member of the room can
-  //    read it, so it is the one part that is nobody's private context.
-  const roomMessages = await recentMessages(pool, input.roomId, input.commonGroundLimit);
+  // 1. COMMON GROUND — the room's own log, shared by construction: every member can read it, so it
+  //    is the one part that is nobody's private context. As of S1.6 it is a ROLLING SUMMARY of the
+  //    older messages (when the room is long enough to have one) followed by the RECENT WINDOW.
+  //    Before, common ground was the last N messages and everything older was simply gone — a long
+  //    room lost its start. The summary is common ground too: a compression of the room's own log,
+  //    attributed, holding nobody's private context, so it is one more common-ground part rather
+  //    than a new source (the §7.1 invariant's allowed set is unchanged).
+  //
+  //    Assembly only READS the summary — one indexed row. It never generates one: that is maintained
+  //    AHEAD of the summon on the message path (summary.ts), so nothing here makes a model call and
+  //    the summon's first token is unaffected (§7, ADR-008).
+  const summary = await latestRoomSummary(pool, input.roomId);
+  if (summary) {
+    parts.push({
+      source: 'common-ground',
+      principal_id: null,
+      messages: [{ author: ROOM_SUMMARY_AUTHOR, body: summary.text }],
+    });
+  }
+  // The recent window is the messages AFTER the summary's coverage (all of them when there is no
+  // summary, since the floor is 0). Coverage and window meet exactly — a message is summarised or
+  // recent, never both and never neither. Capped at the window plus one batch of slack: the backstop
+  // that keeps the tail bounded if maintenance is briefly behind.
+  const floor = summary ? summary.covers_through_seq : 0;
+  const roomMessages = await messagesAfterSeq(
+    pool,
+    input.roomId,
+    floor,
+    input.commonGroundLimit + SUMMARY_TRIGGER_BATCH,
+  );
   parts.push({ source: 'common-ground', principal_id: null, messages: roomMessages });
 
   // 2. THE MEMBER'S OWN STORE — and only through the scoped transaction.

@@ -169,14 +169,153 @@ export async function recentMessages(
   roomId: string,
   limit: number,
 ): Promise<AgentMessage[]> {
+  return messagesAfterSeq(pool, roomId, 0, limit);
+}
+
+/**
+ * The room's messages with `seq > afterSeq`, oldest-first, at most `limit` of them.
+ *
+ * `recentMessages` is this with `afterSeq = 0`. The generalisation exists for S1.6's assembly: the
+ * recent window is the messages AFTER the rolling summary's coverage point, so the summary and the
+ * window meet exactly — no gap (a message is in one or the other) and no overlap (never both). The
+ * `LIMIT` is a backstop against maintenance falling behind; under steady state the tail is already
+ * short and the limit does not bite.
+ *
+ * Agent turn events stay excluded — the same `event_type = 'message'` filter as before, so common
+ * ground is the conversation, not the agents' own event stream (PM7).
+ */
+export async function messagesAfterSeq(
+  pool: Pool,
+  roomId: string,
+  afterSeq: number,
+  limit: number,
+): Promise<AgentMessage[]> {
   const { rows } = await pool.query<{ actor_id: string; payload: { body: string } }>(
     `SELECT actor_id, payload FROM events
-     WHERE room_id = $1 AND event_type = 'message'
+     WHERE room_id = $1 AND event_type = 'message' AND seq > $2
      ORDER BY seq DESC
-     LIMIT $2`,
-    [roomId, limit],
+     LIMIT $3`,
+    [roomId, afterSeq, limit],
   );
   return rows.reverse().map((r) => ({ author: r.actor_id, body: r.payload.body }));
+}
+
+/** How many room messages sit after `afterSeq`. The tail length the summariser watches. */
+export async function countMessagesAfter(
+  pool: Pool,
+  roomId: string,
+  afterSeq: number,
+): Promise<number> {
+  const { rows } = await pool.query<{ n: string }>(
+    `SELECT count(*) AS n FROM events
+     WHERE room_id = $1 AND event_type = 'message' AND seq > $2`,
+    [roomId, afterSeq],
+  );
+  return Number(rows[0].n);
+}
+
+/** One folded message, carrying its seq so the summary knows how far it now reaches. */
+export interface MessageForFold {
+  seq: number;
+  author: string;
+  body: string;
+}
+
+/**
+ * The oldest `limit` messages after `afterSeq`, in order — the batch a maintenance run folds into
+ * the summary. Ordered ASC (oldest first) because that is both the order they are summarised in and
+ * the order whose LAST element gives the new `covers_through_seq`.
+ */
+export async function messageBatchAfter(
+  pool: Pool,
+  roomId: string,
+  afterSeq: number,
+  limit: number,
+): Promise<MessageForFold[]> {
+  const { rows } = await pool.query<{ seq: string; actor_id: string; payload: { body: string } }>(
+    `SELECT seq, actor_id, payload FROM events
+     WHERE room_id = $1 AND event_type = 'message' AND seq > $2
+     ORDER BY seq ASC
+     LIMIT $3`,
+    [roomId, afterSeq, limit],
+  );
+  return rows.map((r) => ({ seq: Number(r.seq), author: r.actor_id, body: r.payload.body }));
+}
+
+/** The current rolling summary of a room, or null if it has none yet (a short room). */
+export interface RoomSummary {
+  covers_through_seq: number;
+  covers_message_count: number;
+  text: string;
+}
+
+/** The newest `room.summary` event for a room — the current summary. Null when there is none. */
+export async function latestRoomSummary(pool: Pool, roomId: string): Promise<RoomSummary | null> {
+  const { rows } = await pool.query<{ payload: RoomSummary }>(
+    `SELECT payload FROM events
+     WHERE room_id = $1 AND event_type = 'room.summary'
+     ORDER BY seq DESC
+     LIMIT 1`,
+    [roomId],
+  );
+  const p = rows[0]?.payload;
+  return p
+    ? {
+        covers_through_seq: Number(p.covers_through_seq),
+        covers_message_count: Number(p.covers_message_count),
+        text: p.text,
+      }
+    : null;
+}
+
+/**
+ * Append a rolling-summary event, authored by the room itself (`system`).
+ *
+ * RETURNS NULL if a summary already covers this exact point — migration 019's unique index refused
+ * the insert because another maintenance run (a restart mid-fold, a second instance) got there
+ * first. Null is not an error: the fold this call was doing is already done, and re-publishing it
+ * would put a second summary for one coverage point into a log that is read as a history.
+ *
+ * The cost lives in BOTH the `cost_usd` column (so the ceiling and the room meter can sum it with
+ * one indexed query) and the payload (so the meter can read it off the wire, as a completed turn's
+ * cost is). The summariser is a model call and its cost is never hidden (S1.6 item 8).
+ */
+export async function appendRoomSummary(
+  pool: Pool,
+  roomId: string,
+  payload: {
+    summary_id: string;
+    covers_through_seq: number;
+    covers_message_count: number;
+    text: string;
+    tokens_in: number | null;
+    tokens_out: number | null;
+    cost_usd: number | null;
+    prompt_hash: string | null;
+  },
+): Promise<ServerEvent | null> {
+  const { rows } = await pool.query<EventRow>(
+    // actor_member_id is NULL, not ACTOR_MEMBER(...): the author is `system`, the room speaking,
+    // which is exactly the row migration 010's CHECK allows without a member (`actor_id = 'system'`).
+    `INSERT INTO events
+       (room_id, actor_id, actor_member_id, event_type, payload,
+        adapter_id, tokens_in, tokens_out, cost_usd, prompt_hash, success)
+     VALUES ($1, 'system', NULL, 'room.summary', $2,
+             NULL, $3, $4, $5, $6, true)
+     ON CONFLICT (room_id, (payload ->> 'covers_through_seq'))
+       WHERE event_type = 'room.summary'
+       DO NOTHING
+     RETURNING ${EVENT_COLS}`,
+    [
+      roomId,
+      JSON.stringify(payload),
+      payload.tokens_in,
+      payload.tokens_out,
+      payload.cost_usd,
+      payload.prompt_hash,
+    ],
+  );
+  return rows[0] ? rowToServerEvent(rows[0]) : null;
 }
 
 // The send path's persistence step. Idempotent on (room_id, client_msg_id): a

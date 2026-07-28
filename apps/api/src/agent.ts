@@ -8,11 +8,15 @@ import { costUsd, getAdapterConfig, listAdapters } from '@playroom/adapters';
 import type { RoomBus } from './bus.js';
 import { appendAgentEvent, appendMessage, type SummonRef, type TaskRef } from './events.js';
 import { assembleContext, assemblyShape, windowFor } from './assembly.js';
+import { RECENT_WINDOW_MESSAGES } from './summary.js';
 import { stampFor } from './stamp.js';
 import { ceilingMessage, spendToday } from './spend.js';
 import { getTask, transitionTask, type TaskState } from './tasks.js';
 
-const CONTEXT_MESSAGES = 30; // PM7 hard cap — last 30 room messages, nothing more
+// The recent window handed to a turn: this many messages verbatim, PLUS the rolling summary of
+// everything older (S1.6). Before, it was a hard cap that DROPPED older messages; now the older
+// span is folded into a summary ahead of the summon, so the window is bounded without being lossy.
+const CONTEXT_MESSAGES = RECENT_WINDOW_MESSAGES;
 
 // The system prompt and its SHA-256, read once from prompts/room-agent.v1.md.
 let promptCache: { text: string; hash: string } | undefined;

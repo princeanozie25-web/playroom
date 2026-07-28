@@ -53,7 +53,12 @@ export type Command =
       subject: string;
       action: string;
       resource: string;
-    };
+    }
+  // Fold the room's older messages into its rolling summary, if the tail has grown past the window
+  // (S1.6). Dispatched fire-and-forget from postMessage so the summary is maintained AHEAD of the
+  // next summon, never on the summon's own first-token path. Idempotent and cheap when there is
+  // nothing to fold. Runs under a `system` actor — it is the room maintaining itself.
+  | { kind: 'maintainSummary'; roomId: string };
 
 // Dependencies the command handlers need. `execute` lets a handler re-enter the
 // single entry (e.g. postMessage triggering an agent turn) so the trigger decision
