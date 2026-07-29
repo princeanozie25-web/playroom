@@ -108,6 +108,33 @@ export async function orderById(
   return rows[0] ? toOrderRow(rows[0]) : null;
 }
 
+/** An order plus the time it last fired, reconstructed from the order.cycled log — the loops
+ * screen's row. The projection holds status/counts/terms; the LOG holds last-fired (there is no
+ * denormalised column for it, deliberately — it is a fact the events already carry). */
+export interface OrderListRow extends OrderRow {
+  last_fired: string | null; // ISO of the most recent order.cycled, or null if it never fired
+}
+
+/** Every order in a room, its config newest first, each with last-fired from the events. */
+export async function ordersInRoom(pool: Pool, roomId: string): Promise<OrderListRow[]> {
+  const { rows } = await pool.query<OrderDbRow & { last_fired: Date | null }>(
+    `SELECT so.id, so.room_id, so.creator_member_id, so.trigger_event_type, so.trigger_member_id,
+            so.action_member_id, so.max_cycles, so.max_unattended_cycles, so.expires_at,
+            so.cycle_count, so.unattended_count, so.status, so.pause_reason,
+            (SELECT max(e.ts) FROM events e
+              WHERE e.room_id = so.room_id AND e.event_type = 'order.cycled'
+                AND e.payload ->> 'order_id' = so.id) AS last_fired
+       FROM standing_orders so
+      WHERE so.room_id = $1
+      ORDER BY so.created_at DESC`,
+    [roomId],
+  );
+  return rows.map((r) => ({
+    ...toOrderRow(r),
+    last_fired: r.last_fired ? r.last_fired.toISOString() : null,
+  }));
+}
+
 /**
  * Move an order to a new status, recording the reason on the row (null when ACTIVE). The order.status
  * event is appended by the caller, before this, so the log leads the projection.

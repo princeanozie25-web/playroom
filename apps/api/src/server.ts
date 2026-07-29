@@ -1,4 +1,9 @@
-import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import {
   PLAYROOM_VERSION,
@@ -13,6 +18,9 @@ import {
   ERROR_TICKET_REQUIRED,
   ERROR_TICKET_INVALID,
   ERROR_DOWNGRADE_REFUSED,
+  ERROR_ORDER_UNKNOWN,
+  ERROR_ORDER_NOT_HUMAN,
+  ERROR_ORDER_NOT_CREATOR,
   WS_CLOSE_ROOM_NOT_FOUND,
   WS_CLOSE_UNAUTHENTICATED,
   type AgentAdapter,
@@ -38,7 +46,8 @@ import { authenticate, type AuthFailure } from './credentials.js';
 import { downgradeInterrupt } from './interrupts.js';
 import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
 import { RedeemRefused, redeemRoomCode } from './room-codes.js';
-import { listMembers, listRoomMembers, roomAccess } from './members.js';
+import { listMembers, listRoomMembers, memberRecord, roomAccess } from './members.js';
+import { ordersInRoom } from './orders.js';
 import { setKnownMemberTokens } from './agent.js';
 import { roomSpend } from './spend.js';
 
@@ -350,6 +359,146 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         return roomNotFound(id);
       }
       return { members: await listRoomMembers(db(), id) };
+    });
+
+    // ── THE STANDING-ORDER ROUTES (S-UI3) ─────────────────────────────────────────────────────
+    //
+    // The loops screen reads and steers orders over HTTP — a form is request/response, not a live
+    // socket. EVERY WRITE GOES THROUGH executeCommand, so the human-only creation, the creator-only
+    // edit/resume/revoke, and the any-human pause are the SAME enforcement the WS frames get: these
+    // routes add none and bypass none. Every route is membership-scoped like GET /members — a
+    // non-member gets what a missing room gives, because the WS handshake's membership gate does not
+    // exist on an HTTP request and orders must not be readable or steerable across rooms.
+
+    /** authenticate + membership, or send the refusal and return null. Same silence as GET /members. */
+    async function orderRouteMember(
+      req: FastifyRequest,
+      reply: FastifyReply,
+      roomId: string,
+    ): Promise<{ member_id: string; principal_id: string } | null> {
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        reply.code(401).send(credentialRefusal(auth.failure, roomId));
+        return null;
+      }
+      const access = await roomAccess(db(), roomId, auth.auth.member_id);
+      if (!access.room_exists || !access.is_member) {
+        reply.code(404).send(roomNotFound(roomId));
+        return null;
+      }
+      return auth.auth;
+    }
+
+    /** An order-command refusal → the HTTP status a form acts on, carrying the code and message. */
+    const orderRefusalStatus = (code: string): number =>
+      code === ERROR_ORDER_UNKNOWN
+        ? 404
+        : code === ERROR_ORDER_NOT_HUMAN || code === ERROR_ORDER_NOT_CREATOR
+          ? 403
+          : 400; // member_unknown / bad_state / invalid_config — malformed or wrong-state
+
+    fastify.get('/rooms/:id/orders', async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const actor = await orderRouteMember(req, reply, id);
+      if (!actor) return reply;
+      // WHO IS ASKING travels with the list, resolved server-side from the credential — the loops
+      // screen is a server component with no WS `hello` to learn it from, and it needs the viewer to
+      // render authorisation as visible truth (the creator sees edit/resume/revoke, any human sees
+      // pause, an agent sees nothing doable). It is a courtesy for rendering; the command re-checks it.
+      const me = await memberRecord(db(), actor.member_id);
+      return {
+        orders: await ordersInRoom(db(), id),
+        viewer: { member_id: actor.member_id, kind: me?.kind ?? 'human' },
+      };
+    });
+
+    fastify.post('/rooms/:id/orders', async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const actor = await orderRouteMember(req, reply, id);
+      if (!actor) return reply;
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+      const result = await executeCommand(
+        { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+        {
+          kind: 'createOrder',
+          roomId: id,
+          clientMsgId: str(b.client_msg_id) || `http-oc-${id}-${str(b.action_member)}`,
+          triggerEventType: str(b.trigger_event_type),
+          triggerMember: str(b.trigger_member),
+          actionMember: str(b.action_member),
+          maxCycles: typeof b.max_cycles === 'number' ? b.max_cycles : null,
+          maxUnattendedCycles:
+            typeof b.max_unattended_cycles === 'number' ? b.max_unattended_cycles : 3,
+          expiresAt: typeof b.expires_at === 'string' ? b.expires_at : null,
+        },
+        deps,
+      );
+      if (!result.ok) {
+        reply.code(orderRefusalStatus(result.refusal.code));
+        return { type: 'error', code: result.refusal.code, message: result.refusal.message };
+      }
+      reply.code(201);
+      return { order_id: result.orderId };
+    });
+
+    fastify.post('/rooms/:id/orders/:orderId/control', async (req, reply) => {
+      const { id, orderId } = req.params as { id: string; orderId: string };
+      const actor = await orderRouteMember(req, reply, id);
+      if (!actor) return reply;
+      const b = (req.body ?? {}) as { op?: unknown; client_msg_id?: unknown };
+      if (b.op !== 'pause' && b.op !== 'resume' && b.op !== 'revoke') {
+        reply.code(400);
+        return {
+          type: 'error',
+          code: 'order_bad_op',
+          message: 'op must be pause, resume or revoke',
+        };
+      }
+      const result = await executeCommand(
+        { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+        {
+          kind: 'controlOrder',
+          roomId: id,
+          clientMsgId:
+            typeof b.client_msg_id === 'string' ? b.client_msg_id : `http-ctl-${orderId}`,
+          orderId,
+          op: b.op,
+        },
+        deps,
+      );
+      if (!result.ok) {
+        reply.code(orderRefusalStatus(result.refusal.code));
+        return { type: 'error', code: result.refusal.code, message: result.refusal.message };
+      }
+      return { order_id: result.orderId };
+    });
+
+    fastify.patch('/rooms/:id/orders/:orderId', async (req, reply) => {
+      const { id, orderId } = req.params as { id: string; orderId: string };
+      const actor = await orderRouteMember(req, reply, id);
+      if (!actor) return reply;
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const result = await executeCommand(
+        { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+        {
+          kind: 'updateOrder',
+          roomId: id,
+          clientMsgId:
+            typeof b.client_msg_id === 'string' ? b.client_msg_id : `http-upd-${orderId}`,
+          orderId,
+          maxCycles: typeof b.max_cycles === 'number' ? b.max_cycles : null,
+          maxUnattendedCycles:
+            typeof b.max_unattended_cycles === 'number' ? b.max_unattended_cycles : 3,
+          expiresAt: typeof b.expires_at === 'string' ? b.expires_at : null,
+        },
+        deps,
+      );
+      if (!result.ok) {
+        reply.code(orderRefusalStatus(result.refusal.code));
+        return { type: 'error', code: result.refusal.code, message: result.refusal.message };
+      }
+      return { order_id: result.orderId };
     });
 
     // POST /ws-ticket { room_id } → a single-use ticket for the authenticated member (S1.3c).

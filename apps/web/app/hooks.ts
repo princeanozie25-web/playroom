@@ -116,6 +116,53 @@ export const HOOK = {
   composer: 'composer',
   /** The room refusal banner (RT-001). */
   refusal: 'refusal',
+  // ── THE LOOPS SCREEN (S-UI3) — orders as a form, not a bash script ─────────────────
+  /** The link FROM the room TO the loops screen. */
+  loopsLink: 'loops-link',
+  /** The loops screen shell. */
+  loops: 'loops',
+  /** The link back to the room. */
+  loopsBack: 'loops-back',
+  /** The honest empty state, shown when a room has no standing orders. */
+  loopsEmpty: 'loops-empty',
+  /** One order row in the list. Carries `data-pr-status`. */
+  loopRow: 'loop-row',
+  /** An order row's status word. */
+  loopStatus: 'loop-status',
+  /** An order row's cycle count. */
+  loopCycles: 'loop-cycles',
+  /** When an order last fired, or "never". */
+  loopFired: 'loop-fired',
+  /** Why an order is paused/terminal, when it is. */
+  loopReason: 'loop-reason',
+  /** Pause — any human. */
+  loopPause: 'loop-pause',
+  /** Resume — the creator only; rendered disabled-with-reason for a non-creator. */
+  loopResume: 'loop-resume',
+  /** Revoke — the creator only. */
+  loopRevoke: 'loop-revoke',
+  /** The edit toggle — the creator only; reveals the edit form. */
+  loopEdit: 'loop-edit',
+  /** The per-row edit form: dial, cap, expiry, save. */
+  loopEditForm: 'loop-edit-form',
+  /** Save an edit. */
+  loopEditSave: 'loop-edit-save',
+  /** The create form. */
+  loopCreate: 'loop-create',
+  /** The trigger-member picker. */
+  loopTriggerMember: 'loop-trigger-member',
+  /** The action-member picker. */
+  loopActionMember: 'loop-action-member',
+  /** The attendance-dial field (default 3). */
+  loopDial: 'loop-dial',
+  /** The cycle-cap field (optional). */
+  loopCap: 'loop-cap',
+  /** The expiry field (optional). */
+  loopExpiry: 'loop-expiry',
+  /** Submit the create form. */
+  loopSubmit: 'loop-submit',
+  /** A refusal or error, shown in place — never a silent failure. */
+  loopError: 'loop-error',
 } as const;
 
 export type HookName = (typeof HOOK)[keyof typeof HOOK];

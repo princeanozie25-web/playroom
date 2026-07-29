@@ -712,6 +712,11 @@ export function Room({
             this room · ${roomSpent.toFixed(4)}
           </div>
         )}
+        {/* TO THE LOOPS SCREEN (S-UI3) — set up and steer standing orders from a form, not a bash
+            script. A plain link: the screen is its own route, read server-side. */}
+        <a className="loops-link" href={`/r/${roomId}/loops`} {...pr(HOOK.loopsLink)}>
+          standing orders →
+        </a>
         {/* INSIDE THE HEADER, not as a fourth child of `.room`. The room is a three-row grid
             (header / transcript / composer) and a fourth child takes `1fr` off the transcript and
             pushes the composer into an implicit row — the layout collapses rather than shifting,

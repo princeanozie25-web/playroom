@@ -1161,3 +1161,180 @@ body {
   font-weight: 650;
   cursor: pointer;
 }
+
+/* ── THE LOOPS SCREEN (S-UI3) ────────────────────────────────────────────────────────────
+   Phone-first: the base rules ARE the 390px layout — "set up the loop from my phone" is the
+   primary target, not an afterthought. Tokens only; amber (--warn) and green (--ok) are left
+   untouched, reserved for needs-a-human and signed-done (D-1/D-2). Status is neutral ink; an
+   error is --bad, which is not reserved. */
+.loops-link {
+  font-size: var(--t-xs);
+  color: var(--indigo);
+  text-decoration: none;
+  justify-self: start;
+}
+.loops-link:hover {
+  text-decoration: underline;
+}
+.loops {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  color: var(--ink);
+}
+.loops-head h1 {
+  font-size: var(--t-lg);
+  margin: var(--s-2) 0 var(--s-1);
+}
+.loops-back {
+  font-size: var(--t-xs);
+  color: var(--indigo);
+  text-decoration: none;
+}
+.loops-sub {
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  margin: 0;
+}
+.loops-error {
+  font-size: var(--t-sm);
+  color: var(--bad);
+  background: var(--bad-soft);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius);
+  padding: var(--s-2) var(--s-3);
+  margin: 0;
+}
+.loops-empty {
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  padding: var(--s-4);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.loop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.loop-row {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink-3);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  background: var(--paper);
+}
+.loop-row[data-pr-status='REVOKED'],
+.loop-row[data-pr-status='EXPIRED'],
+.loop-row[data-pr-status='LIMIT_REACHED'] {
+  border-left-color: var(--line);
+  color: var(--ink-3);
+}
+.loop-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.loop-status {
+  font-size: var(--t-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+.loop-wire {
+  font-size: var(--t-sm);
+}
+.loop-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+.loop-reason {
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  margin: 0;
+}
+.loop-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.loop-controls button,
+.loop-edit-save,
+.loop-submit {
+  font: inherit;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 2.25rem; /* a real tap target on glass */
+}
+.loop-controls button:disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.loop-create,
+.loop-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s-4);
+  background: var(--paper-2);
+}
+.loop-create h2 {
+  font-size: var(--t-md);
+  margin: 0;
+}
+.loop-create label,
+.loop-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+.loop-create select,
+.loop-create input,
+.loop-edit-form select,
+.loop-edit-form input {
+  font: inherit;
+  font-size: var(--t-md);
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 2.75rem; /* comfortable on a phone */
+}
+.loop-submit {
+  background: var(--indigo);
+  color: #fff;
+  border-color: var(--indigo);
+  min-height: 2.75rem;
+  font-size: var(--t-sm);
+}
+.loop-submit:disabled {
+  background: var(--ink-3);
+  border-color: var(--ink-3);
+  cursor: not-allowed;
+}
