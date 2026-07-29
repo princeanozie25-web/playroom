@@ -509,6 +509,61 @@ export async function decisionResolutionEvent(
   return rows[0] ? rowToServerEvent(rows[0]) : null;
 }
 
+// ── STANDING-ORDER EVENTS (S-LOOP) ──────────────────────────────────────────────────────
+//
+// The log is the source of truth; the standing_orders row is a projection (migration 021). Every
+// transition appends one of these and then updates the row (see orders.ts), so the chip renders from
+// the log and the two cannot drift. `actor_id` is the creating/acting human, or 'system' for an
+// automatic transition (attendance, budget, error, limit) — nothing changes an order silently.
+
+export interface OrderCreatedPayload {
+  order_id: string;
+  creator: string;
+  trigger_event_type: string;
+  trigger_member: string;
+  action_member: string;
+  max_cycles: number | null;
+  max_unattended_cycles: number;
+  expires_at: string | null;
+}
+
+export async function appendOrderCreated(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: OrderCreatedPayload,
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'order.created', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+export interface OrderStatusPayload {
+  order_id: string;
+  status: string; // ACTIVE | PAUSED | REVOKED | EXPIRED | LIMIT_REACHED
+  reason: string;
+  actor: string; // the human who acted, or 'system'
+}
+
+export async function appendOrderStatus(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: OrderStatusPayload,
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'order.status', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
 /**
  * A reference to the summon an agent turn answers.
  *

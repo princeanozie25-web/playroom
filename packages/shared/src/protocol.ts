@@ -121,6 +121,44 @@ export const ClientSignDecision = z.object({
 });
 export type ClientSignDecision = z.infer<typeof ClientSignDecision>;
 
+/**
+ * Client → server: CREATE a standing order (S-LOOP) — a human authorises recurring work.
+ *
+ * A standing order fires an order-rooted summon of `action_member` each time a turn of
+ * `trigger_event_type` by `trigger_member` completes. It confers NO authority: the fired summon is
+ * governed exactly as a human's would be. Only a HUMAN may create one — the server checks the
+ * socket's authenticated member's kind, never this frame — because minting a standing authorisation
+ * is delegated human intent, and an agent doing it would be self-authorisation (the co-sign reasoning).
+ */
+export const ClientOrderCreate = z.object({
+  type: z.literal('order_create'),
+  client_msg_id: z.string().min(1),
+  trigger_event_type: z.string().min(1),
+  trigger_member: z.string().min(1),
+  action_member: z.string().min(1),
+  /** null / absent = no cycle cap. The attendance dial (max_unattended_cycles) always applies. */
+  max_cycles: z.number().int().positive().nullable().optional(),
+  /** Default 3 server-side: pause after this many cycles with no human message in the room. */
+  max_unattended_cycles: z.number().int().positive().optional(),
+  expires_at: z.string().datetime().nullable().optional(),
+});
+export type ClientOrderCreate = z.infer<typeof ClientOrderCreate>;
+
+/**
+ * Client → server: PAUSE, RESUME or REVOKE a standing order (S-LOOP).
+ *
+ * Pausing is the safe direction, so ANY human member may pause any order. Resume and revoke are the
+ * creator's alone. An agent may do none of these. All three are checked against the socket's
+ * authenticated member, never this frame.
+ */
+export const ClientOrderControl = z.object({
+  type: z.literal('order_control'),
+  client_msg_id: z.string().min(1),
+  order_id: z.string().min(1),
+  op: z.enum(['pause', 'resume', 'revoke']),
+});
+export type ClientOrderControl = z.infer<typeof ClientOrderControl>;
+
 /** Every frame a client may send. Parsed as a union; an unknown `type` is dropped. */
 export const ClientFrame = z.discriminatedUnion('type', [
   ClientSend,
@@ -128,6 +166,8 @@ export const ClientFrame = z.discriminatedUnion('type', [
   ClientHandoff,
   ClientDowngrade,
   ClientSignDecision,
+  ClientOrderCreate,
+  ClientOrderControl,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
@@ -573,6 +613,50 @@ export const DecisionResolvedEvent = z.object({
 });
 export type DecisionResolvedEvent = z.infer<typeof DecisionResolvedEvent>;
 
+/**
+ * A STANDING ORDER WAS CREATED (S-LOOP) — a human authorised recurring work.
+ *
+ * The order confers no authority; this event records what recurs and who authorised it. `creator` is
+ * the human at the head of every summon the order fires — the order is human-rooted through this row.
+ * In the union for the same reason the summary is: `rowToServerEvent` parses every replayed row
+ * through the strict union, so a room holding one would not open at all if the type were unknown here.
+ */
+export const OrderCreatedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('order.created'),
+  payload: z.object({
+    order_id: z.string(),
+    creator: z.string(), // the human member who authorised it
+    trigger_event_type: z.string(),
+    trigger_member: z.string(),
+    action_member: z.string(),
+    max_cycles: z.number().nullable(),
+    max_unattended_cycles: z.number(),
+    expires_at: z.string().nullable(),
+  }),
+});
+export type OrderCreatedEvent = z.infer<typeof OrderCreatedEvent>;
+
+/**
+ * A STANDING ORDER CHANGED STATE (S-LOOP) — paused, resumed, revoked, expired, or hit a limit.
+ *
+ * One event type for every transition after creation (the `task.state` shape), carrying WHY out loud
+ * and WHO did it. `actor` is a human for a deliberate pause/resume/revoke, or `system` when the runner
+ * paused it (attendance, a budget refusal, an error terminal, or a limit reached) — nothing changes an
+ * order's state silently.
+ */
+export const OrderStatusEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('order.status'),
+  payload: z.object({
+    order_id: z.string(),
+    status: z.string(), // ACTIVE | PAUSED | REVOKED | EXPIRED | LIMIT_REACHED
+    reason: z.string(), // the human sentence: who paused it, or which bound was reached
+    actor: z.string(), // the human who acted, or 'system' for an automatic transition
+  }),
+});
+export type OrderStatusEvent = z.infer<typeof OrderStatusEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -589,6 +673,8 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   InterruptDowngradedEvent,
   ContextPromotedEvent,
   RoomSummaryEvent,
+  OrderCreatedEvent,
+  OrderStatusEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;
@@ -729,6 +815,24 @@ export const ERROR_DECISION_EXPIRED = 'decision_expired';
  * endorse authority that was not the authority evaluated — refused; the action must be re-requested.
  */
 export const ERROR_DECISION_STALE = 'decision_stale';
+
+/**
+ * THE STANDING-ORDER REFUSALS (S-LOOP), kept apart because they are different mistakes.
+ *
+ * The load-bearing one is the first: an AGENT tried to create, resume or revoke an order. Minting or
+ * widening a standing authorisation is delegated HUMAN intent; an agent doing it is self-authorisation,
+ * the same reasoning that keeps an agent from signing a co-signature. Pausing is the safe direction and
+ * is not on this list — any human may pause any order.
+ */
+export const ERROR_ORDER_NOT_HUMAN = 'order_not_human';
+/** No such standing order — an id from another room, or one that was never created. */
+export const ERROR_ORDER_UNKNOWN = 'order_unknown';
+/** Resume and revoke are the creator's alone; someone else asked. Pause would have been allowed. */
+export const ERROR_ORDER_NOT_CREATOR = 'order_not_creator';
+/** The order names a trigger or action member that is not an agent member of this room. */
+export const ERROR_ORDER_MEMBER_UNKNOWN = 'order_member_unknown';
+/** The op does not apply in the order's current state (resuming a revoked order, pausing a dead one). */
+export const ERROR_ORDER_BAD_STATE = 'order_bad_state';
 
 /**
  * Valid JSON, and not a frame this server accepts.

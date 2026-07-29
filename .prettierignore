@@ -4,3 +4,5 @@ dist
 coverage
 .next
 pnpm-lock.yaml
+# Local tooling config, written by the CLI (permission grants etc.), not by hand.
+.claude/settings.local.json

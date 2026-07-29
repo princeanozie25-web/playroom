@@ -79,6 +79,28 @@ export type Command =
       decisionId: string;
       resolution: 'APPROVED' | 'DENIED';
     }
+  // Create a standing order (S-LOOP): a human authorises recurring work. `actorId` is the creator,
+  // authenticated by the socket — an agent can never create one.
+  | {
+      kind: 'createOrder';
+      roomId: string;
+      clientMsgId: string;
+      triggerEventType: string;
+      triggerMember: string;
+      actionMember: string;
+      maxCycles: number | null;
+      maxUnattendedCycles: number;
+      expiresAt: string | null;
+    }
+  // Pause, resume or revoke a standing order (S-LOOP). Any human pauses; only the creator resumes or
+  // revokes; an agent does none. `actorId` is the authenticated member.
+  | {
+      kind: 'controlOrder';
+      roomId: string;
+      clientMsgId: string;
+      orderId: string;
+      op: 'pause' | 'resume' | 'revoke';
+    }
   // Fold the room's older messages into its rolling summary, if the tail has grown past the window
   // (S1.6). Dispatched fire-and-forget from postMessage so the summary is maintained AHEAD of the
   // next summon, never on the summon's own first-token path. Idempotent and cheap when there is

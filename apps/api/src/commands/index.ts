@@ -15,6 +15,7 @@ import { triggerAgentTurnCommand } from './triggerAgentTurn.js';
 import { handoffCommand, type HandoffResult } from './handoff.js';
 import { requestActionCommand, type RequestActionResult } from './requestAction.js';
 import { signDecisionCommand, type SignDecisionResult } from './signDecision.js';
+import { createOrderCommand, controlOrderCommand, type OrderResult } from './order.js';
 import { maintainSummaryCommand } from './maintainSummary.js';
 
 export * from './context.js';
@@ -90,6 +91,32 @@ export function executeCommand(
 ): Promise<SignDecisionResult>;
 export function executeCommand(
   ctx: CommandContext,
+  command: {
+    kind: 'createOrder';
+    roomId: string;
+    clientMsgId: string;
+    triggerEventType: string;
+    triggerMember: string;
+    actionMember: string;
+    maxCycles: number | null;
+    maxUnattendedCycles: number;
+    expiresAt: string | null;
+  },
+  deps: CommandDeps,
+): Promise<OrderResult>;
+export function executeCommand(
+  ctx: CommandContext,
+  command: {
+    kind: 'controlOrder';
+    roomId: string;
+    clientMsgId: string;
+    orderId: string;
+    op: 'pause' | 'resume' | 'revoke';
+  },
+  deps: CommandDeps,
+): Promise<OrderResult>;
+export function executeCommand(
+  ctx: CommandContext,
   command: { kind: 'maintainSummary'; roomId: string },
   deps: CommandDeps,
 ): Promise<ServerEvent | null>;
@@ -122,6 +149,10 @@ export function executeCommand(
       return requestActionCommand(deps, ctx, command);
     case 'signDecision':
       return signDecisionCommand(deps, ctx, command);
+    case 'createOrder':
+      return createOrderCommand(deps, ctx, command);
+    case 'controlOrder':
+      return controlOrderCommand(deps, ctx, command);
     case 'maintainSummary':
       return maintainSummaryCommand(deps, ctx, command);
   }

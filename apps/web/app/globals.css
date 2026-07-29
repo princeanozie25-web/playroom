@@ -776,6 +776,47 @@ body {
   color: var(--ink-3);
 }
 
+/* THE STANDING-ORDER CHIP (S-LOOP) — ambient, one line, quieter than a task chip. It reads as a
+   register entry (§18): a fact about what recurs, not a claim on attention. A paused/terminal order
+   dims its status word so the room shows, at a glance, that it is not running — never by colour alone,
+   the word is there. */
+.order-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  padding: var(--s-1) 0;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+.order-kicker {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.order-status {
+  font-weight: 650;
+  color: var(--ink);
+}
+.order-chip[data-pr-status='PAUSED'] .order-status,
+.order-chip[data-pr-status='EXPIRED'] .order-status,
+.order-chip[data-pr-status='LIMIT_REACHED'] .order-status,
+.order-chip[data-pr-status='REVOKED'] .order-status {
+  color: var(--ink-2);
+}
+.order-summons,
+.order-cycles,
+.order-by {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+.order-reason {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  font-style: italic;
+}
+
 /* ── THE INTERRUPT CHIP (S1.4) ─────────────────────────────────────────────────────────
    A claim on a person's attention. Louder than a task chip and quieter than the DECISION
    card: urgency is carried by a left rule whose colour changes, so the three levels are

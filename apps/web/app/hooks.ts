@@ -78,6 +78,8 @@ export const HOOK = {
   handoff: 'handoff',
   /** A summon row — one agent summoned another through the channel (S1.8). Carries `data-pr-to`. */
   summon: 'summon',
+  /** A standing-order chip — recurring work a human authorised (S-LOOP). Carries `data-pr-status`. */
+  order: 'order',
   /** An interrupt chip. Carries `data-pr-urgency` — BLOCKER | DECISION | FYI. */
   interrupt: 'interrupt',
   /** The urgency, in words. */

@@ -119,7 +119,7 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     expect(dispatchers).toEqual(['commands/summon.ts']);
   });
 
-  it('the wire admits exactly five frames, and only a signed co-sign puts an agent to work', () => {
+  it('the wire admits exactly seven frames, and every path to agent work traces to a human', () => {
     // Read off the schema at runtime rather than grepped, so this cannot pass against a stale
     // build or a comment. A new frame type makes this test fail, which is the point: adding one
     // is then a decision about the activation boundary rather than an addition to a union.
@@ -143,8 +143,24 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     // still traces to a human — it simply gained a human-gated door that a paused, evaluated
     // decision passes through only when the required person signs. An agent can never send a
     // resolution that lands (commands/signDecision.ts), which is what keeps this a door and not a hole.
+    //
+    // IT FIRED AGAIN in S-LOOP, for `order_create` and `order_control`. A standing order fires summons
+    // across cycles, so this is the other frame family that puts an agent to work — and the answer is
+    // the same as sign_decision's, one level up: only a HUMAN may create, resume or revoke an order
+    // (commands/order.ts refuses a non-human before anything else), and every summon an order fires is
+    // HUMAN-ROOTED through the order's creator. So the boundary still holds — every agent turn traces
+    // to a human — the order is a standing authorisation a person gave, not a way for an agent to
+    // authorise itself. An agent can send neither frame that lands, which is what keeps it a door.
     const types = ClientFrame.options.map((o) => o.shape.type.value).sort();
-    expect(types).toEqual(['downgrade', 'handoff', 'request_action', 'send', 'sign_decision']);
+    expect(types).toEqual([
+      'downgrade',
+      'handoff',
+      'order_control',
+      'order_create',
+      'request_action',
+      'send',
+      'sign_decision',
+    ]);
   });
 });
 

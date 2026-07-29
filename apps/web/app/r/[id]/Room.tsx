@@ -19,6 +19,7 @@ import {
 } from '@playroom/shared';
 import { MemberChip, MemberName } from '../../MemberChip';
 import { DecisionCard } from '../../DecisionCard';
+import { OrderChip, type OrderItemView } from '../../OrderChip';
 import {
   HandoffRow,
   SummonRow,
@@ -83,6 +84,9 @@ type PromotionItem = { kind: 'promotion'; key: string; view: PromotionItemView }
 // visible ACT, unlike a human tag — which is already visible as the @-mention in the human's message.
 // So ONLY agent-rooted summons render here; a human summon (requested_by is a human) does not.
 type SummonItem = { kind: 'summon'; key: string; view: SummonItemView };
+// A standing order (S-LOOP). One chip per order, updated in place as it changes state and cycles —
+// the same discipline as an interrupt or a task, never a new chip per transition.
+type OrderItem = { kind: 'order'; key: string; view: OrderItemView };
 type Item =
   | MessageItem
   | AgentItem
@@ -91,7 +95,8 @@ type Item =
   | HandoffItem
   | InterruptItem
   | PromotionItem
-  | SummonItem;
+  | SummonItem
+  | OrderItem;
 
 /**
  * Group the event log into renderable items.
@@ -110,6 +115,7 @@ function buildItems(events: ServerEvent[], agentIds: Set<string>): Item[] {
   const tasks = new Map<string, TaskItemView>();
   const interrupts = new Map<string, InterruptItemView>();
   const decisions = new Map<string, DecisionItemView>();
+  const orders = new Map<string, OrderItemView>();
   const order: Item[] = [];
   for (const ev of events) {
     if (ev.event_type === 'message') {
@@ -128,6 +134,26 @@ function buildItems(events: ServerEvent[], agentIds: Set<string>): Item[] {
           key: `s${ev.seq}`,
           view: { by: ev.payload.requested_by, member: ev.payload.member },
         });
+      }
+    } else if (ev.event_type === 'order.created') {
+      // A STANDING ORDER (S-LOOP) — one chip, updated in place by later order.status/order.cycled.
+      const view: OrderItemView = {
+        order_id: ev.payload.order_id,
+        creator: ev.payload.creator,
+        action_member: ev.payload.action_member,
+        status: 'ACTIVE',
+        cycle_count: 0,
+        reason: null,
+      };
+      orders.set(ev.payload.order_id, view);
+      order.push({ kind: 'order', key: `o${ev.payload.order_id}`, view });
+    } else if (ev.event_type === 'order.status') {
+      // THE SAME CHIP, its state changed — paused, resumed, revoked, or a bound reached. Never a new
+      // chip: the order did not become a second order, it changed. Out loud, with the reason.
+      const view = orders.get(ev.payload.order_id);
+      if (view) {
+        view.status = ev.payload.status;
+        view.reason = ev.payload.status === 'ACTIVE' ? null : ev.payload.reason;
       }
     } else if (ev.event_type === 'decision') {
       const view: DecisionItemView = { event: ev, resolution: null, signedBy: null };
@@ -765,6 +791,10 @@ export function Room({
           ) : it.kind === 'summon' ? (
             <li key={it.key}>
               <SummonRow summon={it.view} roster={byId} />
+            </li>
+          ) : it.kind === 'order' ? (
+            <li key={it.key}>
+              <OrderChip order={it.view} roster={byId} />
             </li>
           ) : it.kind === 'promotion' ? (
             <li key={it.key}>

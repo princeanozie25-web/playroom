@@ -876,6 +876,67 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
               }
               return;
             }
+            if (msg.type === 'order_create') {
+              // CREATE A STANDING ORDER (S-LOOP). The creator is the authenticated member; the command
+              // refuses a non-human, so an agent socket cannot mint one. max_unattended_cycles defaults
+              // to 3 here when the frame omits it (the attendance dial's config default).
+              const result = await executeCommand(
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+                {
+                  kind: 'createOrder',
+                  roomId,
+                  clientMsgId: msg.client_msg_id,
+                  triggerEventType: msg.trigger_event_type,
+                  triggerMember: msg.trigger_member,
+                  actionMember: msg.action_member,
+                  maxCycles: msg.max_cycles ?? null,
+                  maxUnattendedCycles: msg.max_unattended_cycles ?? 3,
+                  expiresAt: msg.expires_at ?? null,
+                },
+                deps,
+              );
+              if (!result.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: result.refusal.code,
+                      message: result.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
+              return;
+            }
+            if (msg.type === 'order_control') {
+              // PAUSE / RESUME / REVOKE (S-LOOP). Any human pauses; only the creator resumes or
+              // revokes; an agent does none — all checked against the authenticated member by the command.
+              const result = await executeCommand(
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+                {
+                  kind: 'controlOrder',
+                  roomId,
+                  clientMsgId: msg.client_msg_id,
+                  orderId: msg.order_id,
+                  op: msg.op,
+                },
+                deps,
+              );
+              if (!result.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: result.refusal.code,
+                      message: result.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
+              return;
+            }
             if (msg.type === 'downgrade') {
               // ONE TAP, and it costs the raiser (Bible §21.3). The actor is the authenticated
               // member, which is also the authorisation: only the member an interrupt is
