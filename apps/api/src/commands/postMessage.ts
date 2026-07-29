@@ -3,6 +3,7 @@ import type { ServerEvent } from '@playroom/shared';
 import { appendMessage } from '../events.js';
 import { summonRuling } from '../agent.js';
 import { loadRoomTokens } from '../members.js';
+import { resetUnattended } from '../orders.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // Persist a message, fan it out, and dispatch a summon for each member it named — each
@@ -115,6 +116,16 @@ export async function postMessageCommand(
       spans: { t0, t1 },
     });
   }
+
+  // A HUMAN PAID ATTENTION — reset every standing order's attendance dial in this room (S-LOOP). A
+  // person typing here is the room being watched, which is exactly what the dial counts the absence
+  // of. Only humans reach this command (agents take turns, they do not post; the system notice above
+  // goes through `appendMessage` directly, not here), so every send is real attention. Fire-and-forget
+  // with its own guard: one indexed write that usually touches nothing must never sit on the send
+  // path (§7, ADR-008), and if it is ever lost to a crash, resuming the order is the backstop reset.
+  void resetUnattended(deps.pool, input.roomId).catch(() => {
+    /* advisory; the streak is also cleared on resume */
+  });
 
   // MAINTAIN THE ROLLING SUMMARY, AHEAD OF THE NEXT SUMMON (S1.6). This message just grew the room;
   // folding its older messages into the summary is a background model call, and it must sit on

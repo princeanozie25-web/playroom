@@ -195,6 +195,22 @@ export async function memberRecord(
 }
 
 /**
+ * The principal a member is bound to, or null if the member is unknown.
+ *
+ * The bridge an order interrupt needs: its creator is a human member, and the claim it raises is
+ * addressed to the humans of that member's PRINCIPAL (via `humanMembersOfPrincipal`), so a second
+ * human behind the same principal is told too. One indexed read of the column the roster already
+ * projects.
+ */
+export async function principalOf(pool: Pool, memberId: string): Promise<string | null> {
+  const { rows } = await pool.query<{ principal_id: string }>(
+    'SELECT principal_id FROM members WHERE id = $1',
+    [memberId],
+  );
+  return rows[0]?.principal_id ?? null;
+}
+
+/**
  * The HUMAN members of a principal, in this room.
  *
  * A co-signature is required from a PRINCIPAL (`required_signer` is `principal:prince`), and an

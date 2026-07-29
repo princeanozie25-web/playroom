@@ -29,7 +29,9 @@ import { getTask, transitionTask } from './tasks.js';
  */
 
 export type Urgency = 'BLOCKER' | 'DECISION' | 'FYI';
-export type AboutKind = 'task' | 'decision' | 'message';
+// 'order' (S-LOOP): a standing order that stops on its own claims its owner's attention. See
+// migration 023 for why the fourth kind exists and commands/runOrders.ts for the raiser.
+export type AboutKind = 'task' | 'decision' | 'message' | 'order';
 
 export interface InterruptRow {
   id: string;

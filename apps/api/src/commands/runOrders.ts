@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { ERROR_INTERRUPT_BUDGET } from '@playroom/shared';
 import { appendOrderCycled, appendOrderStatus } from '../events.js';
 import {
   activeOrdersForTrigger,
@@ -5,12 +7,16 @@ import {
   setOrderStatus,
   tryOpenCycle,
   type OrderRow,
+  type OrderStatus,
 } from '../orders.js';
+import { spendToday, type SpendState } from '../spend.js';
+import { raiseInterrupt } from '../interrupts.js';
+import { humanMembersOfPrincipal, principalOf } from '../members.js';
 import { fireSummon } from './summon.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // ============================================================================
-// THE LOOP RUNNER (S-LOOP) — a completed turn drives the next cycle.
+// THE LOOP RUNNER (S-LOOP) — a completed turn drives the next cycle, WITHIN LIMITS.
 //
 // This is the thing that was missing: nothing took a completed turn, fired the next summon, and
 // repeated without a person pressing go. It runs at the post-completion seam (agent.ts), where the
@@ -19,15 +25,25 @@ import type { CommandContext, CommandDeps } from './context.js';
 // and is refused exactly as a human's would be. An order causes; it does not grant.
 //
 // TWO BOUNDS, TWO PLACES: the depth cap (S1.8) stops runaway WITHIN a cycle; the order's own guards
-// (idempotency + one-cycle-in-flight, migration 022; limits + attendance, the next commit) stop
-// runaway ACROSS cycles. This file must not weaken the first to serve the second.
+// stop runaway ACROSS cycles. Those guards are FOUR, and every one of them STOPS OUT LOUD — the order
+// moves to a named state, the reason is a sentence in the room, and its owner is told through an
+// interrupt (S1.4). A loop that quits silently is indistinguishable from one that broke.
+//
+//   EXPIRY        (terminal)  the wall-clock deadline passed — the order will never fire again.
+//   CEILING       (pause)     the daily spend ceiling is reached — no money to run on; resume later.
+//   MAX CYCLES    (terminal)  the count the creator set has been reached — the work is done.
+//   ATTENDANCE    (pause)     it has run its unattended budget of cycles with nobody watching.
+//
+// The two pauses can resume; the two terminals cannot. Expiry and the ceiling are checked BEFORE a
+// cycle opens (an expired or unfundable order must not run one more); the count and the dial are read
+// FROM the atomic open (orders.tryOpenCycle) and checked AFTER the cycle fires, so the cycle that
+// reaches the limit is the last one that runs, not the one that is refused.
 // ============================================================================
 
 /**
- * Fire one cycle of an order: open a cycle (the atomic idempotency + in-flight guard), record it, and
- * fire the order-rooted summon. `triggerSeq` is the completed turn that fired it (or, for the first
- * cycle, the order.created event). Returns whether a cycle actually fired — false when the order is not
- * idle, not active, or the trigger is a replay.
+ * Fire one cycle of an order, subject to its limits. Returns whether a cycle actually fired — false
+ * when the order was stopped by a pre-open gate (expiry, ceiling), or when the atomic open found the
+ * order not idle, not active, or the trigger a replay.
  *
  * The summon's requester is the CREATOR (a human member, so the task's created_by is valid and the
  * root is a real person); `order_id` is what marks it as order-fired rather than a direct human tag.
@@ -39,8 +55,41 @@ export async function fireOrderCycle(
   order: OrderRow,
   triggerSeq: number,
 ): Promise<boolean> {
-  const cycle = await tryOpenCycle(deps.pool, order.id, triggerSeq);
-  if (cycle === null) return false;
+  // ── PRE-OPEN GATE 1: EXPIRY (terminal) ──────────────────────────────────────────────
+  // A wall-clock deadline, compared against the DATABASE clock — the same `now()` the ceiling and the
+  // interrupt budget use, so one definition of "now" decides every time-bounded thing in the system.
+  if (await orderExpired(deps.pool, order)) {
+    await stopOrder(
+      deps,
+      roomId,
+      order,
+      'EXPIRED',
+      `the standing order reached its expiry and stopped — it will not run again`,
+    );
+    return false;
+  }
+
+  // ── PRE-OPEN GATE 2: THE DAILY CEILING (pause) ──────────────────────────────────────
+  // A pre-check, no retry, out loud — the same refusal a stranger's tag gets (spend.ts), one level up:
+  // a loop must not be the thing that runs my provider key past the ceiling while nobody is watching.
+  // Paused, not terminal: it can resume once the ceiling resets, and a person can resume it sooner.
+  const spend = await spendToday(deps.pool);
+  if (spend.exceeded) {
+    await stopOrder(
+      deps,
+      roomId,
+      order,
+      'PAUSED',
+      `the standing order paused because ${ceilingPhrase(spend)} was reached — ` +
+        `it can resume once the limit resets at midnight UTC`,
+    );
+    return false;
+  }
+
+  // ── OPEN THE CYCLE — the atomic idempotency + one-in-flight guard (migration 022) ────
+  const opened = await tryOpenCycle(deps.pool, order.id, triggerSeq);
+  if (opened === null) return false;
+  const { cycle, unattended } = opened;
 
   const cycled = await appendOrderCycled(deps.pool, roomId, order.creator_member_id, {
     order_id: order.id,
@@ -62,17 +111,153 @@ export async function fireOrderCycle(
     orderId: order.id,
   });
   deps.log.info(
-    { room_id: roomId, order_id: order.id, cycle, member: order.action_member_id },
+    { room_id: roomId, order_id: order.id, cycle, unattended, member: order.action_member_id },
     'standing order fired a cycle',
   );
+
+  // ── POST-OPEN GATE 3: MAX CYCLES (terminal) ─────────────────────────────────────────
+  // The cycle just fired was allowed; if it reached the count the creator set, it was the LAST one.
+  // Terminal — the work the order described is finished, not merely resting.
+  if (order.max_cycles !== null && cycle >= order.max_cycles) {
+    await stopOrder(
+      deps,
+      roomId,
+      order,
+      'LIMIT_REACHED',
+      `the standing order finished the ${order.max_cycles} ${plural(order.max_cycles, 'cycle')} ` +
+        `it was set to run`,
+    );
+    return true;
+  }
+
+  // ── POST-OPEN GATE 4: THE ATTENDANCE DIAL (pause) ───────────────────────────────────
+  // It has now run this many cycles since a person last watched (a message in the room, or a resume).
+  // At the dial it pauses and taps its owner on the shoulder — a loop should not run forever unseen.
+  if (unattended >= order.max_unattended_cycles) {
+    await stopOrder(
+      deps,
+      roomId,
+      order,
+      'PAUSED',
+      `the standing order ran ${unattended} ${plural(unattended, 'cycle')} without you — ` +
+        `resume it to keep the loop going`,
+    );
+  }
+  return true;
+}
+
+/** Is this order past its expiry? Null expiry never expires. Compared against the DB clock. */
+async function orderExpired(pool: CommandDeps['pool'], order: OrderRow): Promise<boolean> {
+  if (!order.expires_at) return false;
+  const { rows } = await pool.query<{ expired: boolean }>(
+    'SELECT ($1::timestamptz <= now()) AS expired',
+    [order.expires_at],
+  );
+  return rows[0].expired;
+}
+
+/** A short phrase naming the ceiling, for the pause sentence. No spend figure — see spend.ts. */
+function ceilingPhrase(spend: SpendState): string {
+  return spend.ceiling_usd === null
+    ? "today's spending ceiling"
+    : `today's $${spend.ceiling_usd} spending ceiling`;
+}
+
+function plural(n: number, word: string): string {
+  return n === 1 ? word : `${word}s`;
+}
+
+/**
+ * STOP AN ORDER, OUT LOUD — the one place a self-stop is written. Appends the order.status event
+ * (log first, §12), moves the projection, fans out, and raises the owner's interrupt. Guarded on the
+ * order still being ACTIVE so a racing second trigger cannot stop it twice; the winner is whoever
+ * reads it ACTIVE first, and the rest are no-ops. `system` is the actor — nothing changes an order
+ * silently, but no person acted here.
+ */
+async function stopOrder(
+  deps: CommandDeps,
+  roomId: string,
+  order: OrderRow,
+  status: OrderStatus,
+  reason: string,
+): Promise<boolean> {
+  const fresh = await orderById(deps.pool, roomId, order.id);
+  if (!fresh || fresh.status !== 'ACTIVE') return false; // already stopped, terminal, or gone
+
+  const event = await appendOrderStatus(deps.pool, roomId, 'system', {
+    order_id: order.id,
+    status,
+    reason,
+    actor: 'system',
+  });
+  await setOrderStatus(deps.pool, order.id, status, reason);
+  deps.bus.publish(roomId, event);
+  await raiseOrderInterrupts(deps, roomId, order, reason);
+  deps.log.warn({ room_id: roomId, order_id: order.id, status }, 'standing order stopped itself');
   return true;
 }
 
 /**
- * An error terminal pauses the order, out loud (Bible §14 shape, one level up). A turn that ended in
- * error does not trigger the next cycle — cycling into an error loop would burn budget and hide the
- * failure; pausing surfaces it as the "needs your input" moment. Keyed on the ERRORED turn's order
- * (threaded through the chain), so the order whose cycle broke is the one that pauses.
+ * A STOPPED ORDER CLAIMS ITS OWNER'S ATTENTION (S1.4). One DECISION interrupt per human member of the
+ * creator's principal — the sibling of coSign's `raiseDecisionInterrupts`, routed through the same
+ * single construction site (`raiseInterrupt`) so the budget, the idempotency and the record are the
+ * ones every interrupt already has.
+ *
+ * WHO IS CHARGED: the loop's own AGENT member (`action_member`). The recurring work is the agent's,
+ * so the claim it makes on a person's attention is the agent's to fund — the same reasoning that
+ * charges a co-sign to the subject whose mandate needs the signature.
+ *
+ * about_id IS UNIQUE PER STOP. There is no interrupt-clearing in the system; a claim persists as the
+ * record that it was made. So a fresh id per stop is what lets the SAME order re-claim attention when
+ * it pauses again after a resume — keyed on the order (the prefix attributes it) with a unique suffix
+ * (each stop is its own moment). A budget refusal is logged and does NOT undo the stop: the order is
+ * already stopped and the record already written; what failed is the notification.
+ */
+async function raiseOrderInterrupts(
+  deps: CommandDeps,
+  roomId: string,
+  order: OrderRow,
+  summary: string,
+): Promise<void> {
+  const principal = await principalOf(deps.pool, order.creator_member_id);
+  if (!principal) return;
+  const aboutId = `${order.id}:${randomUUID().replace(/-/g, '').slice(0, 8)}`;
+  for (const human of await humanMembersOfPrincipal(deps.pool, roomId, principal)) {
+    const raised = await raiseInterrupt(deps.pool, {
+      roomId,
+      urgency: 'DECISION',
+      raisedBy: order.action_member_id,
+      addressedTo: human,
+      aboutKind: 'order',
+      aboutId,
+      summary,
+    });
+    if (!raised.ok) {
+      deps.log.warn(
+        {
+          room_id: roomId,
+          order_id: order.id,
+          raised_by: order.action_member_id,
+          addressed_to: human,
+          spent: raised.budget.spent,
+          limit: raised.budget.limit,
+          code: ERROR_INTERRUPT_BUDGET,
+        },
+        'order interrupt refused: no budget left today',
+      );
+      continue;
+    }
+    if (raised.event) deps.bus.publish(roomId, raised.event);
+    // No halt branch: a DECISION never halts a task (interrupts.ts). Only a BLOCKER does.
+  }
+}
+
+/**
+ * An error terminal pauses the order, out loud. A turn that ended in error does not trigger the next
+ * cycle — cycling into an error loop would burn budget and hide the failure; pausing surfaces it as
+ * the "needs your input" moment. Keyed on the ERRORED turn's order (threaded through the chain), so
+ * the order whose cycle broke is the one that pauses. Routed through `stopOrder`, so an error-stop
+ * claims its owner's attention exactly like every other self-stop.
  */
 async function pauseOrderOnError(
   deps: CommandDeps,
@@ -81,19 +266,13 @@ async function pauseOrderOnError(
   member: string,
 ): Promise<void> {
   const order = await orderById(deps.pool, roomId, orderId);
-  if (!order || order.status !== 'ACTIVE') return; // already paused, terminal, or gone
-  const reason = `${member}'s turn ended in error, so the loop paused rather than cycling on a failure`;
-  const event = await appendOrderStatus(deps.pool, roomId, 'system', {
-    order_id: orderId,
-    status: 'PAUSED',
-    reason,
-    actor: 'system',
-  });
-  await setOrderStatus(deps.pool, orderId, 'PAUSED', reason);
-  deps.bus.publish(roomId, event);
-  deps.log.warn(
-    { room_id: roomId, order_id: orderId, member },
-    'standing order paused: error terminal',
+  if (!order) return;
+  await stopOrder(
+    deps,
+    roomId,
+    order,
+    'PAUSED',
+    `${member}'s turn ended in error, so the loop paused rather than cycling on a failure`,
   );
 }
 
