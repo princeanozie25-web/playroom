@@ -245,6 +245,12 @@ survivable and this entry stops being acceptable. **Whoever builds S2.6 must fin
 before they merge it** — that is what a trigger is for, and it is why the condition is written
 as a sentence about the system rather than a paragraph about the risk.
 
+> **RETIRED EARLIER THAN PREDICTED — at S-CC (29 Jul 2026), not S2.6.** A bridged member with shell
+> access ends the broader guarantee (Playroom causes nothing in the world) before the GitHub bridge
+> ends the narrow `pr.merge`-executor clause. The full retirement, its compensating controls, and the
+> named residual are the last entry in this file. The `pr.merge` clause above is NOT retired by S-CC and
+> remains S2.6's to end.
+
 Earlier candidates that also end it, in the order they are likely to arrive: any outbound
 email or webhook; any write to a repository, tracker or calendar; any payment. If a slice adds
 one of those before S1.2 lands, RT-005 escalates from _accepted_ to _blocking_ and M-N1 with
@@ -980,3 +986,178 @@ event type is unsafe once one exists. **Not fixed here, and the fix is a decisio
 — skipping unparseable rows trades a hard failure for a silent gap in the transcript, which weakens
 "the transcript is the record" and is therefore the owner's call. **Trigger: the first deployment, or
 the first rollback.**
+
+---
+
+## RETIRED IN PART — RT-005's acceptance condition: the world-guarantee it stood for, not the `pr.merge`/ALLOW clause (S-CC, 29 Jul 2026)
+
+> **The condition, as it last stood (S2.2):** _no ALLOW, and no APPROVAL, causes any external side
+> effect anywhere in the system._
+
+**Two sentences hide in that one, and only one of them retires here.** S-CC enrols the first BRIDGED
+member — `claude-code`, an adapter that invokes a coding agent whose room surface is text and whose side
+effects are real: files written, commands run, commits made, in its own scratch workspace, by its own
+tooling, **outside the fabric**. When that member is summoned and takes its turn, work reaches the world.
+
+- The **literal clause** — _a governed action evaluated to ALLOW (a `pr.merge`) causing a real external
+  effect_ — is **NOT** retired. It survives untouched and **remains S2.6's to end** (there is still no
+  executor; an approved merge executes nothing). The precise-claim section below shows why S-CC does not
+  even falsify it.
+- The **informal world-guarantee** the sentence stood in for — _that Playroom causes nothing in the
+  world_ — is what retires. And it retires having **already been narrowed once**: S-LIVE recorded that a
+  summon "DOES cause an external side effect — an HTTP request to a provider, and a charge," so by S-CC
+  the guarantee already read "nothing in the world **beyond metered, capped provider spend**." S-CC
+  breaks _that_ residual: **arbitrary, uncapped, non-spend effects** — files, commands, commits — now
+  reach the world through a governed summon.
+
+**PRE-RETIRED, ahead of the capability.** SCC-1 ships this entry, the member, and its mandate — the
+ledger leads, by design — but the adapter ships `enabled: false` with no implementation, and `factory.ts`
+refuses to construct a disabled adapter, so **no bridged turn can run until SCC-2**. Everything below in
+the present tense describes the capability SCC-2 through SCC-4 bring; nothing in the committed tree runs
+the profile yet. Whichever session wired a working agent in was told to find this line first, and it is
+being found first — before, not after, the code that will make it true.
+
+### What the condition made survivable — so the cost of retiring it is on the record
+
+Every re-check leaned on this sentence, and each leaned on it for something specific:
+
+- **Impersonation was survivable** (RT-005 + M-N1): a caller who claimed `claude-main` gained its
+  mandate, and _nothing that mandate permitted actually happened_. The disclosure widened who could aim,
+  not what the aim achieved — because the aim achieved nothing outside the log.
+- **The public deploy was survivable** (S-LIVE): strangers spending my keys was a bill, not a breach,
+  because an ALLOW moved no money, sent no mail, touched no repo. (This is also where the world-guarantee
+  first narrowed to "beyond metered spend" — the bill IS an effect in the world, just a capped one.)
+- **The unattended loop was safe to build** (S-LOOP): a cycle that runs without a person each tick was
+  acceptable precisely because each tick caused only a governed summon and a metered turn — nothing
+  arbitrary escaped the system.
+- **Two open findings inherited the condition and are NOT re-examined in full here** (they need their
+  own pass): S04-N2 (the unsigned mandate) and S13-N1 (existential delegation) were both documented as
+  carrying this acceptance condition. Their survivability rests on "no executor for governed actions,"
+  which is a statement about the `pr.merge`/ALLOW clause — the half that SURVIVES — so it still holds for
+  every NON-bridged member. What changes for them is only that "causes nothing in the world" can no
+  longer be cited as a blanket backstop; their entries (and the S04-N2 pointer at the top of this file)
+  should be re-read against this split rather than against the retired world-guarantee.
+
+Retiring the world-guarantee retires that backstop. It does not un-fix the findings; it removes one
+reason they were survivable, which is why the compensating controls below have to carry the weight.
+
+### The precise claim — what breaks, and what does NOT
+
+Honesty first, because this sentence has been re-read six times and a loose retirement would erase that
+care. The condition has two halves, and they fare differently:
+
+- **The ALLOW half.** A summon of a member has never been an ALLOW verdict — `agent.turn` is not a
+  governed action. So `claude-code`'s effects arrive through a **summon**, not through an ALLOW, and S-CC
+  does not even falsify "no ALLOW causes an external side effect." That clause is **still true** and
+  **remains S2.6's to end**: the day a governed `pr.merge` ALLOW pushes a branch, it breaks — not before.
+- **The APPROVAL half.** This one S-CC _does_ dent. S2.2 established that an approved protected summon
+  FIRES the held summon, and called that "internal to Playroom either way." With a bridged member, an
+  approved protected summon **of `claude-code`** would fire a turn that does real workspace work — so the
+  APPROVAL half's "internal either way" is **no longer universal**. Today `claude-code` holds no
+  protected actions and its mandate makes it a co-sign target for none, so nothing routes an approval to
+  it yet; but the moment a protected summon can name it, an APPROVAL causes external work, and that is
+  part of what this retirement covers.
+
+A word on the S-LIVE/S2.2 disagreement this inherits: S-LIVE called provider spend "an external side
+effect" (an HTTP call and a charge); S2.2 called the same call "internal to Playroom either way." The
+honest reconciliation is that provider spend is external **but metered and capped** — bounded by the
+ceiling — which is why both readings coexisted. What S-CC adds is the first **unbounded, uncapped**
+external effect, and there is no reading on which that is internal.
+
+### What still holds — and where "governed participation" stops
+
+The member's **participation** is governed as to **control and metering** — but not as to the _content_
+of what it is told, and that limit is the whole residual, so it is stated here rather than buried below:
+
+- It is summoned, not self-starting; **it holds no `summon.initiate`** and emits no structured action, so
+  it cannot summon anyone — in the loop the briefing member summons IT.
+- The room governs **who** briefs it, its **budget**, its **depth** (the S1.8 cap), and its
+  **attribution**. It does **not** govern the _wording_ of the brief: room text — including promoted or
+  imported foreign content — can shape the instruction, and nothing checks that phrasing (the residual).
+  So the ADR-004 split is real but not clean: the injection channel lives inside _participation_ (the
+  brief), not inside the work.
+- **Protected actions in the room still pause for a signature.** The co-sign path is untouched; a
+  `pr.merge` requested under any mandate still holds for a human. (The new case is the APPROVAL half
+  above — an approved protected summon _of the bridged member_, once one can name it.)
+- Its **real cost will be metered** into the S-LIVE ceiling once SCC-2 lands (S-CC meters the route's
+  `total_cost_usd`, not a token estimate) — for provider spend it incurs. This does **not** cover a
+  _stolen_ key spent elsewhere; see the residual.
+
+### The compensating controls, named — and how far each reaches
+
+The world-guarantee is gone; these carry its weight, and a reader should check them rather than it. Each
+is stated with its limit, because a control named without its limit is the overclaim this entry avoids:
+
+1. **Governed participation** — summon, budget, depth cap, attribution. Reaches the control and metering
+   of participation, **not** the brief's content (above).
+2. **The attendance dial, at 1 for first live runs** — every cycle pauses for a human glance before the
+   NEXT fires. It is a **between-cycle, detective** control: it halts continuation, but the first turn —
+   with shell, no sandbox, and the live key in env — **runs to completion before anyone looks**. So it
+   cannot prevent a within-turn side effect (an out-of-workspace write, a key exfiltration); it can only
+   stop the next cycle. The preventive control it is standing in for — an OS sandbox — does not exist.
+3. **The scratch workspace** — the adapter runs with `cwd` set to a designated directory with something
+   honest to work on, and **no runs against the production Playroom repo**. This is a **default working
+   directory and a convention, NOT an enforced boundary**: with permissions skipped and no OS sandbox,
+   `Bash` runs as the OS user and can read or write any absolute path. It bounds the _honest_ case, not
+   an adversarial one.
+4. **The recorded permission profile (as specified for SCC-2; not yet executed by any committed code):**
+   `claude -p` with `--dangerously-skip-permissions`, `cwd` the scratch workspace and `--add-dir` the
+   same, `CLAUDE_CONFIG_DIR` a clean temp dir (no user hooks/settings), a sanitized environment
+   (`ANTHROPIC_BASE_URL` and SDK session vars unset; an explicit `ANTHROPIC_API_KEY` **kept** — the agent
+   cannot run without it), and a turn timeout that becomes an error terminal. **This bypasses the bridged
+   agent's own permission checks; there is no OS sandbox.** "Sanitized" means the SDK session vars are
+   removed — it does **not** protect the key, which is the point of the residual.
+5. **Minimal mandate** — `scope: []`, no protected actions reachable because it emits none. Deny-by-
+   default does the rest **of the fabric/participation governance**; it does **not** constrain the
+   workspace work, which the fabric never sees.
+6. **The daily spend ceiling** (S-LIVE) — will see the bridged member's real _provider_ cost once SCC-2
+   lands. It does not see, and cannot refuse, spend on a **stolen** key (residual).
+7. **Any-human pause** — any human may pause the standing order that drives the loop; the creator alone
+   resumes or revokes it.
+
+### The residual — written down, not wished away
+
+**1. Room text influences a brief, and the brief drives an agent with shell access.** The activation
+boundary stops foreign content from _summoning_; nothing stops it from _phrasing_. A promoted or imported
+message that reaches the briefing member can shape the instruction the bridged member then executes with
+`--dangerously-skip-permissions` and no OS jail — so a determined injection could, via `Bash`, attempt
+work **outside** the scratch directory. The S1.5 provenance markers ride into the brief marking foreign
+content as foreign, but that is **attribution, not a control**: it labels the phrasing, it does not stop
+the model acting on it. This surface **widens post-deploy** (see SCC-N1): today only Prince can brief it;
+later a guest sharing a room could.
+
+**2. Credential exfiltration — the channel the workspace confinement does not touch.** The live
+`ANTHROPIC_API_KEY` sits in the subprocess env (control #4 keeps it — the agent cannot run without it),
+reachable by `Bash` with network egress. A single injected turn can read `$ANTHROPIC_API_KEY` and POST it
+out, and **none of the stated bounds contain that**: the dial is a between-cycle glance, so the exfil turn
+finishes first; the scratch workspace and the non-production repo are irrelevant to an env read; and a
+**stolen key spends OUTSIDE Playroom's ceiling**, so control #6's "refuses out loud" never fires — the key
+outlives the workspace, the dial, and the room. The real mitigations are a **per-turn scoped or ephemeral
+credential** and an **egress restriction**, and **neither exists in this slice.** This is the most
+damaging residual and it is deliberately named, not softened.
+
+**The mitigation for both is the successor slice: tool-call mapping**, which brings the member's _work_
+inside the fabric so it is governed and not merely bridged, plus a scoped credential and egress control.
+Until then this residual is the honest cost of the capability, and the disclosure rule (ADR-004) governs
+every surface that shows it: **participation governed; work bridged** — nothing may imply the member's
+work is governed when only its participation is.
+
+### NOTED — SCC-N1: the bridged member is auto-enrolled everywhere, and summonable everywhere
+
+`claude-code` is a non-guest member of `principal:prince`, so `createRoom` enrols it in **every** room
+Prince creates, exactly like `claude-main` and `sol`. It is therefore tag-summonable (`@claude-code`) in
+any of those rooms, not only the designated loop room. This was chosen over restricting its enrolment —
+which would have meant changing `createRoom`'s membership rule or adding an enrolment flag — because it is
+consistent with every other agent and because room membership was never the boundary anyway: the adapter
+always runs with `cwd` in the scratch directory, so a summon from any room lands its work in the same
+place, and being in fewer rooms would not confine it (the workspace is a default, not a jail — see the
+residual).
+
+**What that defers.** On localhost every room is Prince's, so the only person who can summon it is Prince.
+**Post-deploy that changes**: a guest who redeems a code into one of Prince's rooms would share that room
+with a shell-capable member and could tag it — briefing it, and reaching the credential channel above,
+with their own room text. A stranger triggering shell turns on my key is a wider surface than a
+localhost-only reading assumes. **Restrict `claude-code`'s enrolment to designated rooms before deploy** —
+the cheapest form is a per-member "manual enrolment only" flag that `createRoom` honours. **Trigger: the
+first deploy, or the first guest who could share a room with it.** Bounded until then by deploy being
+blocked, the dial at 1, and the disabled-until-SCC-2 adapter.

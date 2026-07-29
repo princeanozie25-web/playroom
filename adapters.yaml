@@ -62,3 +62,18 @@ adapters:
     max_output_tokens: 512
     cost_per_1k_in: 0.001
     cost_per_1k_out: 0.005
+  # ── THE BRIDGED MEMBER (S-CC) ────────────────────────────────────────────────────────
+  #
+  # claude-code invokes a coding agent through the headless CLI (provider: claude-code), and its cost
+  # is NOT tokens×price: the route surfaces the real total_cost_usd — cache creation, internal tool
+  # iterations — which the adapter carries per turn (SCC-2). So the prices below are 0 DELIBERATELY,
+  # not the typo .strict() exists to catch: they are unused, and the real cost is metered from the
+  # route. DISABLED here in SCC-1 — the member record validates against this entry, but nothing
+  # constructs or warms the adapter until SCC-2 adds the implementation and flips `enabled`.
+  - id: claude-code
+    provider: claude-code
+    model: claude-opus-4-8
+    enabled: false
+    max_output_tokens: 8192
+    cost_per_1k_in: 0
+    cost_per_1k_out: 0

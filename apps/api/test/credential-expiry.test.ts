@@ -87,10 +87,16 @@ describe('every agent member can actually be reached', () => {
              WHERE r.member_id = m.id AND r.status = 'available'
           )`,
     );
+    // ONE DELIBERATE EXCEPTION, and only for this commit: `claude-code` (S-CC) arrives here with the
+    // ledger and its mandate — "the ledger leads" — but its bridged route is genuinely NOT reachable
+    // yet, because its adapter is implemented and enabled in SCC-2. This is the OPPOSITE of the gap
+    // the invariant guards: not an agent silently left unrouted by a snapshot migration, but one
+    // staged on purpose, named here so the staging is visible rather than hidden. SCC-2 seeds the
+    // available bridged route with the adapter and restores this to `[]`.
     expect(
       rows.map((r) => r.id),
-      'agent members with no available route',
-    ).toEqual([]);
+      'agent members with no available route (claude-code is staged for SCC-2)',
+    ).toEqual(['claude-code']);
   });
 
   it('and every agent has a mandate, so a refusal can name a signer', async () => {

@@ -34,6 +34,24 @@ describe('listMembers', () => {
     // agents-only. The agents' fields are what the roster strip draws and must not move.
     const members = (await listMembers(pool)).filter((m) => m.kind === 'agent');
     expect(members).toEqual([
+      // ── THE BRIDGED MEMBER (S-CC) ──────────────────────────────────────────────────
+      //
+      // Ordinal 0 (principal:prince) like claude-main, and ordered before it because the tiebreak
+      // within a principal is the member id and 'claude-code' < 'claude-main'. Its scope is EMPTY on
+      // purpose: it participates, it is granted nothing, and its real work happens outside the fabric
+      // (see the RT-005 retirement). An empty scope pinned here is what catches that emptiness being
+      // "helpfully" filled in later — the same reason the others are enumerated.
+      {
+        id: 'claude-code',
+        kind: 'agent',
+        display_name: 'Claude Code',
+        principal_id: 'principal:prince',
+        principal_name: 'Prince',
+        principal_ordinal: 0,
+        adapter_id: 'claude-code',
+        scope: [],
+        protected_actions: [],
+      },
       {
         id: 'claude-main',
         kind: 'agent',
@@ -139,7 +157,16 @@ describe('a room roster, scoped', () => {
     // absent because their principals are flagged `guest`, and a guest gets into a room only by
     // redeeming a room code. Blanket enrolment would have made the code decoration over an open
     // door.
-    expect(body.members.map((m) => m.id).sort()).toEqual(['claude-main', 'jerry', 'prince', 'sol']);
+    // claude-code (S-CC) is a non-guest member of principal:prince, so room creation enrols it like
+    // every other agent — it is summonable in any room, and always operates in its confined scratch
+    // workspace regardless of which room summons it (see the RT-005 retirement).
+    expect(body.members.map((m) => m.id).sort()).toEqual([
+      'claude-code',
+      'claude-main',
+      'jerry',
+      'prince',
+      'sol',
+    ]);
 
     const ghost = await fetch(`${server.httpBase}/rooms/no-such-room-here/members`, {
       headers: { authorization: `Bearer ${server.token}` },
@@ -161,7 +188,12 @@ describe('a room roster, scoped', () => {
     ]);
 
     const inRoom = await listRoomMembers(pool, room);
-    expect(inRoom.map((m) => m.id).sort()).toEqual(['claude-main', 'jerry', 'prince']);
+    expect(inRoom.map((m) => m.id).sort()).toEqual([
+      'claude-code',
+      'claude-main',
+      'jerry',
+      'prince',
+    ]);
     // The full-roster read still sees sol — the member exists, they are just not here.
     expect((await listMembers(pool)).map((m) => m.id)).toContain('sol');
 
@@ -412,7 +444,13 @@ describe('a guest is not enrolled by creating a room', () => {
     // And the non-guests still are, so this narrowed one thing and not everything. Without this
     // half, a bug that enrolled NOBODY would pass the assertion above.
     const all = await listRoomMembers(pool, room);
-    expect(all.map((m) => m.id).sort()).toEqual(['claude-main', 'jerry', 'prince', 'sol']);
+    expect(all.map((m) => m.id).sort()).toEqual([
+      'claude-code',
+      'claude-main',
+      'jerry',
+      'prince',
+      'sol',
+    ]);
 
     await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
   });

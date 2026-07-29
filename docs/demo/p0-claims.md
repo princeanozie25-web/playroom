@@ -133,7 +133,18 @@ _which document was evaluated_, not that anyone authorised it. S2.1.
 and Deny are live for the REQUIRED SIGNER — the human bound to the decision's principal, and no one
 else; an agent can never complete one. A signed approval releases the decision's action exactly
 once. But on this `pr.merge` decision the release records the sign-off and runs **NOTHING**: there
-is no executor until S2.6, so no merge occurs and RT-005 holds. The completion is demonstrated on an
+is no executor until S2.6, so no merge occurs and **RT-005's `pr.merge`/ALLOW clause still holds** — and
+S-CC does not touch it. `claude-code`'s effects (SCC-2 onward) arrive through a _summon_, which was never
+an ALLOW verdict, so "no ALLOW causes an external side effect" stays true and remains S2.6's to end. What
+S-CC retires is the **informal world-guarantee** the condition stood in for — _that the system causes
+nothing in the world_ — which S-LIVE had already narrowed to "nothing beyond metered provider spend." The
+bridged member `claude-code` **will**, once enabled (SCC-2), do real workspace work on a summon —
+arbitrary, uncapped side effects — so the system stops promising that. **Take 13 predates that member and
+that capability**: in this film **no governed action executed and nothing was merged, sent, or written to
+any external system of record**. Its beats DO show real provider calls and real spend, which the ledger
+classes as external — so say exactly that, and do **not** say "nothing left the system" or "the system
+cannot cause a side effect." The weakening is the SYSTEM's, not this footage's. See the ledger's RT-005
+retirement. The completion is demonstrated on an
 INTERNAL action — a protected summon that fires on approval — in the heartbeat clip, a separate
 asset (`docs/demo/s22-cosign-completes.md`); take 13 shows the paused card, which is still a true
 moment: a decision awaiting a signature. A caption may say _a human signs and the paused action
