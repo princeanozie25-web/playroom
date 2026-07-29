@@ -71,6 +71,13 @@ export interface BuildOptions {
    * suite that deliberately has none.
    */
   warmOnBoot?: boolean;
+  /**
+   * SLIVE-N1: the IP-keyed throttle on POST /redeem — attempts per IP per window. Configurable so a
+   * test can drive it low and hammer one IP to a 429 without tuning the production number. Defaults
+   * throttle a brute-force script hard while never inconveniencing a tester who redeems once or twice.
+   */
+  redeemRateMax?: number;
+  redeemRateWindowMs?: number;
 }
 
 const WS_OPEN = 1; // ws.WebSocket.OPEN
@@ -230,7 +237,14 @@ function frameRefusal(unrecognised: boolean, roomId: string): ServerErrorFrame {
 }
 
 export function buildServer(opts: BuildOptions = {}): FastifyInstance {
-  const app = Fastify({ logger: loggerOptions(opts) });
+  const app = Fastify({
+    logger: loggerOptions(opts),
+    // BEHIND FLY'S PROXY the socket peer is the load balancer, so `req.ip` would be one address for
+    // everyone and the /redeem throttle (SLIVE-N1) would key on nothing. trustProxy makes `req.ip`
+    // the client from X-Forwarded-For, which Fly sets and no caller can forge — the app is reachable
+    // only THROUGH that proxy, never directly.
+    trustProxy: true,
+  });
   const databaseUrl = opts.databaseUrl ?? process.env.DATABASE_URL;
   const pool: Pool | null = databaseUrl ? makePool(databaseUrl) : null;
   const bus = new RoomBus();
@@ -255,6 +269,35 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     adapterFactory,
     execute: (ctx, command) => executeCommand(ctx, command, deps),
   };
+
+  // ── SLIVE-N1: THE /redeem THROTTLE ──────────────────────────────────────────────────────────
+  //
+  // POST /redeem is the one unauthenticated write — its whole job is to hand a credential to someone
+  // who has none. A 4-character code from a 30-character alphabet is ~810k possibilities, and off
+  // localhost, on a public URL, nothing here slowed a script down. This is the "before any code goes
+  // out" control: an IP-keyed sliding window that lets a real tester redeem (once, maybe a retry)
+  // while making a brute-force script take lifetimes per address. It is a floor, not the whole fence
+  // — the companion lever, a longer code, is left to the owner's call and noted in the ledger.
+  //
+  // IN-MEMORY AND PER-INSTANCE, sufficient for the single always-on machine this deploys as
+  // (min_machines_running = 1). A second machine would each keep their own count, which only makes
+  // the effective limit STRICTER, never looser — safe if imperfectly shared. A shared store (Redis)
+  // is the honest answer once there is more than one machine, and is noted, not pretended.
+  const redeemMax = opts.redeemRateMax ?? 20;
+  const redeemWindowMs = opts.redeemRateWindowMs ?? 10 * 60_000;
+  const redeemHits = new Map<string, number[]>();
+  function redeemThrottled(ip: string): boolean {
+    const now = Date.now();
+    const cutoff = now - redeemWindowMs;
+    const hits = (redeemHits.get(ip) ?? []).filter((t) => t > cutoff);
+    hits.push(now);
+    redeemHits.set(ip, hits);
+    // Opportunistic prune so a stream of unique IPs cannot grow the map without bound.
+    if (redeemHits.size > 20_000) {
+      for (const [k, v] of redeemHits) if (v[v.length - 1] <= cutoff) redeemHits.delete(k);
+    }
+    return hits.length > redeemMax;
+  }
 
   app.register(fastifyWebsocket);
 
@@ -555,6 +598,14 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // half-solved: the mitigations that matter today are that a hit costs the attacker a seat which
     // then visibly cannot be claimed, only two seats exist, and this is not yet on a public URL.
     fastify.post('/redeem', async (req, reply) => {
+      // SLIVE-N1: THROTTLE FIRST, before touching the database or telling the caller anything about
+      // the code. A throttled attempt learns nothing — same shape as a wrong code, just a 429 — so
+      // the limit cannot be used as its own oracle. Keyed on the client IP (trustProxy, above).
+      if (redeemThrottled(req.ip)) {
+        app.log.warn({ ip: req.ip }, 'redeem throttled');
+        reply.code(429);
+        return { error: 'too many attempts — please wait a few minutes and try again' };
+      }
       const body = (req.body ?? {}) as { code?: unknown; display_name?: unknown };
       if (typeof body.code !== 'string' || typeof body.display_name !== 'string') {
         reply.code(400);

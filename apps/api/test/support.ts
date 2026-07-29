@@ -98,6 +98,9 @@ export async function startTestServer(
     // emitted (A4-F1: an unobserved logger is the same as no logger).
     loggerStream?: NodeJS.WritableStream;
     logLevel?: string;
+    // SLIVE-N1: a test can drive the /redeem throttle low to reach a 429 without a real deployment.
+    redeemRateMax?: number;
+    redeemRateWindowMs?: number;
   } = {},
 ): Promise<TestServer> {
   const app = buildServer({
@@ -105,6 +108,8 @@ export async function startTestServer(
     adapterFactory: opts.adapterFactory,
     loggerStream: opts.loggerStream,
     logLevel: opts.logLevel,
+    redeemRateMax: opts.redeemRateMax,
+    redeemRateWindowMs: opts.redeemRateWindowMs,
   });
   await app.listen({ port: 0, host: '127.0.0.1' });
   // Narrow, don't cast: a port-0 TCP listen returns an AddressInfo object, never

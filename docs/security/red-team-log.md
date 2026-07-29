@@ -887,6 +887,24 @@ both are cheap — they are omitted because a limiter with no deployment to prot
 sitting in the path that lets testers in. **Trigger: the first deployment to a public URL, before any
 code is sent to anyone.**
 
+**ADDRESSED (rate limit) at the deploy — the trigger arrived.** The first half is now landed and
+tested: an IP-keyed sliding window on `POST /redeem` (`server.ts`), checked BEFORE the code is, so a
+throttled attempt is a 429 that reveals nothing a wrong code's 404 did not — the limit is not its own
+oracle. `trustProxy` is on so `req.ip` is the client from Fly's `X-Forwarded-For`, not the load
+balancer; a forged header is not a concern because the app is reachable only through that proxy.
+Asserted by `redeem-throttle.test.ts`: one IP hammered to a 429, a second IP untouched (so one abuser
+cannot lock every tester out). Two caveats stated rather than hidden:
+
+- **In-memory, per machine.** Sufficient for the single always-on machine this deploys as
+  (`min_machines_running = 1`); a second machine would each keep their own count, which only makes the
+  effective limit STRICTER, never looser. A shared store (Redis) is the honest answer the day a second
+  machine exists, and is noted, not pretended.
+- **The longer code is still open.** The window throttles the RATE; it does not shorten the ~810k
+  space. A 4→6 character code (`room-codes.ts`, `GROUP`) would raise the space to ~730M and is the
+  companion lever — left as the owner's call because it invalidates outstanding codes, and the rate
+  limit is the control the deployment actually needed first. **Trigger for the code length: more than
+  a handful of seats, or evidence of guessing in the logs.**
+
 ### RE-CHECKED — RT-005's condition holds, and it was NOT checked off localhost
 
 The condition: **no ALLOW verdict causes any external side effect.** Re-read against the code as of
