@@ -329,9 +329,39 @@ export const SummonEvent = z.object({
     root_is_human: z.boolean(), // judged against the roster when written, then frozen
     depth: z.number(), // 0 = human-rooted. S0.5b enforces a cap on this.
     cause_seq: z.number(), // the event that triggered it — the log's first back-reference
+    /**
+     * THE STANDING ORDER THAT FIRED THIS SUMMON (S-LOOP), if one did — else absent.
+     *
+     * An order-rooted summon is still HUMAN-rooted: `root_actor` is the order's human creator and
+     * `root_is_human` is true, so it resolves in the §19 drift query exactly like a human tag. This
+     * marks it as the SECOND resolving class — a human authored the order, not this particular ask —
+     * so the drift ledger can report human-rooted and order-rooted separately (both must resolve;
+     * unprompted stays zero). Threaded down the cycle's chain, so a summon an order-fired turn emits
+     * inherits it and the whole cycle reads as order-rooted. Optional, so every prior summon parses.
+     */
+    order_id: z.string().optional(),
   }),
 });
 export type SummonEvent = z.infer<typeof SummonEvent>;
+
+/**
+ * A STANDING ORDER FIRED A CYCLE (S-LOOP) — the recurring "payment".
+ *
+ * One per (order, triggering completion), enforced at the database (migration 022). It carries the
+ * cycle number (for the chip) and the seq of the completed turn that triggered it (the idempotency
+ * key and the fired summon's cause). The summon it fires is a separate `summon` event, order-rooted.
+ */
+export const OrderCycledEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('order.cycled'),
+  payload: z.object({
+    order_id: z.string(),
+    cycle: z.number(), // 1-based; the chip's cycle count is the highest of these
+    trigger_seq: z.number(), // the completed turn that fired it
+    member: z.string(), // the member it summoned this cycle (the order's action)
+  }),
+});
+export type OrderCycledEvent = z.infer<typeof OrderCycledEvent>;
 
 /**
  * A route was selected for a member's turn — Bible §6.2: "record which route was selected and
@@ -675,6 +705,7 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   RoomSummaryEvent,
   OrderCreatedEvent,
   OrderStatusEvent,
+  OrderCycledEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;

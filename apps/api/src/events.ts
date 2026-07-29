@@ -254,6 +254,33 @@ export async function messagesAfterSeq(
   return rows.reverse().map((r) => ({ author: r.actor_id, body: r.payload.body }));
 }
 
+/**
+ * The recent SUCCESSFUL agent turns in the room — the loop's cycle context (S-LOOP).
+ *
+ * Agent turn text is excluded from the message window (PM7 / activation barrier 1), which is correct
+ * for human-mediated chat: the human re-introduces content on the next message. An unattended loop
+ * removes that mediation, so a member reviewing the previous member's draft would otherwise see
+ * nothing. This reads the last few completed turns' text so the next summoned member arrives knowing
+ * the prior work — as COMMON GROUND (shared, nobody's private), NEVER as a `message` event, so barrier
+ * 1 (which keys on event_type) is untouched: this changes what an agent READS, never what triggers a
+ * summon, and every action the reader takes is still governed exactly as before.
+ */
+export async function recentCompletedTurns(
+  pool: Pool,
+  roomId: string,
+  limit: number,
+): Promise<AgentMessage[]> {
+  const { rows } = await pool.query<{ actor_id: string; payload: { text: string } }>(
+    `SELECT actor_id, payload FROM events
+     WHERE room_id = $1 AND event_type = 'agent.turn.completed' AND success = true
+       AND coalesce(payload ->> 'text', '') <> ''
+     ORDER BY seq DESC
+     LIMIT $2`,
+    [roomId, limit],
+  );
+  return rows.reverse().map((r) => ({ author: r.actor_id, body: r.payload.text }));
+}
+
 /** How many room messages sit after `afterSeq`. The tail length the summariser watches. */
 export async function countMessagesAfter(
   pool: Pool,
@@ -564,6 +591,35 @@ export async function appendOrderStatus(
   return rowToServerEvent(rows[0]);
 }
 
+export interface OrderCycledPayload {
+  order_id: string;
+  cycle: number;
+  trigger_seq: number;
+  member: string;
+}
+
+/**
+ * Append the record that an order fired a cycle. Written by 'system' (the runner). At most one per
+ * (order, trigger_seq) — migration 022's unique index refuses a duplicate, the backstop under the
+ * atomic fire guard (orders.tryOpenCycle). Returns null on that conflict, so a racing replay is a
+ * no-op rather than a second cycle.
+ */
+export async function appendOrderCycled(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: OrderCycledPayload,
+): Promise<ServerEvent | null> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'order.cycled', $3)
+     ON CONFLICT DO NOTHING
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rows[0] ? rowToServerEvent(rows[0]) : null;
+}
+
 /**
  * A reference to the summon an agent turn answers.
  *
@@ -618,6 +674,8 @@ export async function appendSummon(
     root_is_human: boolean;
     depth: number;
     cause_seq: number;
+    /** The standing order that fired this summon (S-LOOP), if one did. Human-rooted regardless. */
+    order_id?: string;
   },
 ): Promise<ServerEvent | null> {
   const { rows } = await pool.query<EventRow>(

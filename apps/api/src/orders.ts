@@ -123,3 +123,44 @@ export async function setOrderStatus(
     [orderId, status, reason],
   );
 }
+
+/** The ACTIVE orders a completed turn of this type by this member should fire (the runner's hot path). */
+export async function activeOrdersForTrigger(
+  pool: Pool,
+  roomId: string,
+  eventType: string,
+  member: string,
+): Promise<OrderRow[]> {
+  const { rows } = await pool.query<OrderDbRow>(
+    `SELECT ${ORDER_COLS} FROM standing_orders
+      WHERE room_id = $1 AND status = 'ACTIVE'
+        AND trigger_event_type = $2 AND trigger_member_id = $3
+      ORDER BY id`,
+    [roomId, eventType, member],
+  );
+  return rows.map(toOrderRow);
+}
+
+/**
+ * OPEN A CYCLE — the atomic fire guard (migration 022). Advances the order's cycle iff the triggering
+ * completion is NEWER than the one that opened its current cycle, which is BOTH single-cycle-in-flight
+ * (the next cycle cannot start until this completion — the terminal of the running one — arrives) AND
+ * idempotency (a replayed completion has a seq not newer than the cycle it already opened, so it does
+ * nothing). Returns the new cycle number if it fired, or null if the order is not active, not idle, or
+ * the completion is a replay.
+ */
+export async function tryOpenCycle(
+  pool: Pool,
+  orderId: string,
+  triggerSeq: number,
+): Promise<number | null> {
+  const { rows } = await pool.query<{ cycle_count: number }>(
+    `UPDATE standing_orders
+        SET open_cycle_seq = $2, cycle_count = cycle_count + 1, unattended_count = unattended_count + 1,
+            updated_at = now()
+      WHERE id = $1 AND status = 'ACTIVE' AND coalesce(open_cycle_seq, -1) < $2
+      RETURNING cycle_count`,
+    [orderId, triggerSeq],
+  );
+  return rows[0] ? rows[0].cycle_count : null;
+}

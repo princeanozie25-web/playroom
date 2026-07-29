@@ -128,11 +128,19 @@ function buildItems(events: ServerEvent[], agentIds: Set<string>): Item[] {
     } else if (ev.event_type === 'summon') {
       // ONLY agent-initiated summons: a human tag is already the visible @-mention. `depth` and
       // `root_actor` are provenance the log keeps; the row shows the ACT — this agent summoned that one.
-      if (agentIds.has(ev.payload.requested_by)) {
+      if (ev.payload.order_id) {
+        // ORDER-ROOTED (S-LOOP): fired by a standing order, created by the human at the head. Renders
+        // as its own act — nothing else in the transcript shows it, and it is not a human tag.
         order.push({
           kind: 'summon',
           key: `s${ev.seq}`,
-          view: { by: ev.payload.requested_by, member: ev.payload.member },
+          view: { kind: 'order', by: ev.payload.root_actor, member: ev.payload.member },
+        });
+      } else if (agentIds.has(ev.payload.requested_by)) {
+        order.push({
+          kind: 'summon',
+          key: `s${ev.seq}`,
+          view: { kind: 'agent', by: ev.payload.requested_by, member: ev.payload.member },
         });
       }
     } else if (ev.event_type === 'order.created') {

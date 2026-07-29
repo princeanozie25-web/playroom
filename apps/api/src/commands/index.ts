@@ -16,6 +16,7 @@ import { handoffCommand, type HandoffResult } from './handoff.js';
 import { requestActionCommand, type RequestActionResult } from './requestAction.js';
 import { signDecisionCommand, type SignDecisionResult } from './signDecision.js';
 import { createOrderCommand, controlOrderCommand, type OrderResult } from './order.js';
+import { runOrdersCommand } from './runOrders.js';
 import { maintainSummaryCommand } from './maintainSummary.js';
 
 export * from './context.js';
@@ -117,6 +118,18 @@ export function executeCommand(
 ): Promise<OrderResult>;
 export function executeCommand(
   ctx: CommandContext,
+  command: {
+    kind: 'runOrders';
+    roomId: string;
+    member: string;
+    completedSeq: number;
+    success: boolean;
+    orderId?: string;
+  },
+  deps: CommandDeps,
+): Promise<void>;
+export function executeCommand(
+  ctx: CommandContext,
   command: { kind: 'maintainSummary'; roomId: string },
   deps: CommandDeps,
 ): Promise<ServerEvent | null>;
@@ -153,6 +166,8 @@ export function executeCommand(
       return createOrderCommand(deps, ctx, command);
     case 'controlOrder':
       return controlOrderCommand(deps, ctx, command);
+    case 'runOrders':
+      return runOrdersCommand(deps, ctx, command);
     case 'maintainSummary':
       return maintainSummaryCommand(deps, ctx, command);
   }

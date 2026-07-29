@@ -36,6 +36,10 @@ interface Counts {
   multi_turn_summons: number;
   turn_rows_examined: number;
   summons_examined: number;
+  // The resolving population split (S-LOOP): how the human authorised each resolving turn.
+  directly_human_rooted_turns: number;
+  order_rooted_turns: number;
+  order_summons_examined: number;
 }
 
 // Same TLS treatment as migrate.ts: strict on hosted Postgres, none on local.
@@ -84,6 +88,10 @@ async function main(): Promise<void> {
     console.log(`  dangling reference      : ${r.dangling_ref}`);
     console.log(`  not human-rooted        : ${r.not_human_rooted}`);
     console.log(`multi-turn summons    (0) : ${r.multi_turn_summons}`);
+    console.log(
+      `resolving turns           : ${r.directly_human_rooted_turns} directly human-rooted + ` +
+        `${r.order_rooted_turns} order-rooted (of ${r.summons_examined} summons, ${r.order_summons_examined} order-rooted)`,
+    );
 
     if (r.turn_rows_examined === 0) {
       console.log('\nNOTE: no agent turns in this log. Zero here is vacuous.');

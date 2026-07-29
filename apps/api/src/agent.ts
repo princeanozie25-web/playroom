@@ -529,6 +529,10 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
       task: task ? await getTask(pool, task.task_id) : null,
       system: { text: sys, hash: promptHash },
       commonGroundLimit: CONTEXT_MESSAGES,
+      // A LOOP turn (order-rooted) also gets the recent agent turns as cycle context, so a member
+      // reviewing the previous member's work can see it. A normal turn does not — no extra query on
+      // its first-token path (ADR-008 unaffected), and its context is exactly what it was.
+      includeRoomTurns: deps.chain?.orderId != null,
     });
     // Throws AssemblyInvariantError rather than returning a window: an unprovable window is not
     // sent to a provider in a weaker form, it is not sent.
@@ -597,40 +601,39 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     // test.
     const shape = assemblyShape(assembly);
     console.log(
-      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms ttft=${timings.t_provider_ttft}ms ttfd=${timings.ttfd_total}ms ctx=common:${shape.common_ground}+own:${shape.own_store}+task:${shape.task}`,
+      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms ttft=${timings.t_provider_ttft}ms ttfd=${timings.ttfd_total}ms ctx=common:${shape.common_ground}+turns:${shape.room_turns}+own:${shape.own_store}+task:${shape.task}`,
     );
 
-    publish(
-      await appendAgentEvent(
-        pool,
-        roomId,
-        adapterId,
-        summon,
-        task,
-        'agent.turn.completed',
-        {
-          turn_id: turnId,
-          adapter_id: adapterId,
-          text: assembled,
-          success: true,
-          tokens_in: tokensIn,
-          tokens_out: tokensOut,
-          cost_usd: cost,
-          error_class: null,
-        },
-        {
-          adapter_id: adapterId,
-          tokens_in: tokensIn,
-          tokens_out: tokensOut,
-          cost_usd: cost,
-          latency_ms: latencyMs,
-          prompt_hash: promptHash,
-          success: true,
-          error_class: null,
-          timings,
-        },
-      ),
+    const completedEvent = await appendAgentEvent(
+      pool,
+      roomId,
+      adapterId,
+      summon,
+      task,
+      'agent.turn.completed',
+      {
+        turn_id: turnId,
+        adapter_id: adapterId,
+        text: assembled,
+        success: true,
+        tokens_in: tokensIn,
+        tokens_out: tokensOut,
+        cost_usd: cost,
+        error_class: null,
+      },
+      {
+        adapter_id: adapterId,
+        tokens_in: tokensIn,
+        tokens_out: tokensOut,
+        cost_usd: cost,
+        latency_ms: latencyMs,
+        prompt_hash: promptHash,
+        success: true,
+        error_class: null,
+        timings,
+      },
     );
+    publish(completedEvent);
 
     // THE WORK IS FINISHED, so the task says so — and the member who finished it is the actor.
     // Written after the completed row, in the same order the decisions happened: the turn ends,
@@ -669,6 +672,25 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         }
       }
     }
+
+    // ── THE LOOP RUNNER (S-LOOP) ──────────────────────────────────────────────────────────
+    //
+    // This completion may be the trigger a standing order waits for. Hand it to the runner — a
+    // completed turn drives the next cycle, order-rooted through the order's human creator. Fire-and-
+    // forget under `system`: it is the room running its own orders, not this member. `completedEvent.seq`
+    // is the fired cycle's cause and idempotency key; `deps.chain?.orderId` names the order this turn
+    // belonged to, so an error terminal pauses the right one.
+    void execute(
+      { actorId: 'system', mode: 'system' },
+      {
+        kind: 'runOrders',
+        roomId,
+        member: adapterId,
+        completedSeq: completedEvent.seq,
+        success: true,
+        orderId: deps.chain?.orderId,
+      },
+    ).catch(() => {});
   } catch (err) {
     // A SUMMON MAY START AT MOST ONE TURN (migration 006). This turn lost the race for
     // the `agent.turn.started` row, so another turn already answers this summon.
@@ -686,37 +708,51 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     }
     const errorClass = err instanceof Error ? err.name : 'Error';
     const latencyMs = Date.now() - startedAt;
-    publish(
-      await appendAgentEvent(
-        pool,
-        roomId,
-        adapterId,
-        summon,
-        task,
-        'agent.turn.completed',
-        {
-          turn_id: turnId,
-          adapter_id: adapterId,
-          text: assembled || `(${adapterId} could not respond)`,
-          success: false,
-          tokens_in: tokensIn,
-          tokens_out: tokensOut,
-          cost_usd: null,
-          error_class: errorClass,
-        },
-        {
-          adapter_id: adapterId,
-          tokens_in: tokensIn,
-          tokens_out: tokensOut,
-          cost_usd: null,
-          latency_ms: latencyMs,
-          prompt_hash: promptHash,
-          success: false,
-          error_class: errorClass,
-          timings: null,
-        },
-      ),
+    const failedEvent = await appendAgentEvent(
+      pool,
+      roomId,
+      adapterId,
+      summon,
+      task,
+      'agent.turn.completed',
+      {
+        turn_id: turnId,
+        adapter_id: adapterId,
+        text: assembled || `(${adapterId} could not respond)`,
+        success: false,
+        tokens_in: tokensIn,
+        tokens_out: tokensOut,
+        cost_usd: null,
+        error_class: errorClass,
+      },
+      {
+        adapter_id: adapterId,
+        tokens_in: tokensIn,
+        tokens_out: tokensOut,
+        cost_usd: null,
+        latency_ms: latencyMs,
+        prompt_hash: promptHash,
+        success: false,
+        error_class: errorClass,
+        timings: null,
+      },
     );
+    publish(failedEvent);
+
+    // THE LOOP RUNNER, on an ERROR terminal (S-LOOP): a turn that failed does not cycle. If this turn
+    // belonged to a standing order's cycle, the runner PAUSES that order out loud rather than firing
+    // the next — surfacing the failure instead of looping on it.
+    void execute(
+      { actorId: 'system', mode: 'system' },
+      {
+        kind: 'runOrders',
+        roomId,
+        member: adapterId,
+        completedSeq: failedEvent.seq,
+        success: false,
+        orderId: deps.chain?.orderId,
+      },
+    ).catch(() => {});
 
     // §14: THE WORK IS HELD, NOT FINISHED AND NOT REFUSED.
     //

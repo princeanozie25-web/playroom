@@ -73,9 +73,20 @@ WITH turn_rows AS (
   WHERE event_type LIKE 'agent.turn.%'
 ),
 summon_rows AS (
-  SELECT summon_id, root_is_human
+  SELECT summon_id, root_is_human, payload ->> 'order_id' AS order_id
   FROM events
   WHERE event_type = 'summon'
+),
+-- The RESOLVING population, split by how the human authorised it (S-LOOP): a direct ask (a human tag
+-- or a free agent-emitted summon) versus a standing order the human authored. Both are human-rooted —
+-- an order-rooted summon's root_actor is the order's human creator — so both resolve and neither is
+-- unprompted. Reported with denominators and never lumped: lumping would hide the automation ratio,
+-- which is exactly what the denominator rule exists to prevent.
+resolved AS (
+  SELECT DISTINCT t.turn_id, (s.order_id IS NOT NULL) AS order_rooted
+  FROM turn_rows AS t
+  JOIN summon_rows AS s ON s.summon_id = t.summon_id
+  WHERE t.turn_id IS NOT NULL AND s.root_is_human IS TRUE
 ),
 -- Every turn row that fails to resolve, tagged with WHICH way it failed so a non-zero
 -- total says something actionable instead of just being non-zero.
@@ -106,4 +117,9 @@ SELECT
   (SELECT count(*) FROM unrooted WHERE not_human)::int AS not_human_rooted,
   (SELECT count(*) FROM per_summon WHERE turns > 1)::int AS multi_turn_summons,
   (SELECT count(*) FROM turn_rows)::int AS turn_rows_examined,
-  (SELECT count(*) FROM per_summon)::int AS summons_examined;
+  (SELECT count(*) FROM per_summon)::int AS summons_examined,
+  -- The resolving population split (S-LOOP). directly + order-rooted = every turn that resolves;
+  -- unrooted_turns above is what does NOT, and it must stay zero.
+  (SELECT count(*) FROM resolved WHERE NOT order_rooted)::int AS directly_human_rooted_turns,
+  (SELECT count(*) FROM resolved WHERE order_rooted)::int AS order_rooted_turns,
+  (SELECT count(*) FROM summon_rows WHERE order_id IS NOT NULL)::int AS order_summons_examined;

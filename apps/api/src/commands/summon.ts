@@ -85,6 +85,9 @@ export async function summonCommand(
   // The resolved target. On the human path `input.member` is already resolved (summonRuling did it);
   // on the agent path it is a RAW string the model emitted, resolved here against the room's agents.
   let member: string;
+  // The standing order this summon belongs to (S-LOOP), if any. Inherited from the chain on the agent
+  // path so a summon emitted inside an order's cycle stays order-rooted; absent on a human tag.
+  const orderId = input.chain?.orderId;
 
   if (input.chain) {
     // AGENT-EMITTED (S1.8). The human path's "only a human may root" is REPLACED here by two
@@ -230,6 +233,7 @@ export async function summonCommand(
     causeSeq: input.causeSeq,
     intent: input.intent,
     spans: input.spans,
+    orderId,
   });
 }
 
@@ -237,13 +241,15 @@ export async function summonCommand(
 export interface FireSummonInput {
   roomId: string;
   member: string; // the resolved target
-  requestedBy: string; // who asked — a human, or the emitting agent (S1.8)
+  requestedBy: string; // who asked — a human, the emitting agent (S1.8), or a loop runner (S-LOOP)
   rootActor: string;
   rootIsHuman: boolean;
   depth: number;
   causeSeq: number;
   intent: string;
   spans?: TurnSpans;
+  /** The standing order that fired this summon (S-LOOP), if any — recorded and threaded to the turn. */
+  orderId?: string;
 }
 
 /**
@@ -348,6 +354,7 @@ export async function fireSummon(deps: CommandDeps, input: FireSummonInput): Pro
       root_is_human: input.rootIsHuman,
       depth: input.depth,
       cause_seq: input.causeSeq,
+      order_id: input.orderId,
     },
   );
 
@@ -396,7 +403,12 @@ export async function fireSummon(deps: CommandDeps, input: FireSummonInput): Pro
         // summon of its own, that is the chain it extends — so the depth cap sees one more hop, and
         // the human root at the head is preserved down the chain. A human-rooted turn (depth 0)
         // passes depth 0; an agent-emitted turn passes its depth, and the constructor increments.
-        chain: { rootActor: input.rootActor, rootIsHuman: input.rootIsHuman, depth: input.depth },
+        chain: {
+          rootActor: input.rootActor,
+          rootIsHuman: input.rootIsHuman,
+          depth: input.depth,
+          orderId: input.orderId,
+        },
       },
     )
     .catch(() => {}); // runAgentTurn writes its own error event; this guards the fire-and-forget

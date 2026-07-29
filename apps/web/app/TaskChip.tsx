@@ -137,20 +137,22 @@ export function HandoffRow({
 }
 
 /**
- * THE SUMMON ROW — one agent brought another into its turn (S1.8, the tool-call channel).
+ * THE SUMMON ROW — a summon that is a visible ACT, rendered as what it is.
  *
- * This renders ONLY an agent-initiated summon, and it is the same shape as the handoff row above
- * on purpose: both are ACTS BY A MEMBER upon another member, and the room already reads that shape.
- * A human summon is NOT rendered — it is already visible as the @-mention in the human's own
- * message, and a second row for it would be the "two representations of one visible fact" mistake
- * the transcript is built to avoid (see buildItems' allowlist in Room.tsx).
+ * Two kinds render, and a human tag renders NEITHER (it is already visible as the @-mention in the
+ * human's own message; a second row would be the "two representations of one visible fact" mistake):
+ *   * `agent` (S1.8) — one agent brought another into its turn. Same shape as the handoff row: an act
+ *     by a member upon a member.
+ *   * `order` (S-LOOP) — a STANDING ORDER fired this summon. It reads distinctly — "standing order (by
+ *     Prince) → summons Sol" — because nothing else in the transcript shows it, and it is neither a
+ *     human tag nor an agent's own act: a person authorised it once, and it recurs. `by` is the human
+ *     creator at the head of the chain (root_actor); the order confers no authority, so no hash/action.
  *
- * It carries no mandate hash and no action code: a summon is not a task handoff and confers no
- * authority — the summoned agent acts under its OWN mandate, which its turn already shows. The row
- * is labelling and nothing more, using the existing member colour and marker system unchanged.
+ * Labelling only, using the existing member colour and marker system unchanged.
  */
 export interface SummonItemView {
-  by: string;
+  kind: 'agent' | 'order';
+  by: string; // the emitting agent (agent kind) or the order's human creator (order kind)
   member: string;
 }
 
@@ -162,9 +164,22 @@ export function SummonRow({
   roster: Map<string, RosterMember>;
 }) {
   return (
-    <div className="task-chip summon-row" {...pr(HOOK.summon)} data-pr-to={summon.member}>
-      <span className="task-kicker">summon</span>
-      <MemberName member={roster.get(summon.by)} name={summon.by} />
+    <div
+      className="task-chip summon-row"
+      {...pr(HOOK.summon)}
+      data-pr-to={summon.member}
+      data-pr-kind={summon.kind}
+    >
+      <span className="task-kicker">{summon.kind === 'order' ? 'standing order' : 'summon'}</span>
+      {summon.kind === 'order' ? (
+        <>
+          <span className="order-by">
+            by <MemberName member={roster.get(summon.by)} name={summon.by} />
+          </span>
+        </>
+      ) : (
+        <MemberName member={roster.get(summon.by)} name={summon.by} />
+      )}
       <span className="handoff-arrow" aria-label="summons">
         →
       </span>

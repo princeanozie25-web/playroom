@@ -196,6 +196,11 @@ describe('summon provenance (Bible §19)', () => {
       multi_turn_summons: number;
       turn_rows_examined: number;
       summons_examined: number;
+      // The resolving-population split (S-LOOP): every resolving turn is directly-human-rooted or
+      // order-rooted; both trace to a human, and lumping them would hide the automation ratio.
+      directly_human_rooted_turns: number;
+      order_rooted_turns: number;
+      order_summons_examined: number;
     }>(DRIFT_QUERY);
     const r = rows[0];
 
@@ -206,8 +211,17 @@ describe('summon provenance (Bible §19)', () => {
     );
     expect(r.summons_examined).toBeGreaterThan(0);
 
-    // Reported rather than just asserted, so a failure says WHICH way it failed.
-    const { turn_rows_examined: _t, summons_examined: _s, ...counts } = r;
+    // The must-be-zero numbers, reported rather than just asserted so a failure says WHICH way it
+    // failed. The resolving-split columns are excluded here (they are counts, not zeros) and checked
+    // separately below.
+    const {
+      turn_rows_examined: _t,
+      summons_examined: _s,
+      directly_human_rooted_turns: directHuman,
+      order_rooted_turns: orderRooted,
+      order_summons_examined: _os,
+      ...counts
+    } = r;
     expect(counts, `drift present: ${JSON.stringify(r)}`).toEqual({
       unrooted_turns: 0,
       no_summon_ref: 0,
@@ -215,6 +229,12 @@ describe('summon provenance (Bible §19)', () => {
       not_human_rooted: 0,
       multi_turn_summons: 0,
     });
+
+    // The split resolves: this suite's turns are all directly human-rooted (it raises no orders), so
+    // order-rooted is zero and directly-human accounts for the resolving turns. Both report unprompted
+    // (unrooted) as zero — the split partitions the RESOLVING population, it is not a new failure mode.
+    expect(orderRooted).toBe(0);
+    expect(directHuman).toBeGreaterThan(0);
   });
 
   it('an agent turn cannot be appended without a summon — the type is the gate', () => {

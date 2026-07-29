@@ -27,6 +27,12 @@ export interface SummonChain {
   rootActor: string;
   rootIsHuman: boolean;
   depth: number;
+  /**
+   * The standing order this chain belongs to (S-LOOP), if any. An order fires a cycle's first summon
+   * with this set; it is threaded down so a summon that turn emits inherits it, and the whole cycle
+   * reads as order-rooted in the drift ledger. Absent for a human-tag or free agent-emitted chain.
+   */
+  orderId?: string;
 }
 
 // A room-mutating command. Reads (getRoom, replay) do not pass through the entry.
@@ -100,6 +106,17 @@ export type Command =
       clientMsgId: string;
       orderId: string;
       op: 'pause' | 'resume' | 'revoke';
+    }
+  // The loop runner (S-LOOP): a completed turn drives the next cycle. Dispatched fire-and-forget from
+  // the post-completion seam under a `system` actor — it is the room running its own standing orders,
+  // not a member acting. `orderId` is the completed turn's order (from its chain), for the error-pause.
+  | {
+      kind: 'runOrders';
+      roomId: string;
+      member: string;
+      completedSeq: number;
+      success: boolean;
+      orderId?: string;
     }
   // Fold the room's older messages into its rolling summary, if the tail has grown past the window
   // (S1.6). Dispatched fire-and-forget from postMessage so the summary is maintained AHEAD of the

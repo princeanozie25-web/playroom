@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { AgentMessage } from '@playroom/shared';
-import { latestRoomSummary, messagesAfterSeq } from './events.js';
+import { latestRoomSummary, messagesAfterSeq, recentCompletedTurns } from './events.js';
 import { ROOM_SUMMARY_AUTHOR, SUMMARY_TRIGGER_BATCH } from './summary.js';
 import { withPrincipalStore } from './principal-store.js';
 import type { TaskRow } from './tasks.js';
@@ -31,8 +31,18 @@ import type { TaskRow } from './tasks.js';
  * sentences; nothing about the strings distinguishes them. Provenance is the only thing that does.
  */
 
-/** The three message-bearing sources §7.1 allows. A fourth requires editing this union, on purpose. */
-export type PartSource = 'common-ground' | 'own-store' | 'task';
+/**
+ * The message-bearing sources §7.1 allows. A new one requires editing this union, on purpose.
+ *
+ * `room-turns` was added ON PURPOSE for S-LOOP: the recent agent turns, so a member summoned into an
+ * unattended cycle sees the prior member's work (which the message window excludes by PM7). It is
+ * COMMON GROUND — shared, principal_id null, the room's own log — and NEVER a `message` event, so the
+ * activation boundary is untouched; it changes what an agent reads, not what can summon one.
+ */
+export type PartSource = 'common-ground' | 'room-turns' | 'own-store' | 'task';
+
+/** How many recent completed turns feed a summon's cycle context (S-LOOP). Bounded, like the window. */
+const RECENT_TURNS_IN_CONTEXT = 8;
 
 export interface AssemblyPart {
   source: PartSource;
@@ -159,6 +169,7 @@ export function assemblyShape(assembly: Assembly): Record<string, number> {
     assembly.parts.filter((p) => p.source === s).reduce((n, p) => n + p.messages.length, 0);
   return {
     common_ground: count('common-ground'),
+    room_turns: count('room-turns'),
     own_store: count('own-store'),
     task: count('task'),
   };
@@ -174,6 +185,12 @@ export interface AssembleInput {
   system: { text: string; hash: string };
   /** How much common ground to reach for. PM7's cap, passed in so the caller owns it. */
   commonGroundLimit: number;
+  /**
+   * Include the recent agent turns as cycle context (S-LOOP). Set ONLY for an order-rooted (loop) turn,
+   * so a normal turn's assembly is unchanged — no extra query, no change to what an ordinary agent
+   * reads. The caller (runAgentTurn) sets it from the turn's chain: an order-rooted turn is a loop turn.
+   */
+  includeRoomTurns?: boolean;
 }
 
 /**
@@ -228,6 +245,20 @@ export async function assembleContext(pool: Pool, input: AssembleInput): Promise
     input.commonGroundLimit + SUMMARY_TRIGGER_BATCH,
   );
   parts.push({ source: 'common-ground', principal_id: null, messages: roomMessages });
+
+  // 1b. RECENT AGENT TURNS — the loop's cycle context (S-LOOP), and ONLY for a loop turn. The window
+  //     above is the human conversation; PM7 keeps the members' own turns out of it, which is right for
+  //     chat but leaves an unattended cycle's reviewer blind to the draft it is reviewing. This adds the
+  //     last few completed turns as COMMON GROUND — shared, read-only, NOT a message event, so the
+  //     activation boundary is untouched. Gated on `includeRoomTurns` (an order-rooted turn) so a normal
+  //     human-mediated turn is unchanged — no extra query on its first-token path (ADR-008), and no
+  //     change to what an ordinary agent reads. It changes what a LOOP member reads, never what summons.
+  if (input.includeRoomTurns) {
+    const roomTurns = await recentCompletedTurns(pool, input.roomId, RECENT_TURNS_IN_CONTEXT);
+    if (roomTurns.length > 0) {
+      parts.push({ source: 'room-turns', principal_id: null, messages: roomTurns });
+    }
+  }
 
   // 2. THE MEMBER'S OWN STORE — and only through the scoped transaction.
   // THE LABEL COMES FROM THE STORE, NOT FROM THE INPUT — and that is not a stylistic choice.
