@@ -15,7 +15,12 @@ import { triggerAgentTurnCommand } from './triggerAgentTurn.js';
 import { handoffCommand, type HandoffResult } from './handoff.js';
 import { requestActionCommand, type RequestActionResult } from './requestAction.js';
 import { signDecisionCommand, type SignDecisionResult } from './signDecision.js';
-import { createOrderCommand, controlOrderCommand, type OrderResult } from './order.js';
+import {
+  createOrderCommand,
+  controlOrderCommand,
+  updateOrderCommand,
+  type OrderResult,
+} from './order.js';
 import { runOrdersCommand } from './runOrders.js';
 import { maintainSummaryCommand } from './maintainSummary.js';
 
@@ -119,6 +124,19 @@ export function executeCommand(
 export function executeCommand(
   ctx: CommandContext,
   command: {
+    kind: 'updateOrder';
+    roomId: string;
+    clientMsgId: string;
+    orderId: string;
+    maxCycles: number | null;
+    maxUnattendedCycles: number;
+    expiresAt: string | null;
+  },
+  deps: CommandDeps,
+): Promise<OrderResult>;
+export function executeCommand(
+  ctx: CommandContext,
+  command: {
     kind: 'runOrders';
     roomId: string;
     member: string;
@@ -164,6 +182,8 @@ export function executeCommand(
       return signDecisionCommand(deps, ctx, command);
     case 'createOrder':
       return createOrderCommand(deps, ctx, command);
+    case 'updateOrder':
+      return updateOrderCommand(deps, ctx, command);
     case 'controlOrder':
       return controlOrderCommand(deps, ctx, command);
     case 'runOrders':

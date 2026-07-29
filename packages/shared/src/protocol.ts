@@ -687,6 +687,33 @@ export const OrderStatusEvent = z.object({
 });
 export type OrderStatusEvent = z.infer<typeof OrderStatusEvent>;
 
+/**
+ * A STANDING ORDER'S TERMS WERE EDITED (S-UI3) — the dial, the limits, or the expiry.
+ *
+ * Carries `before` and `after` so the change is legible from the log alone, not reconstructed by
+ * diffing two projection reads. The editable config is exactly these three fields: the WIRING —
+ * trigger, action, members — is immutable and is deliberately ABSENT here, because an order.updated
+ * can never record a rewiring (that is revoke-and-recreate). `actor` is always the creator, because
+ * only the creating human may edit. An edit takes effect at the NEXT cycle: the runner reads a fresh
+ * row per trigger, so an in-flight cycle keeps the terms it opened under.
+ */
+const OrderTerms = z.object({
+  max_cycles: z.number().nullable(),
+  max_unattended_cycles: z.number(),
+  expires_at: z.string().nullable(),
+});
+export const OrderUpdatedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('order.updated'),
+  payload: z.object({
+    order_id: z.string(),
+    before: OrderTerms,
+    after: OrderTerms,
+    actor: z.string(), // the creator — only a human creator may edit
+  }),
+});
+export type OrderUpdatedEvent = z.infer<typeof OrderUpdatedEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -706,6 +733,7 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   OrderCreatedEvent,
   OrderStatusEvent,
   OrderCycledEvent,
+  OrderUpdatedEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;
@@ -864,6 +892,8 @@ export const ERROR_ORDER_NOT_CREATOR = 'order_not_creator';
 export const ERROR_ORDER_MEMBER_UNKNOWN = 'order_member_unknown';
 /** The op does not apply in the order's current state (resuming a revoked order, pausing a dead one). */
 export const ERROR_ORDER_BAD_STATE = 'order_bad_state';
+/** An edit carried an out-of-range value — the dial below 1, a non-positive cycle cap, a bad date. */
+export const ERROR_ORDER_INVALID_CONFIG = 'order_invalid_config';
 
 /**
  * Valid JSON, and not a frame this server accepts.

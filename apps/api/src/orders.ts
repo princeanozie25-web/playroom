@@ -149,6 +149,34 @@ export async function resetUnattended(pool: Pool, roomId: string): Promise<void>
   );
 }
 
+export interface OrderConfigUpdate {
+  maxCycles: number | null;
+  maxUnattendedCycles: number;
+  expiresAt: string | null;
+}
+
+/**
+ * EDIT AN ORDER'S TERMS — the dial, the limits, the expiry (S-UI3). The WIRING (trigger, action,
+ * members) is not a parameter and cannot be changed here: rewiring a running loop is revoke-and-
+ * recreate, a different act than adjusting how often it checks in. The order.updated event is appended
+ * by the caller, before this (log leads the projection). It does NOT touch cycle_count or
+ * unattended_count, so an edit never resets a streak — that is resume's job alone. Effective next
+ * cycle by construction: the runner reads a fresh row per trigger, so a cycle already in flight keeps
+ * the terms it opened under.
+ */
+export async function updateOrderConfig(
+  pool: Pool,
+  orderId: string,
+  cfg: OrderConfigUpdate,
+): Promise<void> {
+  await pool.query(
+    `UPDATE standing_orders
+        SET max_cycles = $2, max_unattended_cycles = $3, expires_at = $4, updated_at = now()
+      WHERE id = $1`,
+    [orderId, cfg.maxCycles, cfg.maxUnattendedCycles, cfg.expiresAt],
+  );
+}
+
 /** The ACTIVE orders a completed turn of this type by this member should fire (the runner's hot path). */
 export async function activeOrdersForTrigger(
   pool: Pool,

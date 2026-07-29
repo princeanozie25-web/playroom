@@ -1,18 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import {
   ERROR_ORDER_BAD_STATE,
+  ERROR_ORDER_INVALID_CONFIG,
   ERROR_ORDER_MEMBER_UNKNOWN,
   ERROR_ORDER_NOT_CREATOR,
   ERROR_ORDER_NOT_HUMAN,
   ERROR_ORDER_UNKNOWN,
 } from '@playroom/shared';
-import { appendOrderCreated, appendOrderStatus } from '../events.js';
+import { appendOrderCreated, appendOrderStatus, appendOrderUpdated } from '../events.js';
 import { listRoomMembers, matchRoomAgent, memberRecord } from '../members.js';
 import {
   createOrderRow,
   orderById,
   setOrderStatus,
   TERMINAL_ORDER_STATUSES,
+  updateOrderConfig,
   type OrderStatus,
 } from '../orders.js';
 import type { CommandContext, CommandDeps } from './context.js';
@@ -207,5 +209,117 @@ export async function controlOrderCommand(
   await setOrderStatus(deps.pool, input.orderId, next.status, next.pauseReason);
   deps.bus.publish(input.roomId, event);
   deps.log.info({ ...base, status: next.status }, 'standing order transitioned');
+  return { ok: true, orderId: input.orderId };
+}
+
+// ── EDITING AN ORDER'S TERMS (S-UI3) ───────────────────────────────────────────────────────────
+//
+// The form over the record needs a way to change an order after creation — but a NARROW one. What is
+// editable is HOW OFTEN it checks in and WHEN it stops: the attendance dial, the cycle cap, the expiry.
+// What is NOT is WHO it wires together — trigger, action, members — because rewiring a running loop is
+// a different act than adjusting its cadence, and it is done by revoke-and-recreate so the old wiring's
+// record ends and a new one begins rather than a summon quietly changing target mid-life. The immutable
+// half is enforced by ABSENCE: this command has no parameter for it. Creator-only, matching resume and
+// revoke; an agent may do none of it (checked against the authenticated member's kind, never the frame).
+
+/** An integer at or above `min`, or null when nullable is allowed and the value is null. */
+function validCount(v: number | null, min: number, nullable: boolean): boolean {
+  if (v === null) return nullable;
+  return Number.isInteger(v) && v >= min;
+}
+
+export async function updateOrderCommand(
+  deps: CommandDeps,
+  ctx: CommandContext,
+  input: {
+    roomId: string;
+    clientMsgId: string;
+    orderId: string;
+    maxCycles: number | null;
+    maxUnattendedCycles: number;
+    expiresAt: string | null;
+  },
+): Promise<OrderResult> {
+  const base = { room_id: input.roomId, member: ctx.actorId, order_id: input.orderId };
+
+  const order = await orderById(deps.pool, input.roomId, input.orderId);
+  if (!order) {
+    deps.log.warn({ ...base, code: ERROR_ORDER_UNKNOWN }, 'order edit refused: no such order');
+    return refuse(ERROR_ORDER_UNKNOWN, 'there is no such standing order');
+  }
+
+  // AN AGENT MAY NEVER EDIT — checked against the authenticated member's kind, same as create/resume.
+  const actor = await memberRecord(deps.pool, ctx.actorId);
+  if (!actor || actor.kind !== 'human') {
+    deps.log.warn(
+      { ...base, code: ERROR_ORDER_NOT_HUMAN },
+      'order edit refused: only a human may edit',
+    );
+    return refuse(ERROR_ORDER_NOT_HUMAN, 'only a human may edit a standing order');
+  }
+
+  // CREATOR-ONLY, matching resume and revoke. Adjusting the terms is not the safe direction pausing is.
+  if (ctx.actorId !== order.creator_member_id) {
+    deps.log.warn(
+      { ...base, creator: order.creator_member_id, code: ERROR_ORDER_NOT_CREATOR },
+      'order edit refused: not the creator',
+    );
+    return refuse(ERROR_ORDER_NOT_CREATOR, "only the order's creator may edit it");
+  }
+
+  // A terminal order will never fire again, so its terms are frozen — editing a revoked/expired/
+  // limit-reached order is refused rather than silently written to a record nothing reads.
+  if (TERMINAL_ORDER_STATUSES.has(order.status)) {
+    deps.log.warn(
+      { ...base, status: order.status, code: ERROR_ORDER_BAD_STATE },
+      'order edit refused: terminal order',
+    );
+    return refuse(ERROR_ORDER_BAD_STATE, `a ${order.status.toLowerCase()} order cannot be edited`);
+  }
+
+  // OUT-OF-RANGE VALUES ARE REFUSED SERVER-SIDE, because the form adds no enforcement and bypasses
+  // none. The dial must be at least 1 (a dial of 0 would pause before any unattended cycle ran); a
+  // cycle cap is null or at least 1; an expiry is null or a real timestamp (a past one is allowed — it
+  // is a valid way to wind an order down).
+  const expiryValid = input.expiresAt === null || !Number.isNaN(Date.parse(input.expiresAt));
+  if (
+    !validCount(input.maxUnattendedCycles, 1, false) ||
+    !validCount(input.maxCycles, 1, true) ||
+    !expiryValid
+  ) {
+    deps.log.warn(
+      { ...base, code: ERROR_ORDER_INVALID_CONFIG },
+      'order edit refused: invalid config',
+    );
+    return refuse(
+      ERROR_ORDER_INVALID_CONFIG,
+      'the attendance dial must be at least 1, a cycle cap must be a positive whole number or empty, and an expiry must be a valid date or empty',
+    );
+  }
+
+  // The event carries BEFORE and AFTER — only the editable terms, because only they can change.
+  const before = {
+    max_cycles: order.max_cycles,
+    max_unattended_cycles: order.max_unattended_cycles,
+    expires_at: order.expires_at,
+  };
+  const after = {
+    max_cycles: input.maxCycles,
+    max_unattended_cycles: input.maxUnattendedCycles,
+    expires_at: input.expiresAt,
+  };
+  const event = await appendOrderUpdated(deps.pool, input.roomId, ctx.actorId, {
+    order_id: input.orderId,
+    before,
+    after,
+    actor: ctx.actorId,
+  });
+  await updateOrderConfig(deps.pool, input.orderId, {
+    maxCycles: input.maxCycles,
+    maxUnattendedCycles: input.maxUnattendedCycles,
+    expiresAt: input.expiresAt,
+  });
+  deps.bus.publish(input.roomId, event);
+  deps.log.info({ ...base }, 'standing order edited; effective next cycle');
   return { ok: true, orderId: input.orderId };
 }

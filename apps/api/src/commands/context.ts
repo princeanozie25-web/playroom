@@ -107,6 +107,17 @@ export type Command =
       orderId: string;
       op: 'pause' | 'resume' | 'revoke';
     }
+  // Editing an order's TERMS (S-UI3): the dial, the cycle cap, the expiry. The wiring is immutable and
+  // absent here — rewiring is revoke-and-recreate. Creator-only, agents refused, evented before/after.
+  | {
+      kind: 'updateOrder';
+      roomId: string;
+      clientMsgId: string;
+      orderId: string;
+      maxCycles: number | null;
+      maxUnattendedCycles: number;
+      expiresAt: string | null;
+    }
   // The loop runner (S-LOOP): a completed turn drives the next cycle. Dispatched fire-and-forget from
   // the post-completion seam under a `system` actor — it is the room running its own standing orders,
   // not a member acting. `orderId` is the completed turn's order (from its chain), for the error-pause.

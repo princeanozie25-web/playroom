@@ -591,6 +591,35 @@ export async function appendOrderStatus(
   return rowToServerEvent(rows[0]);
 }
 
+export interface OrderTerms {
+  max_cycles: number | null;
+  max_unattended_cycles: number;
+  expires_at: string | null;
+}
+
+export interface OrderUpdatedPayload {
+  order_id: string;
+  before: OrderTerms;
+  after: OrderTerms;
+  actor: string; // the creator — only a human creator may edit
+}
+
+/** An order's editable terms changed (S-UI3), carrying before + after so the log reads the change. */
+export async function appendOrderUpdated(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: OrderUpdatedPayload,
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'order.updated', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
 export interface OrderCycledPayload {
   order_id: string;
   cycle: number;
