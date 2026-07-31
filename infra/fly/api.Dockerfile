@@ -55,4 +55,11 @@ ENV PORT=8080
 EXPOSE 8080
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["pnpm", "--filter", "@playroom/api", "exec", "tsx", "src/index.ts"]
+# RUN tsx DIRECTLY, not through `pnpm exec`. pnpm 10+ verifies deps before running and, because the
+# build above installs a FILTERED subset (the api's graph, not the whole workspace), pnpm sees
+# node_modules as out-of-sync at boot and runs `pnpm install` — which OOM-kills node on a 512mb VM
+# before the server ever binds. The tsx binary is a root devDependency installed by `--filter .`, so
+# it is at /app/node_modules/.bin/tsx; running it is deterministic and never touches the store. The
+# workspace imports (@playroom/shared, …) resolve through pnpm's node_modules symlinks from the api's
+# own source, and the prompt/mandate/adapter reads are import.meta.url-relative, so cwd does not matter.
+CMD ["node_modules/.bin/tsx", "apps/api/src/index.ts"]

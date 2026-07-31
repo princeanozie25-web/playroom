@@ -43,4 +43,7 @@ primary_region = "lhr"
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "512mb"
+  # 1gb, not 512mb: the api runs under tsx, which compiles TypeScript in-process, and 512mb OOM-killed
+  # the first boot. The provider ceiling ($2/day) caps API SPEND; this is machine memory, a small fixed
+  # monthly cost, and a public deploy that stays up is worth the couple of dollars over a marginal one.
+  memory = "1gb"
