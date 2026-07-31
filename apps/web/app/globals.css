@@ -341,6 +341,96 @@ body {
   font-size: var(--t-xs);
 }
 
+/* ── the mandate surface (UI3-3): the six fields that decide whether a mandate is in force ──
+   Read-only by construction — every control is disabled in its true position, and there is no third
+   "off" state. `--bad` (red) flags an EXPIRED mandate; amber (--warn) and green (--ok) stay reserved
+   for needs-a-human and signed-done (D-1/D-2), so expiry borrows neither. Plain and phone-first: this
+   is read on a 390px screen before it is ever read on a laptop. */
+.mandate-surface {
+  margin-top: var(--s-2);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.mandate-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.mandate-field dt {
+  font-size: var(--t-xs);
+  font-weight: 650;
+  color: var(--ink-2);
+}
+.mandate-field dd {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--ink);
+}
+.mandate-note {
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.mandate-undisclosed {
+  color: var(--ink-3);
+  font-style: italic;
+}
+.mandate-none,
+.mandate-live {
+  color: var(--ink-2);
+}
+.mandate-expired {
+  color: var(--bad);
+  background: var(--bad-soft);
+  font-weight: 650;
+  padding: 0 var(--s-1);
+  border-radius: var(--radius);
+}
+.mandate-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.mandate-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.mandate-list code {
+  font-size: var(--t-xs);
+  color: var(--ink);
+}
+.mandate-list input[type='checkbox'] {
+  margin: 0;
+  accent-color: var(--ink-2);
+}
+.mandate-by,
+.mandate-limit-value {
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+.mandate-hash-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.mandate-hash {
+  font-size: var(--t-xs);
+  color: var(--ink);
+}
+.mandate-hash-full {
+  /* one tap selects the WHOLE hash to copy; small and wrapping so a 71-char id fits a 390px panel */
+  user-select: all;
+  font-size: 10px;
+  color: var(--ink-3);
+  word-break: break-all;
+}
+
 /* ── inline member name, in the transcript ──────────────────────────────────
    NOT a chip. A turn shows who is speaking in their principal's colour with their
    shape, and nothing else: no affiliation clause, no mandate, no "human" label.

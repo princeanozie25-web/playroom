@@ -2,6 +2,7 @@ import type { RosterMember } from './roster';
 // VALUE import from a client-safe module. roster.ts is server-only — importing a value from
 // there pulls node:fs and node:crypto into the browser bundle and breaks `next build`.
 import { mandateSummary } from './mandate';
+import { MandateSurface } from './MandateSurface';
 import { HOOK, pr } from './hooks';
 
 // TWO SURFACES, BECAUSE THE DENSITY GRADIENT IS THE POINT.
@@ -127,6 +128,11 @@ function boundName(member: RosterMember | undefined, fallback: string): string {
 export function MemberChip({ member, name }: { member?: RosterMember; name: string }) {
   const agent = isAgent(member);
   const summary = member ? mandateSummary(member.scope, member.protected_actions) : null;
+  // A MANDATE EXISTS iff it has a hash — that, not a non-empty scope, is what earns the disclosure.
+  // claude-code is granted nothing (empty scope, so `summary` is null) yet HAS a mandate with an expiry
+  // and a hash; gating on `summary` hid a real mandate. A member with NO mandate (a human) still shows
+  // nothing, which is the rule that stays: absent authority is never dressed as anything.
+  const hasMandate = !!member && member.mandate_hash != null;
   return (
     <span
       className={['chip', agent ? 'chip-agent' : 'chip-human'].join(' ')}
@@ -140,34 +146,38 @@ export function MemberChip({ member, name }: { member?: RosterMember; name: stri
       <span className="chip-name" {...pr(HOOK.author)}>
         {boundName(member, name)}
       </span>
-      {summary && member && (
+      {hasMandate && member && (
         /* AVAILABLE, NOT SHOUTED. The compact summary is always visible because beat 1
-           reads it; the full namespaced scope is one click away rather than permanently on
-           screen. `details` rather than a tooltip: it works on tap, it is keyboard
-           reachable, and it needs no dependency. */
+           reads it; the full mandate is one click away rather than permanently on screen.
+           `details` rather than a tooltip: it works on tap, it is keyboard reachable, and it
+           needs no dependency. The trigger reads the compact scope summary, or "granted
+           nothing" for a mandate that grants nothing — never blank, which would hide it. */
         <details className="mandate">
           <summary className="chip-mandate" {...pr(HOOK.mandateSummary)}>
-            {summary}
+            {summary ?? 'granted nothing'}
           </summary>
           <div className="mandate-detail" {...pr(HOOK.mandateDetail)}>
             <div className="mandate-detail-head">
               {member.display_name}
               {member.principal_name ? ` acts for ${member.principal_name}` : ''}
             </div>
-            <ul className="mandate-scope">
-              {member.scope?.map((action) => {
-                const gated = member.protected_actions?.includes(action) ?? false;
-                return (
-                  <li key={action}>
-                    <code>{action}</code>
-                    {gated && <span className="mandate-gated">needs a human signature</span>}
-                  </li>
-                );
-              })}
-            </ul>
-            {/* Everything here is a field of the mandate document. There is no summary
-                sentence, no total, and no "and more" — a disclosure that added a word the
-                mandate does not contain would be the same failure as mandate_label. */}
+            {member.scope && member.scope.length > 0 && (
+              <ul className="mandate-scope">
+                {member.scope.map((action) => {
+                  const gated = member.protected_actions?.includes(action) ?? false;
+                  return (
+                    <li key={action}>
+                      <code>{action}</code>
+                      {gated && <span className="mandate-gated">needs a human signature</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {/* The six fields that decide whether the mandate is actually in force. Everything
+                here is a field of the mandate document, read-only, in its true position — no
+                summary sentence, no total, no "and more". */}
+            <MandateSurface member={member} />
           </div>
         </details>
       )}

@@ -163,6 +163,19 @@ export const HOOK = {
   loopSubmit: 'loop-submit',
   /** A refusal or error, shown in place — never a silent failure. */
   loopError: 'loop-error',
+  // ── THE MANDATE SURFACE (UI3-3) — read-only, every control disabled in its true position ──
+  /** The mandate surface container, revealed inside a roster entry's detail. */
+  mandateSurface: 'mandate-surface',
+  /** Expiry as a STATE. Carries `data-pr-state` — live | expired | undisclosed. */
+  mandateStatus: 'mandate-status',
+  /** The co-signature requirement: disabled checkboxes in their true (checked) position, or none/undisclosed. */
+  mandateCoSign: 'mandate-cosign',
+  /** The declared (not-enforced) limits, or none/undisclosed. */
+  mandateLimits: 'mandate-limits',
+  /** The policy version the mandate was written against. */
+  mandatePolicy: 'mandate-policy',
+  /** The document hash — truncated for the screen, the full value copyable. */
+  mandateHash: 'mandate-hash',
 } as const;
 
 export type HookName = (typeof HOOK)[keyof typeof HOOK];

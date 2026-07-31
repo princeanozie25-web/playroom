@@ -57,3 +57,64 @@ export function mandateSummary(
   if (free.length === 0) return `${held.join(' + ')} (co-sign)`;
   return `${free.join(' + ')}, ${held.join(' + ')} (co-sign)`;
 }
+
+// ── THE MANDATE SURFACE DERIVATIONS (UI3-3) ─────────────────────────────────────────────
+//
+// Pure so they can be tested without a DOM, and so the component renders a DERIVED state rather than
+// deciding truth inline. The one rule these enforce: a switch is never shown in a position the mandate
+// does not hold. There is no third "off-because-we-don't-know" state — undisclosed and empty are told
+// apart, and expiry is a STATE, not a date printed next to live-looking authority.
+
+/**
+ * Three states every mandate field collapses to, kept distinct on purpose:
+ *  - `undisclosed` — the server sent null (the member has no mandate). NOT "off", NOT "none".
+ *  - `empty` — a mandate that carries an empty value: a real "none" (nothing gated / no limits declared).
+ *  - `present` — a value to render.
+ * `off` is deliberately absent: a read-only mandate surface has no false third position.
+ */
+export type Disclosed<T> =
+  { kind: 'undisclosed' } | { kind: 'empty' } | { kind: 'present'; value: T };
+
+export function discloseList(value: readonly string[] | null): Disclosed<readonly string[]> {
+  if (value == null) return { kind: 'undisclosed' };
+  if (value.length === 0) return { kind: 'empty' };
+  return { kind: 'present', value };
+}
+
+export function discloseLimits(
+  value: Record<string, number> | null,
+): Disclosed<ReadonlyArray<readonly [string, number]>> {
+  if (value == null) return { kind: 'undisclosed' };
+  const entries = Object.entries(value);
+  if (entries.length === 0) return { kind: 'empty' };
+  return { kind: 'present', value: entries };
+}
+
+/**
+ * Expiry as a STATE. Absent → undisclosed; a past (or now) instant → expired; otherwise live. A mandate
+ * past its `expires` must never read as live authority with a stale date beside it, so the surface asks
+ * this, never formats the raw string. An unparseable instant discloses no state rather than defaulting
+ * to live — the safe direction (the schema validates real mandates, so this only guards the impossible).
+ */
+export type ExpiryState =
+  { kind: 'undisclosed' } | { kind: 'live'; at: string } | { kind: 'expired'; at: string };
+
+export function expiryState(expires: string | null, now: Date): ExpiryState {
+  if (expires == null) return { kind: 'undisclosed' };
+  const t = Date.parse(expires);
+  if (Number.isNaN(t)) return { kind: 'undisclosed' };
+  return t <= now.getTime() ? { kind: 'expired', at: expires } : { kind: 'live', at: expires };
+}
+
+/**
+ * A hash is an identifier: show enough of it to recognise, keep all of it for copying. `sha256:abcdef…wxyz`
+ * — the scheme, the leading bytes and the trailing bytes, which is what an eye actually checks. The full
+ * value stays in the DOM (the component makes it copyable); this only shortens the DISPLAY.
+ */
+export function truncateHash(hash: string): string {
+  const idx = hash.indexOf(':');
+  const scheme = idx >= 0 ? hash.slice(0, idx + 1) : '';
+  const body = idx >= 0 ? hash.slice(idx + 1) : hash;
+  if (body.length <= 14) return hash;
+  return `${scheme}${body.slice(0, 6)}…${body.slice(-4)}`;
+}

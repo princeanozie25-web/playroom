@@ -53,6 +53,21 @@ export interface RosterMember {
   principal_name: string | null;
   /** Which accent this member inherits from its principal. */
   accent: number | null;
+  // ── THE MANDATE SURFACE FIELDS (UI3-3) ────────────────────────────────────────────────
+  //
+  // Carried verbatim from the API. Each is `null` when the member has NO mandate — which the surface
+  // must render as "not disclosed", distinct from a mandate that carries an EMPTY value (`[]`/`{}`),
+  // which is a real fact ("nothing gated", "no limits declared"). Off and unknown are different claims.
+  /** Which actions need a co-signature, and whose. Null = no mandate; `{actions:[],...}` = none gated. */
+  co_sign: { actions: string[]; by: string } | null;
+  /** Declared per-action limits. Null = no mandate. NOT enforced yet (S2.7) — declarative only. */
+  limits: Record<string, number> | null;
+  /** The policy version the mandate was written against, or null when there is no mandate. */
+  policy_version: string | null;
+  /** When the mandate expires (ISO 8601), or null. A past instant is EXPIRED — the surface derives it. */
+  expires: string | null;
+  /** sha256 of the mandate document (identifies WHICH document), or null. Shown truncated, copyable full. */
+  mandate_hash: string | null;
 }
 
 export interface Principal {
@@ -73,6 +88,11 @@ interface ApiMember {
   adapter_id: string | null;
   scope: string[] | null;
   protected_actions: string[] | null;
+  co_sign: { actions: string[]; by: string } | null;
+  limits: Record<string, number> | null;
+  policy_version: string | null;
+  expires: string | null;
+  mandate_hash: string | null;
 }
 
 /**
@@ -156,5 +176,13 @@ export async function loadRoster(roomId: string): Promise<RosterMember[]> {
     accent: m.kind === 'agent' ? principalAccent(m.principal_ordinal) : null,
     scope: m.scope,
     protected_actions: m.protected_actions,
+    // Carried straight through — null/absent for a member with no mandate, real (incl. empty) for one
+    // that has it. The surface, not this mapper, decides how each renders; the mapper must not collapse
+    // absent into empty here or the distinction is lost before it reaches the screen.
+    co_sign: m.co_sign,
+    limits: m.limits,
+    policy_version: m.policy_version,
+    expires: m.expires,
+    mandate_hash: m.mandate_hash,
   }));
 }
