@@ -7,9 +7,19 @@
 #
 # Every secret this deployment needs is set with `fly secrets set`, which stores it encrypted and
 # injects it at runtime. Nothing below is copied.
+#
+# THE `**/` VARIANTS ARE NOT OPTIONAL (S-WEB). A bare `.env`/`.env.*` anchors to the CONTEXT ROOT, so
+# a NESTED env file — `apps/web/.env.local`, which Next.js loads from the app directory — sailed past
+# these two lines into the web image and baked PLAYROOM_WEB_TOKEN (a real member credential) into a
+# pushed layer. The whole web tier then authenticated as `prince` for every unredeemed request, which
+# is exactly the attribution WEB-1 exists to prevent. `.next` already carried its `**/` twin (below);
+# `.env` did not. It does now — at every depth, both images.
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 
 # Not secrets, just weight and correctness.
 node_modules
