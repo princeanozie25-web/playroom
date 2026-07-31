@@ -246,6 +246,22 @@ that capture and are not optional.
 document the fabric enforces against._ **Not:** _the surface proves the mandate was enforced_ (it shows the
 terms, not an enforcement). **Not:** _these limits are in effect_ (they are declared, not enforced — S2.7).
 
+### UI3-4 — the surface, captured LIVE at 390px (a new artifact, not take 13)
+
+The surface above is now recorded on the internet, on a phone-sized screen, against the fabric running on
+a machine — a tester redeems a code, their member appears in the room, and the mandate opens. The artifact
+lives at `playroom-capture/videos/mandate-take1/mandate-take1-stream.webm` (11.6s, 390×844), a NEW path;
+**take 13 is untouched** (`videos-p0/take13/`, unchanged).
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **What it proves**   | The surface renders the LIVE fabric's mandate, not a local one — proven, not asserted: at capture time the `mandate_hash` on screen (`sha256:12f080…d35b`) was fetched from the live `/members` endpoint for the same member (`claude-main`) and the two were compared; a mismatch would have aborted the run. It was filmed against `playroom-web.fly.dev` via a redeemed tester code, at 390px, with every field in its true position and expiry reading `live`. |
+| **What it does NOT** | It shows the surface rendering live mandate TERMS; it does **not** show the server refusing an action. No enforcement happened on camera — no request was made, gated, or denied. The liveness check proves the DOCUMENT on screen is the one the fabric holds; it does not prove the fabric acted on it. Enrolment is redeemed OFF-camera by design (a code must not appear in a frame), so the film shows the enrolled member and the surface, never the code.   |
+
+**Caption:** _this is the live mandate, on a phone — the hash on screen is the one the running fabric
+returned._ **Not:** _the fabric enforced this_ (the capture proves the surface is live, not that any action
+was governed).
+
 ---
 
 ## Findings raised by this slice

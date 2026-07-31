@@ -390,37 +390,59 @@ async function clipMandate(
   const beats: Record<string, unknown> = {};
 
   try {
-    // ENROLMENT — the real /join screen, filled and submitted. The redeem sets an httpOnly session cookie
-    // and lands the tester in their room; no owner shortcut, no injected credential.
-    await page.goto(`${target.web}/join`, { waitUntil: 'domcontentloaded' });
-    await sleep(SETTLE);
-    await page.locator('[data-pr="join-code"]').fill(code);
-    await page.locator('[data-pr="join-name"]').fill(displayName);
-    await sleep(BEAT);
-    await page.locator('[data-pr="join-submit"]').click();
-    await page.waitForURL(/\/r\/[^/]+/, { timeout: 30_000 });
-    const roomId = decodeURIComponent(new URL(page.url()).pathname.split('/r/')[1] ?? '');
-    must(roomId.length > 0, 'redeem did not land in a room');
-    log(`  redeemed "${displayName}" into room ${roomId}`);
+    // ENROLMENT — REDEEMED OFF-CAMERA, ON PURPOSE. A room code is a claim on an identity until it is
+    // spent, and step 13 forbids a code in any frame — so the redemption happens over the wire here (the
+    // code is spent, never typed on screen), and its credential is installed as the tester's session
+    // cookie. The FILM then shows what a real tester sees AFTER the door: the enrolment screen, then the
+    // room where their member has appeared, then the surface. No owner shortcut, no injected mandate —
+    // the same credential the redemption issued.
+    const redeemRes = await fetch(`${target.api}/redeem`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, display_name: displayName }),
+    });
+    must(redeemRes.status === 200, `redeem expected 200, got ${redeemRes.status}`);
+    const redeemed = (await redeemRes.json()) as { token?: string; room_id?: string };
+    const token = redeemed.token ?? '';
+    const roomId = redeemed.room_id ?? '';
+    must(token.length > 0 && roomId.length > 0, 'redeem did not return a token and a room');
+    log(`  redeemed "${displayName}" into room ${roomId} (off-camera — the code is never filmed)`);
 
-    // The session token, read from the httpOnly cookie (Playwright can read it; a script cannot) — this
-    // is what the liveness fetch below authenticates with, the SAME credential the browser is using.
-    const cookies = await ctx.cookies();
-    const token = cookies.find((c: any) => c.name === 'playroom_member')?.value ?? '';
-    must(token.length > 0, 'no playroom_member session cookie after redeem');
+    // Install the credential as the browser's own session cookie: from here the browser IS the tester.
+    const host = new URL(target.web).host;
+    await ctx.addCookies([
+      {
+        name: 'playroom_member',
+        value: token,
+        domain: host,
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ]);
+
+    // The enrolment door — filmed empty, as the tester's entry point (never the code).
+    await page.goto(`${target.web}/join`, { waitUntil: 'domcontentloaded' });
+    await sleep(HOLD);
+    // …then the room their redemption enrolled them into.
+    await page.goto(`${target.web}/r/${encodeURIComponent(roomId)}`, {
+      waitUntil: 'domcontentloaded',
+    });
 
     await waitForConn(page, 'connected');
     await sleep(SETTLE);
 
-    // THE MEMBER APPEARS, THE SURFACE OPENS. Open the first roster chip that carries a mandate.
-    const memberId = await page
-      .locator('[data-pr="roster-member"]')
-      .first()
-      .getAttribute('data-pr-member');
-    must(!!memberId, 'no member id on the first roster chip');
-    await page.locator('[data-pr="roster-member"] details.mandate summary').first().click();
+    // THE MEMBER APPEARS, THE SURFACE OPENS. Scope to ONE chip that carries a mandate — the human tester
+    // has none, the agents do — and read the member id, the surface and the hash all from THAT SAME chip.
+    // Reading the id from a different chip than the one whose hash is checked would compare two members.
+    const chip = page.locator('[data-pr="roster-member"]:has(details.mandate)').first();
+    must((await chip.count()) > 0, 'no roster member carries a mandate to surface');
+    const memberId = await chip.getAttribute('data-pr-member');
+    must(!!memberId, 'the mandate-bearing chip has no member id');
+    await chip.locator('details.mandate summary').click();
     await sleep(SETTLE);
-    const surface = page.locator('[data-pr="mandate-surface"]').first();
+    const surface = chip.locator('[data-pr="mandate-surface"]');
     must((await surface.count()) > 0, 'mandate surface did not render');
     for (const field of [
       'mandate-status',
@@ -429,13 +451,13 @@ async function clipMandate(
       'mandate-policy',
       'mandate-hash',
     ]) {
-      must((await page.locator(`[data-pr="${field}"]`).count()) > 0, `surface is missing ${field}`);
+      must((await chip.locator(`[data-pr="${field}"]`).count()) > 0, `surface is missing ${field}`);
     }
     beats.surfaceRendered = true;
 
-    // Read the on-screen hash (the full, copyable value — not the truncated display).
+    // Read the on-screen hash (the full, copyable value — not the truncated display) FROM THAT chip.
     const onScreen = (
-      await page.locator('[data-pr="mandate-hash"] .mandate-hash-full').first().innerText()
+      await chip.locator('[data-pr="mandate-hash"] .mandate-hash-full').innerText()
     ).trim();
 
     // ── THE LIVENESS ASSERTION — the slice ─────────────────────────────────────────────
