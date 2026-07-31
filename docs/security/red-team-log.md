@@ -1179,3 +1179,115 @@ localhost-only reading assumes. **Restrict `claude-code`'s enrolment to designat
 the cheapest form is a per-member "manual enrolment only" flag that `createRoom` honours. **Trigger: the
 first deploy, or the first guest who could share a room with it.** Bounded until then by deploy being
 blocked, the dial at 1, and the disabled-until-SCC-2 adapter.
+
+### AUDIT-0-F1 (high) — CLOSED-BY-COMMIT: the live api ran an image built from an uncommitted tree
+
+The first deploy of `playroom-api` was made from a working copy carrying two uncommitted files —
+`infra/fly/api.Dockerfile` (the boot CMD, changed from `pnpm exec` to `node_modules/.bin/tsx` after the
+former OOM-killed the machine) and `infra/fly/api.fly.toml` (VM memory 512mb→1gb). The running machines
+therefore corresponded to no commit: a rollback or a reproduce would have needed changes that existed
+only in one working copy. Found by AUDIT-0's Phase-0 STOP gate (a dirty tree halts the audit).
+**Closed by commit `9de00c0` ("deploy: commit the live api's actual boot config"), exactly those two
+files.** Whether the committed config now MATCHES the running machines (image CMD, VM memory as
+deployed) is verified in AUDIT-0 Phase 2, not assumed by this closure.
+
+### AUDIT-0-F2 (high) — CLOSED-BY-PUSH: five commits lived only locally, un-CI'd
+
+At the audit's start, HEAD was four commits ahead of `origin/main` and unpushed (SCC-1, UI3-1, UI3-2,
+SLIVE-N1), plus the F1 commit made five. `.github/workflows/ci.yml` runs only on push/PR, so GitHub CI
+had validated none of them — the entire loops screen and the `/redeem` throttle existed only on this
+machine, their "green" resting on the local pre-commit hook against the Neon dev/test DB, a different
+corpus than CI's ephemeral Postgres 16. Found by `git log origin/main..HEAD`. **Closed by push
+(`80f4f3d..9de00c0`, origin/main == local main). CI verdict: GREEN** — run 30611820414, conclusion
+`success`, headSha `9de00c0`, both jobs (`verify`, `context-isolation`) passing; one non-blocking
+Node-20-deprecation annotation. This is the first CI run to validate all five commits cumulatively.
+
+### NEW — SLIVE-N3 (high): warm-up/adapter error logging echoed credential material past the redaction
+
+During the first production deploy's initial secrets import, a malformed provider key (the import had
+concatenated a second key onto it) made the Anthropic adapter throw a `Headers.append: invalid header
+value` error whose **message embedded the key value**. The warm-up logged that error inside a structured
+object — `{ failed: [ { target, error } ] }` — and the existing redaction is PATH-BASED (`server.ts`
+`redact.paths`: `*.token`, `*.apiKey`, request headers, named env vars). A secret that arrives INSIDE an
+error field nobody named is not on any path, so **both provider keys reached Fly's logs in plaintext and
+re-printed on every warm-up attempt** until the keys were re-set. Both keys are treated as compromised.
+
+The last redaction fix named fields; this one arrived in the payload — **scrub the payload, not the
+field.** Found by AUDIT-0 (it had no ID, no ledger entry, and no fix — it existed only as chat prose from
+the deploy session). **Status: fix lands this slice — SCRUB-2 adds a whole-payload scrubber at the single
+pino sink (`app.log`), operating on message, stack, nested error and cause chains, not on named fields.
+Trigger already fired (the first production deploy).**
+
+## MIGRATED — the A4 capture-audit findings (A4-F1..F9)
+
+These nine were raised in the A4 demo-capture run (25 Jul 2026, commit `1da7ae3`) and lived only in an
+uncommitted scratch `A4-REPORT.md` outside the repo, while code, tests and CONTRIBUTING.md cited them by
+id ("the A4-F1 shape") — evidence referenced but not held (AUDIT-0's off-list find). The full source
+report is committed alongside at `docs/security/a4-capture-report.md`; these anchors are the canonical,
+citation-resolving record. Migrated as-recorded; a later slice may have since addressed one, but this
+migration does not re-adjudicate closure (the audit rule: assert the finding, not an unverified outcome).
+
+### A4-F1 — a send into a non-existent room is dropped silently, end to end · worth fixing
+
+`GET /rooms/:id/ws` never checked the room existed: the socket opened for any id and even sent
+`{hello, last_seq:0}`; `postMessage` then violated the `events.room_id → rooms.id` FK; the error went to
+`app.log.error` on a Fastify built with no logger, so nothing was emitted; the client showed a green
+"open" dot and cleared the input. Indistinguishable from success on both sides. The dual of §8's ordering
+law — a member must never be shown a message accepted that was in fact discarded. **Recorded as not fixed
+(a design decision); the handshake refusing unknown rooms (S1.3b) is the likely later closer, not
+re-verified here.**
+
+### A4-F2 — `POST /rooms` normalises the id with no signal
+
+`createRoom` slugifies (`toLowerCase`, non-alnum → `-`), so `a4-clipA-1` becomes `a4-clipa-1`. The
+response carries the real id, so the contract is "always use `room.id` from the response" — but nothing
+says so, and combined with A4-F1 the failure mode is a room that looks fine and eats every message.
+
+### A4-F3 — `scripts/` is not typechecked, contrary to CONTRIBUTING
+
+CONTRIBUTING states typecheck coverage is total and an unreachable area "is a defect: wire it in". The
+root `tsconfig` references the packages, the apps and their test configs — **not `scripts/`** — so
+`migrate.ts`, `latency-control.ts`, `demo-capture.ts` and their successors get no typecheck. Predates the
+A4 work; wiring `scripts/` in may surface pre-existing errors, which is its own change.
+
+### A4-F4 — two severance mechanisms in the A4 brief do not work (harness finding)
+
+`context.route('**', r => r.abort())` never sees WebSockets (HTTP only); `context.setOffline(true)` does
+not drop an already-established WebSocket in Chromium 151. What works is `page.routeWebSocket()`
+(Playwright ≥1.48), which proxies the real socket so it can be cut and reconnects refused while dark.
+
+### A4-F5 — `pg` will change SSL semantics under us · low, but diarise it
+
+`sslmode` values `prefer`/`require`/`verify-ca` are currently treated as `verify-full`, but in pg v9 /
+pg-connection-string v3 they adopt weaker libpq semantics. Both `DATABASE_URL` and `TEST_DATABASE_URL`
+use `sslmode=require` and the repo pins `pg ^8.13.0`, so a major bump would silently loosen TLS. Pin
+`sslmode=verify-full` explicitly and the warning goes with no behaviour change.
+
+### A4-F6 — the clips carry the Next.js dev badge · cosmetic
+
+The A4 clips were filmed against `pnpm dev`, so the dev indicator sits bottom-left. Needs no source
+change — film against a production build (`build && start`). (Take 13 was later recorded on a production
+build per the claims sheet, so this does not affect the P0 asset.)
+
+### A4-F7 — the short prompt is too fast to read on camera
+
+The brief's `@claude explain what this room does in three short sentences` answers in ~1.4s (54 tokens);
+"watch it fill in token by token" is a blink. A longer question (~312 tokens, ~4s of visible fill) is the
+one to put in the deck.
+
+### A4-F8 — agent replies render as raw markdown in one unbroken block · visible in every A4 clip
+
+`page.tsx` rendered `{it.text}` as plain text in an `<li>`, so literal `**bold**` showed and newlines
+collapsed into one running paragraph. Two independent decisions: preserve newlines (`white-space:
+pre-wrap`, purely cosmetic) and whether to render markdown at all (not cosmetic — needs a sanitisation
+story first, §13 L1: foreign content is data, not instructions).
+
+### A4-F9 — Neon autosuspend puts the first summon after idle at risk of breaching §7 · new (from A4's measurement)
+
+Postgres is on the first-token path (§8 persist-before-fanout), so a cold connection delays the provider
+call rather than overlapping it. Warm TTFT measured 633–834ms (inside §7 P50 <900ms); add the measured
++657ms cold-connection cost and the first summon after idle lands ~1.3–1.5s — breaching P50, on the P95
+limit, with nothing wrong in the code. Options: a keep-alive ping while a room has live members; exclude
+first-after-idle from P95 (and say so in telemetry); or disable autosuspend (infra cost). The deploy's
+`min_machines_running = 1` + the always-on `pg` pool now hold the compute awake, which mitigates this in
+production — not re-measured here.
