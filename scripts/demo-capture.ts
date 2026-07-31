@@ -24,6 +24,12 @@
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import {
+  LiveCaptureRefused,
+  assertLiveMandateHash,
+  resolveLiveTarget,
+  type LiveTarget,
+} from './capture-live.js';
 
 const API = process.env.PLAYROOM_API_URL ?? 'http://localhost:3001';
 const WEB = process.env.PLAYROOM_WEB_URL ?? 'http://localhost:3000';
@@ -331,12 +337,176 @@ async function clipB(
   }
 }
 
+// The web tier SLEEPS (auto_stop=suspend, min=0). A capture that opens on a loading spinner because the
+// machine was asleep is an accurate recording of a bad first impression — a separate finding, not this
+// artifact. So warm both tiers to a good state BEFORE the browser opens, or refuse loudly.
+async function warmTier(target: LiveTarget): Promise<number> {
+  const started = Date.now();
+  const deadline = started + 60_000;
+  let webOk = false;
+  let apiOk = false;
+  while (Date.now() < deadline && !(webOk && apiOk)) {
+    try {
+      apiOk =
+        ((await fetch(`${target.api}/health`).then((r) => r.json())) as { ok?: boolean }).ok ===
+        true;
+    } catch {
+      apiOk = false;
+    }
+    try {
+      webOk = (await fetch(`${target.web}/`)).status < 500;
+    } catch {
+      webOk = false;
+    }
+    if (!(webOk && apiOk)) await sleep(1000);
+  }
+  if (!(webOk && apiOk)) {
+    throw new LiveCaptureRefused(`tier did not warm within 60s (web=${webOk}, api=${apiOk})`);
+  }
+  return Date.now() - started;
+}
+
+// Clip MANDATE — UI3-4. Enrolment through to the mandate surface, at 390px, against the LIVE tier, via a
+// redeemed code. The film is not the proof; the LIVENESS ASSERTION is: the mandate_hash on screen must
+// equal the one the live /members endpoint returns at capture time, or the run aborts. A capture that
+// looks right but recorded a local surface is the one thing this exists to prevent.
+async function clipMandate(
+  browser: any,
+  take: number,
+  out: string,
+  target: LiveTarget,
+  code: string,
+  displayName: string,
+): Promise<unknown> {
+  const dir = resolve(out, `mandate-take${take}`);
+  mkdirSync(dir, { recursive: true });
+  const PHONE = { width: 390, height: 844 }; // read on a phone before it is ever read on a laptop
+  const ctx = await browser.newContext({
+    viewport: PHONE,
+    recordVideo: { dir: resolve(dir, 'stream'), size: PHONE },
+  });
+  const page = await ctx.newPage();
+  const video = page.video();
+  const beats: Record<string, unknown> = {};
+
+  try {
+    // ENROLMENT — the real /join screen, filled and submitted. The redeem sets an httpOnly session cookie
+    // and lands the tester in their room; no owner shortcut, no injected credential.
+    await page.goto(`${target.web}/join`, { waitUntil: 'domcontentloaded' });
+    await sleep(SETTLE);
+    await page.locator('[data-pr="join-code"]').fill(code);
+    await page.locator('[data-pr="join-name"]').fill(displayName);
+    await sleep(BEAT);
+    await page.locator('[data-pr="join-submit"]').click();
+    await page.waitForURL(/\/r\/[^/]+/, { timeout: 30_000 });
+    const roomId = decodeURIComponent(new URL(page.url()).pathname.split('/r/')[1] ?? '');
+    must(roomId.length > 0, 'redeem did not land in a room');
+    log(`  redeemed "${displayName}" into room ${roomId}`);
+
+    // The session token, read from the httpOnly cookie (Playwright can read it; a script cannot) — this
+    // is what the liveness fetch below authenticates with, the SAME credential the browser is using.
+    const cookies = await ctx.cookies();
+    const token = cookies.find((c: any) => c.name === 'playroom_member')?.value ?? '';
+    must(token.length > 0, 'no playroom_member session cookie after redeem');
+
+    await waitForConn(page, 'connected');
+    await sleep(SETTLE);
+
+    // THE MEMBER APPEARS, THE SURFACE OPENS. Open the first roster chip that carries a mandate.
+    const memberId = await page
+      .locator('[data-pr="roster-member"]')
+      .first()
+      .getAttribute('data-pr-member');
+    must(!!memberId, 'no member id on the first roster chip');
+    await page.locator('[data-pr="roster-member"] details.mandate summary').first().click();
+    await sleep(SETTLE);
+    const surface = page.locator('[data-pr="mandate-surface"]').first();
+    must((await surface.count()) > 0, 'mandate surface did not render');
+    for (const field of [
+      'mandate-status',
+      'mandate-cosign',
+      'mandate-limits',
+      'mandate-policy',
+      'mandate-hash',
+    ]) {
+      must((await page.locator(`[data-pr="${field}"]`).count()) > 0, `surface is missing ${field}`);
+    }
+    beats.surfaceRendered = true;
+
+    // Read the on-screen hash (the full, copyable value — not the truncated display).
+    const onScreen = (
+      await page.locator('[data-pr="mandate-hash"] .mandate-hash-full').first().innerText()
+    ).trim();
+
+    // ── THE LIVENESS ASSERTION — the slice ─────────────────────────────────────────────
+    // Fetch /members from the LIVE api with the tester's own credential, and compare. Mismatch aborts.
+    const membersRes = await fetch(`${target.api}/rooms/${encodeURIComponent(roomId)}/members`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    must(membersRes.status === 200, `live /members expected 200, got ${membersRes.status}`);
+    const membersBody = (await membersRes.json()) as {
+      members?: Array<{ id: string; mandate_hash: string | null }>;
+    };
+    const liveness = assertLiveMandateHash(onScreen, membersBody, memberId as string); // throws on mismatch
+    beats.liveness = liveness;
+    log(
+      `  LIVENESS FIRED — ${liveness.member}: screen == live (${liveness.onScreen.slice(0, 20)}…)`,
+    );
+
+    await sleep(HOLD);
+    return { roomId, dir, beats, memberId, target };
+  } finally {
+    await ctx.close();
+    await video.saveAs(resolve(dir, `mandate-take${take}-stream.webm`)).catch(() => {});
+  }
+}
+
 async function main(): Promise<void> {
   const which = process.argv[2] ?? 'all';
   const takeArg = process.argv[3];
   const home = captureHome();
   const out = resolve(home, 'videos');
   mkdirSync(out, { recursive: true });
+
+  // ── THE LIVE MANDATE-SURFACE CAPTURE (UI3-4) — explicit live target, fail-loud, no default ──
+  // This path never touches the localhost defaults below: the live target is resolved from explicit env
+  // or the run refuses, and it is printed so a viewer of the artifact can see what was filmed.
+  if (which === 'mandate') {
+    const target = resolveLiveTarget(process.env); // throws LiveCaptureRefused if unset or local
+    log(`LIVE TARGET — api ${target.api} · web ${target.web}`);
+    const code = process.env.PLAYROOM_CAPTURE_CODE?.trim();
+    if (!code) {
+      throw new LiveCaptureRefused(
+        'PLAYROOM_CAPTURE_CODE is not set — a live capture needs a redeemable code (mint one first)',
+      );
+    }
+    const name = process.env.PLAYROOM_CAPTURE_NAME?.trim() || 'Tester';
+    const warmed = await warmTier(target);
+    log(`tier warm in ${warmed}ms`);
+    const liveHtml = await fetch(target.web).then((r) => r.text());
+    must(
+      !/__next_devtools|nextjs-portal|__nextDevClientId|\/_next\/static\/chunks\/react-refresh/.test(
+        liveHtml,
+      ),
+      'the LIVE web is serving a development overlay — refusing to film a dev badge (A4-F6)',
+    );
+    const browser = await loadChromium(home).launch();
+    log(`chromium ${browser.version()}`);
+    const take = Number(takeArg ?? 1);
+    let report: unknown;
+    try {
+      report = await clipMandate(browser, take, out, target, code, name);
+    } finally {
+      await browser.close();
+    }
+    writeFileSync(
+      resolve(out, `mandate-run-report-take${take}.json`),
+      JSON.stringify({ target, ...(report as object) }, null, 2),
+    );
+    log(`done — mandate capture at 390px against ${target.web}`);
+    log(`videos: ${out}`);
+    process.exit(0);
+  }
 
   const health = (await fetch(`${API}/health`).then((r) => r.json())) as { ok?: boolean };
   must(health.ok === true, `API not healthy: ${JSON.stringify(health)} — is the api running?`);
