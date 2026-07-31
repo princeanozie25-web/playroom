@@ -8,6 +8,7 @@ import {
   type TestServer,
 } from './support.js';
 import { listMembers, listRoomMembers, loadRoomTokens } from '../src/members.js';
+import { mandateFor } from '../src/mandates.js';
 
 // THE ROSTER, AS RECORDS AND AS THE ROOM SEES IT.
 //
@@ -51,6 +52,13 @@ describe('listMembers', () => {
         adapter_id: 'claude-code',
         scope: [],
         protected_actions: [],
+        // co_sign.actions is EMPTY, not absent: claude-code HAS a mandate (that is why scope is [] and
+        // not null) that gates nothing. This is the empty-≠-absent anchor the dedicated test leans on.
+        co_sign: { actions: [], by: 'principal' },
+        limits: { interrupts_per_day: 0 },
+        policy_version: 'playroom-policy/1.0',
+        expires: '2026-11-30T00:00:00Z',
+        mandate_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       },
       {
         id: 'claude-main',
@@ -64,6 +72,11 @@ describe('listMembers', () => {
         // (sol, ada, bo) are default-closed, which is what makes this enumeration worth pinning.
         scope: ['pr.review', 'pr.comment', 'pr.merge', 'summon.initiate'],
         protected_actions: ['pr.merge', 'deploy'],
+        co_sign: { actions: ['pr.merge', 'deploy'], by: 'principal' },
+        limits: { interrupts_per_day: 6, postage_per_day: 200 },
+        policy_version: 'playroom-policy/1.0',
+        expires: '2026-11-30T00:00:00Z',
+        mandate_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       },
       {
         id: 'sol',
@@ -75,6 +88,11 @@ describe('listMembers', () => {
         adapter_id: 'sol',
         scope: ['pr.review', 'pr.comment'],
         protected_actions: ['pr.merge', 'deploy'],
+        co_sign: { actions: ['pr.merge', 'deploy'], by: 'principal' },
+        limits: { interrupts_per_day: 6, postage_per_day: 200 },
+        policy_version: 'playroom-policy/1.0',
+        expires: '2026-11-30T00:00:00Z',
+        mandate_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       },
       // ── THE TWO GUEST AGENTS, ADDED ON PURPOSE IN S-LIVE ────────────────────────────
       //
@@ -99,6 +117,11 @@ describe('listMembers', () => {
         adapter_id: 'ada',
         scope: ['pr.review', 'pr.comment', 'pr.merge'],
         protected_actions: ['pr.merge', 'deploy'],
+        co_sign: { actions: ['pr.merge', 'deploy'], by: 'principal' },
+        limits: { interrupts_per_day: 6, postage_per_day: 200 },
+        policy_version: 'playroom-policy/1.0',
+        expires: '2026-11-30T00:00:00Z',
+        mandate_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       },
       {
         id: 'bo',
@@ -110,6 +133,11 @@ describe('listMembers', () => {
         adapter_id: 'bo',
         scope: ['pr.review', 'pr.comment', 'pr.merge'],
         protected_actions: ['pr.merge', 'deploy'],
+        co_sign: { actions: ['pr.merge', 'deploy'], by: 'principal' },
+        limits: { interrupts_per_day: 6, postage_per_day: 200 },
+        policy_version: 'playroom-policy/1.0',
+        expires: '2026-11-30T00:00:00Z',
+        mandate_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       },
     ]);
   });
@@ -138,6 +166,42 @@ describe('listMembers', () => {
       principal_id: 'principal:prince',
       adapter_id: null,
     });
+  });
+
+  it('projects the six mandate fields FROM the document, with mandate_hash from the WRAPPER', async () => {
+    // The mechanism, not the values: every field the surface renders is read from the mandate the
+    // fabric loaded, and mandate_hash is the wrapper's hash — not a re-hash of `.mandate`, and not the
+    // mandate_id. The named trap: a hash of the wrong object is a real-looking id that identifies nothing.
+    const claude = (await listMembers(pool)).find((m) => m.id === 'claude-main');
+    const loaded = mandateFor('claude-main');
+    expect(loaded, 'fixture: claude-main must have a mandate').toBeDefined();
+    const doc = loaded!.mandate;
+    expect(claude?.co_sign).toEqual(doc.co_sign);
+    expect(claude?.limits).toEqual(doc.limits);
+    expect(claude?.policy_version).toBe(doc.policy_version);
+    expect(claude?.expires).toBe(doc.expires);
+    expect(claude?.mandate_hash).toBe(loaded!.hash); // the wrapper's hash, verbatim
+    expect(claude?.mandate_hash).not.toBe(doc.mandate_id); // not the id — a sha256 of the document
+    expect(claude?.mandate_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('keeps ABSENT (no mandate → null) distinct from EMPTY (mandate present, field []/{}) on the wire', async () => {
+    const members = await listMembers(pool);
+    const prince = members.find((m) => m.id === 'prince'); // human, no mandate at all
+    const code = members.find((m) => m.id === 'claude-code'); // a mandate that gates nothing
+
+    // ABSENT: a member with no mandate is null across every mandate field — never [] or {}, which
+    // would read as "a mandate that grants/gates nothing" rather than "no mandate exists".
+    expect(prince?.co_sign).toBeNull();
+    expect(prince?.limits).toBeNull();
+    expect(prince?.policy_version).toBeNull();
+    expect(prince?.expires).toBeNull();
+    expect(prince?.mandate_hash).toBeNull();
+
+    // EMPTY: claude-code HAS a mandate whose co_sign gates nothing — `actions: []` is a value, not null.
+    expect(code?.co_sign).toEqual({ actions: [], by: 'principal' });
+    expect(code?.co_sign).not.toBeNull();
+    expect(code?.mandate_hash).toMatch(/^sha256:/); // it has a document; the hash identifies it
   });
 });
 

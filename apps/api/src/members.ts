@@ -31,6 +31,31 @@ export interface MemberRecord {
   /** From the member's mandate document, or null if they have none. */
   scope: string[] | null;
   protected_actions: string[] | null;
+  /**
+   * The co-sign requirement: which actions need a second signature, and whose. Null when the member
+   * has NO mandate — a different fact from a mandate whose `actions` list is empty (nothing gated),
+   * and the two must stay distinguishable on the wire.
+   */
+  co_sign: { actions: string[]; by: string } | null;
+  /**
+   * Declared per-action limits (e.g. `interrupts_per_day`). Null = no mandate. NOT enforced yet (S2.7):
+   * this is what the mandate DECLARES, not a usage counter — the surface must not imply otherwise.
+   */
+  limits: Record<string, number> | null;
+  /** The policy version the mandate was written against. Null when there is no mandate. */
+  policy_version: string | null;
+  /**
+   * When the mandate expires (ISO 8601), or null when there is no mandate. A value in the PAST means
+   * expired — the surface derives that state; this field carries the raw instant, not the verdict.
+   */
+  expires: string | null;
+  /**
+   * sha256 of the mandate DOCUMENT — identifies WHICH document is in force. Taken from the loaded
+   * wrapper (`LoadedMandate.hash`), never by hashing `.mandate` here: the wrapper already hashed the
+   * canonical document, and a hash of the wrong object is a real-looking id that identifies nothing.
+   * Null when there is no mandate.
+   */
+  mandate_hash: string | null;
 }
 
 /**
@@ -119,7 +144,11 @@ export async function listMembers(pool: Pool): Promise<MemberRecord[]> {
   }
 
   return rows.map((r) => {
-    const m = mandates.get(r.id)?.mandate;
+    // The WRAPPER, not just `.mandate`: `mandate_hash` comes from `loaded.hash`, which is the sha256
+    // of the canonical document. Reading `m` for the fields and `loaded` for the hash keeps the two
+    // straight — the hash identifies the document the other fields were read from.
+    const loaded = mandates.get(r.id);
+    const m = loaded?.mandate;
     return {
       id: r.id,
       kind: r.kind,
@@ -130,6 +159,14 @@ export async function listMembers(pool: Pool): Promise<MemberRecord[]> {
       adapter_id: r.adapter_id,
       scope: m?.scope ?? null,
       protected_actions: m?.protected_actions ?? null,
+      // `?? null` on the mandate, NOT on each field: a member with no mandate is null across the board
+      // (absent), while a member WITH a mandate carries the real value including an empty `[]`/`{}`
+      // (declared-but-empty). Absent and empty stay different facts on the wire.
+      co_sign: m?.co_sign ?? null,
+      limits: m?.limits ?? null,
+      policy_version: m?.policy_version ?? null,
+      expires: m?.expires ?? null,
+      mandate_hash: loaded?.hash ?? null,
     };
   });
 }

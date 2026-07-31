@@ -16,20 +16,21 @@ Severity is about the trust boundary, not user annoyance:
 - **medium** — a failure is detectable but not surfaced to the party who needs it.
 - **low** — hardening; no observable trust consequence yet.
 
-| id      | date        | severity | discovered by                                 | principle violated                                                                                                                                | disposition                              | commit    |
-| ------- | ----------- | -------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------- |
-| RT-001  | 25 Jul 2026 | high     | found during A4 automated capture             | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one                                               | fixed                                    | `161aa16` |
-| RT-002  | 25 Jul 2026 | medium   | noticed while closing RT-001                  | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                                                   | fixed                                    | `S13c-2`  |
-| RT-003  | 26 Jul 2026 | high     | property test, S0.5a                          | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                                               | fixed                                    | `01ae2e8` |
-| RT-004  | 26 Jul 2026 | high     | S0.5b activation-boundary review              | model output is DATA; a summon token in generated text would convert injection into cross-principal action                                        | guarded, one gap accepted until **S1.7** | `fe642c0` |
-| RT-005  | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b                 | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member                       | fixed                                    | `7fc279a` |
-| M-N1    | 25 Jul 2026 | critical | logged at the mandate slice                   | identity must be stamped by the boundary, not asserted by the caller; `actor_id` arrived from the wire as a free string                           | fixed                                    | `7fc279a` |
-| S04-N2  | 25 Jul 2026 | high     | logged at the mandate slice                   | a mandate is an unsigned file, so _this principal granted this authority_ is asserted by the document, not proven                                 | open, narrowed — trigger **S2.6**        | —         |
-| S12-N2  | 26 Jul 2026 | medium   | S1.2 closeout, while writing the roster scope | a governed request's subject must be justified by a record, not asserted by the caller — and it was not even checked to be a member               | fixed                                    | `S13-3`   |
-| S13-N2  | 27 Jul 2026 | high     | S1.3 Phase 0, reading the handshake           | room membership is the product's boundary; the handshake checks that a room EXISTS, not that the caller is IN it                                  | fixed                                    | `S13b-2`  |
-| S12-N1  | 26 Jul 2026 | low      | S1.2, while scoping the roster read           | an oracle anywhere undoes silence everywhere; room existence was readable without a credential                                                    | fixed                                    | `S13b-3`  |
-| S13-N3  | 27 Jul 2026 | medium   | S1.3 Phase 0, reading Room.tsx                | a credential must not travel where logs collect it; the browser's token is in the WebSocket query string, and the code cited the wrong finding id | fixed                                    | `S13c-1`  |
-| S13c-N1 | 27 Jul 2026 | low      | S1.3b, a standalone run under load            | a suite that fails 1-in-N erodes the signal it exists to give; two timing-sensitive tests failed once and have not reproduced                     | accepted until the first CI failure      | —         |
+| id      | date        | severity | discovered by                                 | principle violated                                                                                                                                                          | disposition                                                              | commit    |
+| ------- | ----------- | -------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | --------- |
+| RT-001  | 25 Jul 2026 | high     | found during A4 automated capture             | deny-by-default requires an explicit refusal; an unaudited failed write is worse than a delayed one                                                                         | fixed                                                                    | `161aa16` |
+| RT-002  | 25 Jul 2026 | medium   | noticed while closing RT-001                  | rooms are invite-only by membership (§1); an unauthenticated create has no principal to bind to                                                                             | fixed                                                                    | `S13c-2`  |
+| RT-003  | 26 Jul 2026 | high     | property test, S0.5a                          | one human action must produce one agent action; a rooted turn is not automatically an asked-for one                                                                         | fixed                                                                    | `01ae2e8` |
+| RT-004  | 26 Jul 2026 | high     | S0.5b activation-boundary review              | model output is DATA; a summon token in generated text would convert injection into cross-principal action                                                                  | guarded, one gap accepted until **S1.7**                                 | `fe642c0` |
+| RT-005  | 26 Jul 2026 | high     | S1.1a review, scoped in S1.1b                 | an unauthenticated roster read discloses which member may take which action, and M-N1 lets a caller claim to be that member                                                 | fixed                                                                    | `7fc279a` |
+| M-N1    | 25 Jul 2026 | critical | logged at the mandate slice                   | identity must be stamped by the boundary, not asserted by the caller; `actor_id` arrived from the wire as a free string                                                     | fixed                                                                    | `7fc279a` |
+| S04-N2  | 25 Jul 2026 | high     | logged at the mandate slice                   | a mandate is an unsigned file, so _this principal granted this authority_ is asserted by the document, not proven                                                           | open, narrowed — trigger **S2.6**                                        | —         |
+| S12-N2  | 26 Jul 2026 | medium   | S1.2 closeout, while writing the roster scope | a governed request's subject must be justified by a record, not asserted by the caller — and it was not even checked to be a member                                         | fixed                                                                    | `S13-3`   |
+| S13-N2  | 27 Jul 2026 | high     | S1.3 Phase 0, reading the handshake           | room membership is the product's boundary; the handshake checks that a room EXISTS, not that the caller is IN it                                                            | fixed                                                                    | `S13b-2`  |
+| S12-N1  | 26 Jul 2026 | low      | S1.2, while scoping the roster read           | an oracle anywhere undoes silence everywhere; room existence was readable without a credential                                                                              | fixed                                                                    | `S13b-3`  |
+| S13-N3  | 27 Jul 2026 | medium   | S1.3 Phase 0, reading Room.tsx                | a credential must not travel where logs collect it; the browser's token is in the WebSocket query string, and the code cited the wrong finding id                           | fixed                                                                    | `S13c-1`  |
+| S13c-N1 | 27 Jul 2026 | low      | S1.3b, a standalone run under load            | a suite that fails 1-in-N erodes the signal it exists to give; two timing-sensitive tests failed once and have not reproduced                                               | accepted until the first CI failure                                      | —         |
+| UI3-N1  | 31 Jul 2026 | medium   | UI3-3, generalising SLIVE-N3 + WEB-2          | no systematic enumeration exists of the paths by which a credential can LEAVE the system; two egress paths were found and closed one at a time, but the set was never swept | open — trigger **before the first non-Prince tester holds a credential** | —         |
 
 ## RT-001 — a refused write was indistinguishable from an accepted one
 
@@ -1250,6 +1251,32 @@ DATABASE_URL|CONNECTION_STRING`) so the two nets can no longer disagree — a di
 proof — its Fly log line must carry `[REDACTED:n]` (or a `scrub_error` drop), never a secret-shaped
 string. Do not synthesize a leak against production to test this; the mechanism is proven by the SCRUB-2
 corpus (N=7 × M=5) and asserted, not by staging a real credential in a live log.
+
+### UI3-N1 (medium): the paths a credential can LEAVE by have never been enumerated as a set
+
+Two credential-egress leaks have now been found and closed **one at a time, by accident, in production**:
+SLIVE-N3 (a provider key echoed into Fly logs inside an error object) and WEB-2 (a real `PLAYROOM_WEB_TOKEN`
+baked into a public image layer via a nested `apps/web/.env.local` the `.dockerignore` did not exclude).
+Each fix is sound. But finding them one incident at a time is the actual finding: there is **no systematic
+enumeration of the paths by which a credential can leave the system**, so the next one is found the same
+way — after it has already left.
+
+The principle: a boundary you discover by tripping over it is not a boundary you hold. Logs and image
+layers are now swept; the following egress surfaces have **never** been swept for credential material, and
+each is a place a token could ride out unredacted:
+
+- **CI logs** — GitHub Actions output is world-readable on a public repo; a test or a `migrate` step that
+  echoed a connection string would publish it. The api's scrubber does not run there.
+- **Client-facing error responses** — a 4xx/5xx body or a stack surfaced to the browser is an egress the
+  sink scrubber never touches; the BFF passes api errors through.
+- **Receipts / the event log itself** — append-only rows are the product's memory; a credential written
+  into an event `detail` or a receipt is a leak that also becomes permanent and replayable.
+
+**Severity medium:** no leak is demonstrated on these surfaces today, but the class is proven live twice and
+the set is unaudited. **Disposition: open. Trigger — BEFORE the first non-Prince tester holds a credential.**
+Until a stranger's token exists, every credential in the system is Prince's own; the moment one is a
+tester's, an unswept egress path stops being a latent gap and becomes someone else's secret leaving. The
+work is a single deliberate sweep of the egress set, not another one-off fix after the next incident.
 
 ## MIGRATED — the A4 capture-audit findings (A4-F1..F9)
 
