@@ -1214,9 +1214,42 @@ re-printed on every warm-up attempt** until the keys were re-set. Both keys are 
 
 The last redaction fix named fields; this one arrived in the payload — **scrub the payload, not the
 field.** Found by AUDIT-0 (it had no ID, no ledger entry, and no fix — it existed only as chat prose from
-the deploy session). **Status: fix lands this slice — SCRUB-2 adds a whole-payload scrubber at the single
-pino sink (`app.log`), operating on message, stack, nested error and cause chains, not on named fields.
-Trigger already fired (the first production deploy).**
+the deploy session). Trigger already fired (the first production deploy).
+
+**Status: FIXED IN CODE — SCRUB-2 (`c6ff5d5`); deployed-pending (SCRUB-3 `fly deploy`, live-proof
+deferred, trigger below).** The fix, and what an adversarial review (three angles) changed about it:
+
+- **The sink scrubber (`apps/api/src/scrub.ts`).** Every serialized line pino writes is scrubbed on the
+  way out — by then message, stack, nested error and cause chain are all text, so no field name can hide
+  a secret. Three nets: the exact VALUES of credential-shaped env vars (snapshotted at boot), secret
+  shape prefixes (`sk-ant-`/`sk-proj-`/`sk-`/`plr_cnry_`/`prm_`), and a general 40+ opaque-token net that
+  deliberately KEEPS lowercase-hex so `prompt_hash` telemetry survives. **Fail-closed:** if the scrubber
+  throws, the line is DROPPED and a `scrub_errors` counter bumps — an unscrubbed line is never the
+  fallback.
+- **The bypass the review confirmed (real).** The wrapper covered only pino, but the BOOT path reaches
+  stderr WITHOUT it: `buildServer` runs `makePool → new URL` synchronously, and a malformed
+  `DATABASE_URL` throws an `ERR_INVALID_URL` whose enumerable `.input` is the whole connection string —
+  the SLIVE-N3 shape (a secret in a field nobody named) at a DIFFERENT sink. Closed:
+  `installProcessScrubGuards` (`uncaughtException` + `unhandledRejection`) and the boot/listen catches
+  route every error through `scrubError` (inspect + scrub, fail-closed) before stderr; and the env-name
+  net widened to match pino's own definition (`server.ts:146`, `_KEY|_TOKEN|_SECRET|PASSWORD|
+DATABASE_URL|CONNECTION_STRING`) so the two nets can no longer disagree — a disagreement being the
+  original SLIVE-N3 shape.
+- **A source defect caught in the same pass.** The sentinel marker was a LITERAL NUL byte, which made
+  `scrub.ts` a binary file — removing it from every ripgrep search, the exact `agent.ts` failure the
+  evidence NUL-byte guard exists to catch. Rewritten as a `\u0000` escape; runtime value unchanged.
+- **Latent, recorded NOT fixed (no such secret is configured today, so neither is a live leak).** (1) The
+  `console.*` telemetry in `agent.ts` (`turn=…`) is the same bypass class as the boot path but carries no
+  secret on the turn path — the catch logs `err.name`, adapters throw `MissingApiKeyError(id)` without the
+  key. (2) The general net still lets `AIza-` (39-char), `+/=`-bearing base64/AWS, and sub-40 detached
+  passwords through — for providers/secrets not in use. Both are backstopped by the exact env-value
+  snapshot for anything actually configured. **Follow-up RT-ID reserved: SLIVE-N4** (route all process
+  output through one scrubbed sink) if a second provider or a `console.*`-with-secret ever lands.
+
+**Live-proof trigger (deferred):** the next real boot-error or warm-up failure on the deployed api is the
+proof — its Fly log line must carry `[REDACTED:n]` (or a `scrub_error` drop), never a secret-shaped
+string. Do not synthesize a leak against production to test this; the mechanism is proven by the SCRUB-2
+corpus (N=7 × M=5) and asserted, not by staging a real credential in a live log.
 
 ## MIGRATED — the A4 capture-audit findings (A4-F1..F9)
 
