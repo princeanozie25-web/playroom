@@ -42,6 +42,7 @@ import {
 } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
+import { makeScrubStream } from './scrub.js';
 import { authenticate, type AuthFailure } from './credentials.js';
 import { downgradeInterrupt } from './interrupts.js';
 import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
@@ -123,7 +124,11 @@ function loggerOptions(opts: BuildOptions): FastifyServerOptions['logger'] {
       ],
       censor: '[redacted]',
     },
-    ...(opts.loggerStream ? { stream: opts.loggerStream } : {}),
+    // SLIVE-N3: THE SINK ITSELF SCRUBS. The `redact` above is path-based and a key rode into the logs
+    // inside an error field nobody named — so the destination is wrapped so every serialized line is
+    // scrubbed on the way out (message, stack, nested error, cause chain are all text by here), fail-
+    // closed. Wraps the injected test stream, or stdout in production; nothing reaches either unscrubbed.
+    stream: makeScrubStream(opts.loggerStream ?? process.stdout).stream,
   };
 }
 
