@@ -199,18 +199,19 @@ demonstrated anywhere in this film and must not be narrated.
 
 Other wordings to avoid across the whole cut:
 
-| do not say                                      | because                                                                                                               | say instead                                                                             |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| "signed receipt", "provable", "notarised"       | no chain, no signatures exist (S2.3)                                                                                  | "recorded in an append-only log"                                                        |
-| "verified identity", "we know who the human is" | a credential authenticates a PROCESS acting as a member; no login, no per-human key (S04-N2)                          | "each connection authenticates as a member, and members are bound to principals"        |
-| "the room is private", "only Prince can see it" | membership is enforced and there is no login: the web tier mints a socket ticket for anyone who can reach it (S04-N2) | "the room admits only its own members"                                                  |
-| "the mandate is authorised", "signed authority" | the mandate is an unsigned file; the hash proves which document, not who granted it (S2.1)                            | "the mandate that was evaluated is recorded by hash"                                    |
-| "Claude requested the merge"                    | the requester is authenticated, the subject it names is not (S12-N2)                                                  | "a merge was requested under Claude's mandate"                                          |
-| "the agent was blocked from merging"            | the agent never requested it, and could not                                                                           | "a merge request against that member's mandate is refused"                              |
-| "the card shows Claude attempted a merge"       | the card has not said that since UI2-4, and it was never true                                                         | "the card shows who requested what, and under whose mandate"                            |
-| "approve it here" (in take 13)                  | take 13 predates S2.2 and shows the paused card; completing a co-sign is a separate asset                             | "a decision awaiting a signature; the co-signature completes in S2.2, shown separately" |
-| "agents can't be tricked"                       | quoted and imported content still activates (RT-004, S1.7)                                                            | "an agent's own output cannot summon another agent"                                     |
-| "isolated context per principal"                | one shared 30-message window today (S1.5)                                                                             | "one shared room context"                                                               |
+| do not say                                                             | because                                                                                                                           | say instead                                                                             |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| "signed receipt", "provable", "notarised"                              | no chain, no signatures exist (S2.3)                                                                                              | "recorded in an append-only log"                                                        |
+| "verified identity", "we know who the human is"                        | a credential authenticates a PROCESS acting as a member; no login, no per-human key (S04-N2)                                      | "each connection authenticates as a member, and members are bound to principals"        |
+| "the room is private", "only Prince can see it"                        | membership is enforced and there is no login: the web tier mints a socket ticket for anyone who can reach it (S04-N2)             | "the room admits only its own members"                                                  |
+| "the mandate is authorised", "signed authority"                        | the mandate is an unsigned file; the hash proves which document, not who granted it (S2.1)                                        | "the mandate that was evaluated is recorded by hash"                                    |
+| "Claude requested the merge"                                           | the requester is authenticated, the subject it names is not (S12-N2)                                                              | "a merge was requested under Claude's mandate"                                          |
+| "the agent was blocked from merging"                                   | the agent never requested it, and could not                                                                                       | "a merge request against that member's mandate is refused"                              |
+| "the card shows Claude attempted a merge"                              | the card has not said that since UI2-4, and it was never true                                                                     | "the card shows who requested what, and under whose mandate"                            |
+| "approve it here" (in take 13)                                         | take 13 predates S2.2 and shows the paused card; completing a co-sign is a separate asset                                         | "a decision awaiting a signature; the co-signature completes in S2.2, shown separately" |
+| "agents can't be tricked"                                              | quoted and imported content still activates (RT-004, S1.7)                                                                        | "an agent's own output cannot summon another agent"                                     |
+| "isolated context per principal"                                       | one shared 30-message window today (S1.5)                                                                                         | "one shared room context"                                                               |
+| "the mandate surface proves enforcement", "these limits are in effect" | the surface READS the document; limits aren't enforced (S2.7) and enforcement is beat 5's separate, action-specific demonstration | "the surface shows what the mandate requires, read from the document"                   |
 
 **One further honesty note about the recording itself.** The five beats are one continuous
 take with no cuts, but the _pacing_ is set by the harness: holds are deliberate, and the two
@@ -225,6 +226,25 @@ silence in beat 2, the silence stops being the claim it currently is.
 The deck promises six. This film delivers five. Whatever the sixth is, it is **not** in this
 footage, and the deck must either drop it for P0 or mark it as forthcoming. Reconciling that
 is an owner decision and is recorded here as the open item, not resolved.
+
+---
+
+## The mandate surface (UI3-3 — a new surface, not in take 13)
+
+Take 13 shows a member's SCOPE on its chip. UI3-3 adds the rest of the mandate on tap — the co-signature
+requirement, the declared limits, the policy version, the expiry **as a state**, and the hash that says
+WHICH document is in force. It is read-only by construction (UI3-3c proves no write path exists) and every
+control is disabled in its true position. The surface is captured at 390px in UI3-4; its claims apply to
+that capture and are not optional.
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | Six fields READ FROM the member's mandate document — co-sign (which actions need a signature, and whose), limits, policy version, expiry, and the document hash — the same values the fabric loaded, not a caption of them. Expiry is shown as a STATE: a mandate past its `expires` reads **expired**, never as live authority with a stale date. The hash is truncated on screen but copyable in full, so WHICH document is in force is identifiable. A member with no mandate shows nothing; a mandate that grants or gates nothing shows an honest "none" — distinct from "not disclosed", which is a different fact.                                                                                  |
+| **What it does NOT** | **It shows what a mandate SAYS, not that the server ENFORCED it on any particular action.** A disabled, checked co-signature control proves the mandate REQUIRES a signature for that action; it does not prove any specific request was gated — that is beat 5's separate, action-specific demonstration, and even there nothing merged. The **limits are DECLARED, not enforced** (no usage counters exist — S2.7), and the surface says so on its face. The hash proves WHICH document was read, **not that anyone authorised it** — the mandate is unsigned (S2.1), exactly as beat 5's hash. This is a faithful READ of the document, not evidence of enforcement, and a caption may not make it one. |
+
+**The one sentence a caption may use:** _the surface shows the terms of a member's mandate, read from the
+document the fabric enforces against._ **Not:** _the surface proves the mandate was enforced_ (it shows the
+terms, not an enforcement). **Not:** _these limits are in effect_ (they are declared, not enforced — S2.7).
 
 ---
 
