@@ -1,4 +1,5 @@
 import { MemberName } from './MemberChip';
+import { Chip } from './Chip';
 import type { RosterMember } from './roster';
 import { HOOK, pr } from './hooks';
 
@@ -57,8 +58,7 @@ export function TaskChip({
 }) {
   const assignee = roster.get(task.assignee);
   return (
-    <div className="task-chip" {...pr(HOOK.task)} data-pr-state={task.state}>
-      <span className="task-kicker">task</span>
+    <Chip hook={HOOK.task} kicker="task" data-pr-state={task.state}>
       <span className="task-state" {...pr(HOOK.taskState)}>
         {STATE_WORDS[task.state] ?? task.state}
       </span>
@@ -76,7 +76,7 @@ export function TaskChip({
           under {task.mandate_hash ? `${task.mandate_hash.slice(0, 14)}…` : 'no mandate'}
         </span>
       )}
-    </div>
+    </Chip>
   );
 }
 
@@ -115,8 +115,12 @@ export function HandoffRow({
   roster: Map<string, RosterMember>;
 }) {
   return (
-    <div className="task-chip handoff-row" {...pr(HOOK.handoff)} data-pr-to={handoff.to_member}>
-      <span className="task-kicker">handoff</span>
+    <Chip
+      hook={HOOK.handoff}
+      modifier="handoff-row"
+      kicker="handoff"
+      data-pr-to={handoff.to_member}
+    >
       <MemberName member={roster.get(handoff.actor)} name={handoff.actor} />
       <span className="handoff-arrow" aria-label="hands to">
         →
@@ -132,7 +136,7 @@ export function HandoffRow({
       <span className="task-mandate" {...pr(HOOK.taskMandate)}>
         under {handoff.mandate_hash ? `${handoff.mandate_hash.slice(0, 21)}…` : 'no mandate'}
       </span>
-    </div>
+    </Chip>
   );
 }
 
@@ -164,13 +168,13 @@ export function SummonRow({
   roster: Map<string, RosterMember>;
 }) {
   return (
-    <div
-      className="task-chip summon-row"
-      {...pr(HOOK.summon)}
+    <Chip
+      hook={HOOK.summon}
+      modifier="summon-row"
       data-pr-to={summon.member}
       data-pr-kind={summon.kind}
+      kicker={summon.kind === 'order' ? 'standing order' : 'summon'}
     >
-      <span className="task-kicker">{summon.kind === 'order' ? 'standing order' : 'summon'}</span>
       {summon.kind === 'order' ? (
         <>
           <span className="order-by">
@@ -184,6 +188,6 @@ export function SummonRow({
         →
       </span>
       <MemberName member={roster.get(summon.member)} name={summon.member} />
-    </div>
+    </Chip>
   );
 }

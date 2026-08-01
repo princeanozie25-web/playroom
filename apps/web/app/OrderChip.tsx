@@ -1,6 +1,7 @@
 import { MemberName } from './MemberChip';
+import { Chip } from './Chip';
 import type { RosterMember } from './roster';
-import { HOOK, pr } from './hooks';
+import { HOOK } from './hooks';
 
 // THE STANDING-ORDER CHIP (S-LOOP) — recurring work a human authorised, ambient in the room (§18's
 // register: a fact, not a nag). It says what recurs, who authorised it, its status, and how many
@@ -42,8 +43,7 @@ export function OrderChip({
   const creator = roster.get(order.creator);
   const action = roster.get(order.action_member);
   return (
-    <div className="order-chip" {...pr(HOOK.order)} data-pr-status={order.status}>
-      <span className="order-kicker">standing order</span>
+    <Chip variant="order" hook={HOOK.order} kicker="standing order" data-pr-status={order.status}>
       <span className="order-status">{STATUS_WORDS[order.status] ?? order.status}</span>
       {/* WHAT RECURS — it summons this member each cycle. */}
       <span className="order-summons">summons</span>
@@ -59,6 +59,6 @@ export function OrderChip({
       {order.reason && order.status !== 'ACTIVE' ? (
         <span className="order-reason">{order.reason}</span>
       ) : null}
-    </div>
+    </Chip>
   );
 }

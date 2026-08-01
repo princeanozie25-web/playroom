@@ -1,6 +1,7 @@
 'use client';
 
 import { MemberName } from './MemberChip';
+import { Chip } from './Chip';
 import type { RosterMember } from './roster';
 import { HOOK, pr } from './hooks';
 
@@ -54,12 +55,12 @@ export function InterruptChip({
     viewer !== null && viewer === interrupt.addressed_to && interrupt.urgency !== 'FYI';
 
   return (
-    <div
-      className="task-chip interrupt-chip"
-      {...pr(HOOK.interrupt)}
+    <Chip
+      hook={HOOK.interrupt}
+      modifier="interrupt-chip"
+      kicker="interrupt"
       data-pr-urgency={interrupt.urgency}
     >
-      <span className="task-kicker">interrupt</span>
       <span className="interrupt-urgency" {...pr(HOOK.interruptUrgency)}>
         {URGENCY_WORDS[interrupt.urgency] ?? interrupt.urgency}
       </span>
@@ -88,6 +89,6 @@ export function InterruptChip({
           lower
         </button>
       )}
-    </div>
+    </Chip>
   );
 }
