@@ -66,6 +66,17 @@
      `var(--mono, …)` fallback; a code, a hash and a room code should read in the same voice. */
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
+  /* ── MOTION (SHELL-B2) ──────────────────────────────────────────────────
+     design.md "Tokens": 150–200ms ease-out; card resolve = one gentle settle;
+     prefers-reduced-motion kills all of it. One duration, one curve — an
+     exponential ease-out (quint), no bounce, no elastic. "Calm by default":
+     motion marks something real happening (an event arriving, a state
+     committing, a disclosure opening) and decorates nothing. Every rule that
+     moves uses these two tokens, so the reduced-motion block at the end of
+     this file can be checked against a closed set. */
+  --motion: 180ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
   /* type scale */
   --t-xs: 11px;
   --t-sm: 13px;
@@ -501,6 +512,21 @@ body {
   margin: 0;
 }
 
+/* AN ITEM ENTERS BY RISING (SHELL-B2) — "the replayed span slides in" (design.md "States"), and a
+   live event arrives the same way: 4px and one fade, opacity/transform only (compositor properties,
+   never layout). A record exists from its first frame — the rise is presentation, not a state claim:
+   nothing here may make a pending thing read as settled, and opacity cannot. On a fresh open the
+   whole window rises once, together, which is the room opening — not per-row noise. */
+.transcript > li {
+  animation: rise-in var(--motion) var(--ease-out);
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 /* ── LOAD EARLIER (S16b) ──────────────────────────────────────────────────────
    The top of a WINDOWED transcript. Quiet and centred — a control, not content, so it does not read
    as a message. Loading behaviour, not a new surface: a plain pill that says what it is doing. */
@@ -557,17 +583,21 @@ body {
   white-space: pre-wrap;
 }
 
+/* THE STREAMING CARET (SHELL-B2) — design.md "Message anatomy": a 2px caret SHIMMER in the
+   speaking member's accent. Was a 7px block on a step-end blink; a shimmer eases, a blink shouts.
+   It exists to show a turn is live — legibility, not decoration — and it is the one perpetual
+   motion in the transcript, which is why it is thin and soft. */
 .caret {
   display: inline-block;
-  width: 7px;
+  width: 2px;
   /* The caret takes the speaking member's accent, inherited from the row. */
   background: var(--accent, var(--indigo));
   color: transparent;
-  animation: blink 1s step-end infinite;
+  animation: shimmer 1s ease-in-out infinite;
 }
-@keyframes blink {
+@keyframes shimmer {
   50% {
-    opacity: 0;
+    opacity: 0.3;
   }
 }
 
@@ -1459,4 +1489,90 @@ body {
   background: var(--ink-3);
   border-color: var(--ink-3);
   cursor: not-allowed;
+}
+
+/* ── MOTION (SHELL-B2) — the remaining transitions, gathered where they can be audited ─────────
+   design.md "Tokens": 150–200ms ease-out; card resolve = one gentle settle. Everything below uses
+   --motion/--ease-out, animates only compositor properties (opacity/transform) or colours — never
+   layout — and presents a state the event log has ALREADY committed. Motion must never make a
+   pending thing read as settled: the settle animates the resolved element itself, which exists only
+   once `decision.resolved` arrived; the pending card's buttons never crossfade into it. */
+
+/* CONTROL EMPHASISING — a control's hover/press shift eases instead of snapping. */
+.decision-actions button,
+.load-older-btn,
+.interrupt-downgrade,
+.loop-controls button,
+.welcome-dismiss,
+.composer button,
+.join-submit,
+.loop-submit,
+.loop-edit-save {
+  transition:
+    border-color var(--motion) var(--ease-out),
+    background-color var(--motion) var(--ease-out),
+    color var(--motion) var(--ease-out);
+}
+
+/* FIELD UPDATING — a state that changes in place (a task's dot, an interrupt's urgency rule, an
+   order's status, a loop row dimming) eases to its new colour. The attribute changes only after the
+   event committed; the ease presents a done fact, it never previews one. */
+.task-state::before {
+  transition: background-color var(--motion) var(--ease-out);
+}
+.interrupt-chip {
+  transition: border-color var(--motion) var(--ease-out);
+}
+.order-status,
+.loop-status,
+.loop-row {
+  transition: color var(--motion) var(--ease-out);
+}
+
+/* DISCLOSURE EXPANDING — the mandate popover pops from its trigger. `display` toggling under
+   `details[open]` restarts the animation on every open. */
+.mandate-detail {
+  animation: pop-in var(--motion) var(--ease-out);
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+/* THE PANEL RESOLVE SETTLE — "card resolve = one gentle settle". The resolved line exists only
+   once the decision.resolved event arrived; it settles in place of the buttons, exactly once. */
+.decision-resolved {
+  animation: settle var(--motion) var(--ease-out);
+}
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+/* THE SPEND FOOTER FADES IN — design.md "Message anatomy": on completed, a quiet footer fades in. */
+.meter {
+  animation: fade-in var(--motion) var(--ease-out);
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── REDUCED MOTION KILLS ALL OF IT (design.md "Tokens") ───────────────────────────────────────
+   Universal and !important, deliberately: every motion declaration above is non-important, so this
+   block wins by cascade arithmetic rather than by enumeration — a new animation added later is
+   killed here without anyone remembering to add it. motion.test.ts asserts the mechanism: motion
+   exists to be killed, none of it is !important, and this block covers both properties. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
