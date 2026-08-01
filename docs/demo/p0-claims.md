@@ -262,6 +262,26 @@ lives at `playroom-capture/videos/mandate-take1/mandate-take1-stream.webm` (11.6
 returned._ **Not:** _the fabric enforced this_ (the capture proves the surface is live, not that any action
 was governed).
 
+### SHELL-B — the craft pass changed how it looks, and changed no claim (1 Aug 2026)
+
+The appearance changed on purpose for the first time: the ambient text tier darkened to meet the
+contract's own 4.5:1 floor, focus rings and `aria-live` landed, motion arrived (180ms ease-out CSS
+transitions; Framer Motion 12.43.0 scoped to the Chip and Panel primitives for layout and
+enter/exit-across-unmount), the caret became design.md's 2px shimmer, and the two unruled
+side-stripes were rewritten. Every motion animates opacity, position and size only — never a colour,
+background or border — so **a pending card is pending for every frame of its transition, and the
+resolved style renders only from a `decision.resolved` event** (asserted by `framer-scope.test.ts`
+and `motion.test.ts`, not by this paragraph).
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | The craft pass is on film at 390px — the surface, the six mandate fields, the welcome dismissing with a real exit — in `playroom-capture/videos/mandate-take2-LOCAL/` (the `LOCAL` in the filename is the label: a **local production build**, owner's ruling of 1 Aug 2026, no deploy that day). The on-screen hash was checked against the **local** api's `/members` for the same member — a consistency check of the frame, named as such. |
+| **What it does NOT** | **Everything the UI3-3 and UI3-4 rows above say still holds, unchanged — a craft pass does not upgrade a claim.** The surface still shows what a mandate SAYS, not that the server enforced it. The LOCAL capture asserts **nothing about the deployed product**: it is a craft artifact, not the UI3-4 liveness artifact — the live tier ran pre-SHELL-A code that day, and the live after-capture is outstanding (**SHA-B-F1**, below).      |
+
+**Caption:** _the same surface, after the craft pass — filmed against a local production build._
+**Not:** _the deployed product looks like this_ (it will, after the next deploy; SHA-B-F1 is the
+record that this is outstanding). **Not:** _the fabric enforced anything on camera._
+
 ---
 
 ## Findings raised by this slice

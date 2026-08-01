@@ -728,6 +728,16 @@ button. A suite that fails one run in N erodes exactly the signal eleven slices 
 building — the value of a green run is that it means something, and a flaky test converts every
 future failure into a coin toss about whether to look.
 
+**ADDENDUM — 1 Aug 2026 (SHELL-B2): a third test in the family, same shape, same conditions.**
+`apps/api/test/room-not-found.test.ts` ("refuses before the write is attempted") failed once in a
+pre-commit full run — a `23503` reached its captured log — while Prince's dev stack was live against
+the same Neon compute, which is this entry's exact load hypothesis. The failing commit contained
+only a stylesheet and a source-level test; no causal path exists. Green 3× in isolation immediately
+after, green on the full re-run. This widens the entry from "two tests" to "the timing-sensitive
+family" and strengthens the shared-compute hypothesis without confirming it. **Trigger unchanged**
+— a CI failure of any of the three gets a session; local single-failures under concurrent load are
+recorded here, not chased.
+
 ### CORRECTION — S13b-3 claimed a claims-sheet row it did not add
 
 S13b-3's message says it added a do-not-say row for _"the room is private" / "only Prince can see
