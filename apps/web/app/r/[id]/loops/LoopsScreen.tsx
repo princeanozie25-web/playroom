@@ -6,6 +6,7 @@ import Link from 'next/link';
 import type { OrderView } from '../../../orders';
 import type { RosterMember } from '../../../roster';
 import { MemberName } from '../../../MemberChip';
+import { Panel } from '../../../Panel';
 import { HOOK, pr } from '../../../hooks';
 
 // THE LOOPS SCREEN (S-UI3) — standing orders as a form, not a bash script.
@@ -104,7 +105,13 @@ export function LoopsScreen({
             const mine = isHuman && viewer.member_id === o.creator_member_id;
             const terminal = ['REVOKED', 'EXPIRED', 'LIMIT_REACHED'].includes(o.status);
             return (
-              <li className="loop-row" key={o.id} {...pr(HOOK.loopRow)} data-pr-status={o.status}>
+              <Panel
+                as="li"
+                className="loop-row"
+                key={o.id}
+                hook={HOOK.loopRow}
+                data-pr-status={o.status}
+              >
                 <div className="loop-row-head">
                   <span className="loop-status" {...pr(HOOK.loopStatus)}>
                     {STATUS_WORDS[o.status] ?? o.status}
@@ -204,7 +211,7 @@ export function LoopsScreen({
                 {editing === o.id && mine && !terminal && (
                   <EditForm roomId={roomId} order={o} busy={busy} onSave={mutate} />
                 )}
-              </li>
+              </Panel>
             );
           })}
         </ul>
@@ -236,9 +243,10 @@ function CreateForm({
   const [expiry, setExpiry] = useState('');
 
   return (
-    <form
+    <Panel
+      as="form"
       className="loop-create"
-      {...pr(HOOK.loopCreate)}
+      hook={HOOK.loopCreate}
       onSubmit={(e) => {
         e.preventDefault();
         void onCreate(`/api/rooms/${roomId}/orders`, 'POST', {
@@ -313,7 +321,7 @@ function CreateForm({
       <button type="submit" disabled={busy || !trigger || !action} {...pr(HOOK.loopSubmit)}>
         create standing order
       </button>
-    </form>
+    </Panel>
   );
 }
 
@@ -332,9 +340,10 @@ function EditForm({
   const [cap, setCap] = useState(order.max_cycles === null ? '' : String(order.max_cycles));
 
   return (
-    <form
+    <Panel
+      as="form"
       className="loop-edit-form"
-      {...pr(HOOK.loopEditForm)}
+      hook={HOOK.loopEditForm}
       onSubmit={(e) => {
         e.preventDefault();
         void onSave(`/api/rooms/${roomId}/orders/${order.id}`, 'PATCH', {
@@ -366,6 +375,6 @@ function EditForm({
       <button type="submit" disabled={busy} {...pr(HOOK.loopEditSave)}>
         save — effective next cycle
       </button>
-    </form>
+    </Panel>
   );
 }

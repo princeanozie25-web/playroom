@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { RosterMember } from './roster';
+import { Panel } from './Panel';
 import { HOOK, pr } from './hooks';
 
 // THREE LINES, ONE DISMISS, NO TOUR (S-LIVE).
@@ -47,7 +48,7 @@ export function Welcome({
   if (closing) return null;
 
   return (
-    <div className="welcome" {...pr(HOOK.welcome)} role="dialog" aria-label="Welcome">
+    <Panel className="welcome" hook={HOOK.welcome} role="dialog" aria-label="Welcome">
       <p className="welcome-line">
         <strong>This is a shared room.</strong> The people here have their own AI assistants, and
         everyone can see everything that happens.
@@ -83,6 +84,6 @@ export function Welcome({
       >
         Got it
       </button>
-    </div>
+    </Panel>
   );
 }

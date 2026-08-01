@@ -3,6 +3,7 @@ import type { RosterMember } from './roster';
 // there pulls node:fs and node:crypto into the browser bundle and breaks `next build`.
 import { mandateSummary } from './mandate';
 import { MandateSurface } from './MandateSurface';
+import { Panel } from './Panel';
 import { HOOK, pr } from './hooks';
 
 // TWO SURFACES, BECAUSE THE DENSITY GRADIENT IS THE POINT.
@@ -156,7 +157,7 @@ export function MemberChip({ member, name }: { member?: RosterMember; name: stri
           <summary className="chip-mandate" {...pr(HOOK.mandateSummary)}>
             {summary ?? 'granted nothing'}
           </summary>
-          <div className="mandate-detail" {...pr(HOOK.mandateDetail)}>
+          <Panel className="mandate-detail" hook={HOOK.mandateDetail}>
             <div className="mandate-detail-head">
               {member.display_name}
               {member.principal_name ? ` acts for ${member.principal_name}` : ''}
@@ -178,7 +179,7 @@ export function MemberChip({ member, name }: { member?: RosterMember; name: stri
                 here is a field of the mandate document, read-only, in its true position — no
                 summary sentence, no total, no "and more". */}
             <MandateSurface member={member} />
-          </div>
+          </Panel>
         </details>
       )}
     </span>

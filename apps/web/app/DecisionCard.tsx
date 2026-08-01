@@ -2,6 +2,7 @@
 
 import type { DecisionEvent } from '@playroom/shared';
 import { MemberName } from './MemberChip';
+import { Panel } from './Panel';
 import type { Principal, RosterMember } from './roster';
 import { HOOK, pr } from './hooks';
 
@@ -95,7 +96,7 @@ export function DecisionCard({
   const signedByMember = signedBy ? roster.find((m) => m.id === signedBy) : undefined;
 
   return (
-    <section className="decision" aria-label="decision required" {...pr(HOOK.decision)}>
+    <Panel as="section" className="decision" hook={HOOK.decision} aria-label="decision required">
       <div className="decision-kicker">
         Decision · <span {...pr(HOOK.decisionVerdict)}>{p.decision}</span>
       </div>
@@ -190,6 +191,6 @@ export function DecisionCard({
           </>
         )}
       </div>
-    </section>
+    </Panel>
   );
 }
