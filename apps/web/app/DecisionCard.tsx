@@ -3,6 +3,7 @@
 import type { DecisionEvent } from '@playroom/shared';
 import { MemberName } from './MemberChip';
 import { Panel } from './Panel';
+import { DisabledControl } from './DisabledControl';
 import type { Principal, RosterMember } from './roster';
 import { HOOK, pr } from './hooks';
 
@@ -94,6 +95,10 @@ export function DecisionCard({
     viewerMember?.kind === 'human' &&
     viewerMember.principal === p.required_signer;
   const signedByMember = signedBy ? roster.find((m) => m.id === signedBy) : undefined;
+  // Why the inert Approve/Deny are inert: a claim on a specific person. Sourced from the required
+  // signer — the same source the visible "Awaiting …" line reads — so the control and the sentence
+  // beside it cannot disagree about who the room is waiting on.
+  const pendingReason = signer ? `Awaiting ${signer.display_name}` : 'Awaiting the named principal';
 
   return (
     <Panel as="section" className="decision" hook={HOOK.decision} aria-label="decision required">
@@ -179,12 +184,8 @@ export function DecisionCard({
           // INERT for everyone else, and the signer is NAMED — a claim on someone specific, so the
           // room says who rather than dangling a button that would be refused.
           <>
-            <button type="button" disabled>
-              Approve
-            </button>
-            <button type="button" disabled>
-              Deny
-            </button>
+            <DisabledControl reason={pendingReason}>Approve</DisabledControl>
+            <DisabledControl reason={pendingReason}>Deny</DisabledControl>
             <span className="decision-pending">
               {signer ? <>Awaiting {signer.display_name}</> : <>Awaiting the named principal</>}
             </span>

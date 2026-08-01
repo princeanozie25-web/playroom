@@ -1,5 +1,6 @@
 import type { RosterMember } from './roster';
 import { discloseLimits, expiryState, truncateHash } from './mandate';
+import { DisabledControl } from './DisabledControl';
 import { HOOK, pr } from './hooks';
 
 // THE MANDATE SURFACE — what a mandate SAYS, rendered so it cannot say more than it says (UI3-3).
@@ -68,11 +69,10 @@ export function MandateSurface({ member }: { member: RosterMember }) {
             <ul className="mandate-list">
               {cosign.actions.map((action) => (
                 <li key={action}>
-                  <input
-                    type="checkbox"
+                  <DisabledControl
+                    as="checkbox"
                     checked
-                    disabled
-                    readOnly
+                    reason="The mandate surface is read-only — a mandate is set in code, not changed here."
                     aria-label={`${action} requires a co-signature by ${cosign.by}`}
                   />
                   <code>{action}</code>
