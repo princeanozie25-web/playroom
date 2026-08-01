@@ -743,7 +743,9 @@ export function Room({
         </p>
       )}
 
-      <ul className="transcript" {...pr(HOOK.transcript)}>
+      {/* aria-live="polite": design.md's A11y line promises streaming text announces politely —
+          a screen reader hears a turn arrive without it interrupting the current utterance. */}
+      <ul className="transcript" {...pr(HOOK.transcript)} aria-live="polite">
         {/* LOAD EARLIER — the top of a WINDOW, not the top of the room (S16b). It appears only when
             history exists below what is loaded, and reaching it is one request, never a lost message.
             An explicit control rather than scroll-detection: loading behaviour, no new UI look. */}
@@ -847,8 +849,10 @@ export function Room({
               )}
               {!it.streaming && (it.tokens_in != null || it.cost_usd != null) && (
                 <div className="meter" {...pr(HOOK.spend)}>
+                  {/* toFixed(4), matching the room meter: the quiet tier must not go loud on a long
+                      float (SHELL-B1). Formatting only — the value is the event's, untouched. */}
                   {it.tokens_in != null ? `${it.tokens_in}→${it.tokens_out} tok` : ''}
-                  {it.cost_usd != null ? ` · $${it.cost_usd}` : ''}
+                  {it.cost_usd != null ? ` · $${it.cost_usd.toFixed(4)}` : ''}
                 </div>
               )}
             </li>
@@ -866,7 +870,10 @@ export function Room({
             slice, not here. */}
         <input
           className="what"
-          placeholder="message"
+          // design.md "The composer" copy, verbatim: the placeholder is the one persistent surface
+          // that can teach the @-convention, and "message" taught nothing (SHELL-B1; the full
+          // composer with its @-popover remains the shell slice's).
+          placeholder="Message the room — @ to bring someone in"
           value={body}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setBody(e.target.value)}
         />

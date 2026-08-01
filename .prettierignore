@@ -6,3 +6,5 @@ coverage
 pnpm-lock.yaml
 # Local tooling config, written by the CLI (permission grants etc.), not by hand.
 .claude/settings.local.json
+# Impeccable critique snapshots — machine-persisted evidence artifacts (SHELL-B1), not hand-formatted.
+.impeccable/

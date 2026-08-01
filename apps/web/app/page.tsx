@@ -37,7 +37,9 @@ export default function Landing() {
     <main className="home">
       <h1>Playroom</h1>
       <p>Create a room, then open it in two browsers.</p>
-      <form onSubmit={onSubmit} style={{ display: 'flex', gap: 8 }}>
+      {/* .home form already provides the flex row and tokenized gap; the inline copy of it was
+          SHA-A-F3's hardcoded spacing (SHELL-B1). */}
+      <form onSubmit={onSubmit}>
         <input placeholder="room name" value={title} onChange={(e) => setTitle(e.target.value)} />
         <input
           placeholder="slug (optional)"

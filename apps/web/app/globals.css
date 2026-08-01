@@ -10,7 +10,10 @@
   --indigo-line: #c7d2fe;
   --ink: #0f172a;
   --ink-2: #475569;
-  --ink-3: #94a3b8;
+  /* The quietest TEXT ink. Darkened from #94a3b8 in SHELL-B1: at 2.6:1 on white the ambient tier
+     (meters, kickers, hashes, budgets) failed the contract's own 4.5:1 floor — quiet must still be
+     readable. #64748b is 4.8:1: the density gradient survives, the words stop being decoration. */
+  --ink-3: #64748b;
   --paper: #ffffff;
   --paper-2: #f8fafc;
   --line: #e2e8f0;
@@ -51,6 +54,17 @@
   --warn-soft: #fef3c7;
   --bad: #b91c1c;
   --bad-soft: #fee2e2;
+  /* THE BLOCKER URGENCY ACCENT (SHELL-B1, closing SHA-A-F2). Previously an undeclared fallback —
+     `var(--rose, #e11d48)` rendered the hex while the token did not exist. Declared now so the value
+     is governed. OPEN QUESTION for the owner, recorded in the critique snapshot: this hue (~347)
+     sits near principal accent --p3 (#be185d, 336), the adjacency the accent palette was engineered
+     to avoid; an interrupt chip can carry both a BLOCKER rule and a --p3 member name. The word
+     ("blocking") is the first channel either way. */
+  --rose: #e11d48;
+
+  /* The one monospace stack (SHELL-B1). Was three hand-rolled copies plus an undeclared
+     `var(--mono, …)` fallback; a code, a hash and a room code should read in the same voice. */
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* type scale */
   --t-xs: 11px;
@@ -73,6 +87,14 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* THE FOCUS RING (SHELL-B1) — promised by design.md's A11y line ("visible focus rings (indigo)")
+   and previously implemented on exactly two text inputs. :focus-visible, not :focus, so a pointer
+   tap does not paint rings on buttons while keyboard navigation always gets one. */
+:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 1px;
 }
 
 html,
@@ -311,7 +333,9 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--paper);
-  box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
+  /* Tightened from 0 8px 24px (SHELL-B1): a hairline border under a wide soft shadow is a
+     recognisable generated-UI tell, and the popover needs elevation, not glow. */
+  box-shadow: 0 4px 12px rgb(15 23 42 / 10%);
   white-space: normal;
 }
 .mandate-detail-head {
@@ -424,9 +448,10 @@ body {
   color: var(--ink);
 }
 .mandate-hash-full {
-  /* one tap selects the WHOLE hash to copy; small and wrapping so a 71-char id fits a 390px panel */
+  /* one tap selects the WHOLE hash to copy; small and wrapping so a 71-char id fits a 390px panel.
+     --t-xs, not 10px: the one sub-scale size in the app, and it was also the least readable (SHELL-B1). */
   user-select: all;
-  font-size: 10px;
+  font-size: var(--t-xs);
   color: var(--ink-3);
   word-break: break-all;
 }
@@ -832,15 +857,17 @@ body {
 [data-pr-state='working'] .task-state::before {
   background: var(--indigo);
 }
+/* needs-a-human states wear the CONTRACT's amber (--warn), not a second amber: design.md reserves
+   amber for exactly this meaning, and two ambers for one meaning is drift (SHELL-B1, SHA-A-F2). */
 [data-pr-state='input-required'] .task-state::before,
 [data-pr-state='held'] .task-state::before {
-  background: var(--amber, #d97706);
+  background: var(--warn);
 }
 [data-pr-state='done'] .task-state::before {
   background: var(--ink-3);
 }
 .task-action {
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--mono);
   font-size: var(--t-xs);
   background: var(--paper-2);
   border: 1px solid var(--line);
@@ -916,10 +943,10 @@ body {
   padding-left: var(--s-2);
 }
 [data-pr-urgency='BLOCKER'].interrupt-chip {
-  border-left-color: var(--rose, #e11d48);
+  border-left-color: var(--rose);
 }
 [data-pr-urgency='DECISION'].interrupt-chip {
-  border-left-color: var(--amber, #d97706);
+  border-left-color: var(--warn);
 }
 [data-pr-urgency='FYI'].interrupt-chip {
   border-left-color: var(--ink-3);
@@ -1049,7 +1076,7 @@ body {
 }
 .join-code {
   /* A code is read character by character, so it is set in a face where 8 and B differ. */
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1069,11 +1096,15 @@ body {
   background: var(--ink-3);
   cursor: default;
 }
+/* A refusal renders as THE refusal (SHELL-B1): the same full-border, tinted shape as the room's
+   refusal banner, not a side stripe of its own invention. One rendering for one meaning — and the
+   old fallback (#dc2626) was quietly a different red from --bad. */
 .join-error {
   margin: var(--s-3) 0 0;
   padding: var(--s-2) var(--s-3);
-  border-left: 3px solid var(--bad, #dc2626);
-  background: var(--paper-2);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius);
+  background: var(--bad-soft);
   color: var(--ink);
   line-height: 1.45;
 }
@@ -1233,7 +1264,7 @@ body {
   color: var(--ink-2);
 }
 .welcome-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   background: var(--paper);
   border: 1px solid var(--indigo-line);
   border-radius: 4px;
@@ -1314,9 +1345,11 @@ body {
   flex-direction: column;
   gap: var(--s-3);
 }
+/* The status stripe is GONE (SHELL-B1): the row already carries its status as a word plus dimming,
+   and an accent stripe on a bordered card was decoration restating them — the one side-rule pattern
+   in the app with no ruling behind it. */
 .loop-row {
   border: 1px solid var(--line);
-  border-left: 3px solid var(--ink-3);
   border-radius: var(--radius);
   padding: var(--s-3);
   display: flex;
@@ -1327,7 +1360,6 @@ body {
 .loop-row[data-pr-status='REVOKED'],
 .loop-row[data-pr-status='EXPIRED'],
 .loop-row[data-pr-status='LIMIT_REACHED'] {
-  border-left-color: var(--line);
   color: var(--ink-3);
 }
 .loop-row-head {

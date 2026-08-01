@@ -54,7 +54,7 @@ export default async function DecisionCardFixture() {
         one only from a <code>decision</code> event in its log, and nothing emits those yet (S2.1
         decides, S2.2 signs). Never film this page.
       </p>
-      <div style={{ marginTop: 24 }}>
+      <div style={{ marginTop: 'var(--s-5)' }}>
         <DecisionCard
           event={FIXTURE}
           resolution={null}
