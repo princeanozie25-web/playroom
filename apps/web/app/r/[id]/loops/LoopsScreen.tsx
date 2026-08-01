@@ -6,7 +6,7 @@ import Link from 'next/link';
 import type { OrderView } from '../../../orders';
 import type { RosterMember } from '../../../roster';
 import { MemberName } from '../../../MemberChip';
-import { Panel } from '../../../Panel';
+import { Panel, PanelPresence } from '../../../Panel';
 import { HOOK, pr } from '../../../hooks';
 
 // THE LOOPS SCREEN (S-UI3) — standing orders as a form, not a bash script.
@@ -208,9 +208,12 @@ export function LoopsScreen({
                   </div>
                 )}
 
-                {editing === o.id && mine && !terminal && (
+                {/* PanelPresence (SHELL-B3): the edit form is the loops screen's one unmounting
+                    Panel — its enter/exit play here, and the row's own layout animation eases the
+                    height the form takes and vacates. */}
+                <PanelPresence show={editing === o.id && mine && !terminal}>
                   <EditForm roomId={roomId} order={o} busy={busy} onSave={mutate} />
-                )}
+                </PanelPresence>
               </Panel>
             );
           })}

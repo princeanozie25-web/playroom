@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import type { RosterMember } from './roster';
 import { Panel } from './Panel';
 import { HOOK, pr } from './hooks';
@@ -32,7 +31,6 @@ export function Welcome({
   viewer: string | null;
   onDismiss: () => void;
 }) {
-  const [closing, setClosing] = useState(false);
   const agents = roster.filter((m) => m.kind === 'agent');
   const me = roster.find((m) => m.id === viewer);
   // THE VIEWER'S OWN AGENT: the one bound to the same principal they are. Named first, because
@@ -40,12 +38,10 @@ export function Welcome({
   const mine = me ? agents.find((a) => a.principal === me.principal) : undefined;
   const tagTarget = mine ?? agents[0];
 
-  function dismiss(): void {
-    setClosing(true);
-    onDismiss();
-  }
-
-  if (closing) return null;
+  // Dismissal is the PARENT's (Room flips `showWelcome` and this unmounts through PanelPresence,
+  // which is what lets the exit play — SHELL-B3). The old internal `closing` state returned null in
+  // the same tick, which would have removed the content before any exit could run; with presence at
+  // the conditional site it was dead code wearing a job.
 
   return (
     <Panel className="welcome" hook={HOOK.welcome} role="dialog" aria-label="Welcome">
@@ -80,7 +76,7 @@ export function Welcome({
         className="welcome-dismiss"
         {...pr(HOOK.welcomeDismiss)}
         type="button"
-        onClick={dismiss}
+        onClick={onDismiss}
       >
         Got it
       </button>

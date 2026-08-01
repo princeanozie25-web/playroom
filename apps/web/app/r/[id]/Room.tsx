@@ -31,6 +31,7 @@ import {
 import { InterruptChip, type InterruptItemView } from '../../InterruptChip';
 import { PromotionRow, type PromotionItemView } from '../../PromotionRow';
 import { Welcome } from '../../Welcome';
+import { PanelPresence } from '../../Panel';
 import { HOOK, pr } from '../../hooks';
 import type { Principal, RosterMember } from '../../roster';
 
@@ -721,7 +722,11 @@ export function Room({
             (header / transcript / composer) and a fourth child takes `1fr` off the transcript and
             pushes the composer into an implicit row — the layout collapses rather than shifting,
             which is a good deal worse than the panel being in the wrong place. */}
-        {showWelcome && (
+        {/* PanelPresence (SHELL-B3) lets the panel's exit play when the flag flips — the one site
+            where a Panel leaves the DOM in the room. It owns the conditional, so the exit is
+            structural; the wrapper comes from Panel, so this file imports nothing from
+            framer-motion. */}
+        <PanelPresence show={showWelcome}>
           <Welcome
             roster={roster}
             viewer={viewer}
@@ -732,7 +737,7 @@ export function Room({
               window.history.replaceState(null, '', `/r/${roomId}`);
             }}
           />
-        )}
+        </PanelPresence>
       </header>
 
       {refusal && (
