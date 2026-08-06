@@ -1,9 +1,15 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { Writable } from 'node:stream';
-import { ERROR_SIGNER_NOT_HUMAN, type AgentAdapter, type AgentTurnChunk } from '@playroom/shared';
+import {
+  ERROR_SIGNER_NOT_HUMAN,
+  ERROR_SUBJECT_NOT_JUSTIFIED,
+  type AgentAdapter,
+  type AgentTurnChunk,
+} from '@playroom/shared';
 import { Client, httpCreateRoom, startTestServer, testPool, uniqueRoomId } from './support.js';
 import { MAX_ACTIONS_PER_TURN } from '../src/agent.js';
 import { RoomBus } from '../src/bus.js';
+import { createRoom } from '../src/events.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 
 /**
@@ -360,6 +366,185 @@ describe("S2.1a Phase 2 — the three verdicts, against claude-main's real manda
       // is the MANDATE's, not "the model wasn't handed the tool". Were the channel gated on tool exposure,
       // there would be NO decision event at all; the event's existence, with OUT_OF_SCOPE, is the proof.
       expect(d.subject).toBe('claude-main');
+    } finally {
+      c.close();
+      await server.close();
+    }
+  });
+});
+
+async function completedOk(roomId: string, adapterId: string): Promise<boolean> {
+  const { rows } = await pool.query<{ n: string }>(
+    `SELECT count(*) AS n FROM events
+      WHERE room_id = $1 AND event_type = 'agent.turn.completed' AND adapter_id = $2
+        AND (payload ->> 'success') = 'true'`,
+    [roomId, adapterId],
+  );
+  return Number(rows[0].n) > 0;
+}
+
+describe('S2.1a Phase 3 — adversarial: model output is untrusted input', () => {
+  it('an action the fabric has never seen → BLOCK with a reason code, and no throw', async () => {
+    const server = await startTestServer({
+      adapterFactory: (id) =>
+        id === 'claude-main'
+          ? actingAdapter(id, [
+              { action: 'filesystem.delete', arguments: { resource: 'path:/etc/shadow' } },
+            ])
+          : plainAdapter(id),
+    });
+    const roomId = room('s21a-unknown');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
+    try {
+      await c.open();
+      c.send('@claude do the thing', 'adv-unknown');
+      const rows = await until(
+        () => decisionRows(roomId),
+        (r) => r.length >= 1,
+      );
+      // A never-seen action is simply not in scope → BLOCK/OUT_OF_SCOPE. evaluate() is pure and does not
+      // throw on an unknown type; the DECISION EVENT existing (not a crash) is the proof it was ruled on.
+      expect(rows).toHaveLength(1);
+      expect(rows[0].decision).toBe('BLOCK');
+      expect(rows[0].reason_code).toBe('OUT_OF_SCOPE');
+      // And the turn itself completed normally — no throw took it down.
+      expect(await completedOk(roomId, 'claude-main')).toBe(true);
+    } finally {
+      c.close();
+      await server.close();
+    }
+  });
+
+  it('the model cannot choose the subject — a `subject` in arguments is ignored; the emitter is the subject', async () => {
+    // The emission tries to name `sol` as the subject; the channel pins the subject to the EMITTING
+    // member, so the decision is claude-main's. Escalation by naming another member is not even
+    // expressible through this channel — only `resource` is read from the arguments.
+    const server = await startTestServer({
+      adapterFactory: (id) =>
+        id === 'claude-main'
+          ? actingAdapter(id, [
+              {
+                action: 'pr.merge',
+                arguments: { resource: 'repo:playroom/playroom#pr-7', subject: 'sol' },
+              },
+            ])
+          : plainAdapter(id),
+    });
+    const roomId = room('s21a-subjpin');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
+    try {
+      await c.open();
+      c.send('@claude merge as sol', 'adv-subj');
+      const rows = await until(
+        () => decisionRows(roomId),
+        (r) => r.length >= 1,
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].subject).toBe('claude-main'); // NOT 'sol'
+      expect(rows[0].required_signer).toBe('principal:prince');
+    } finally {
+      c.close();
+      await server.close();
+    }
+  });
+
+  it('a request naming a DIFFERENT member as subject is refused for want of standing, with NO decision event', async () => {
+    // At the request layer — the guard the channel relies on. claude-main naming sol as subject has no
+    // record entitling it, so subjectBasis returns null → ERROR_SUBJECT_NOT_JUSTIFIED, refused BEFORE the
+    // evaluator: NO decision event. That is the distinguishable second shape — a mandate BLOCK writes a
+    // decision event and this does not, exactly the refused-vs-misconfigured distinction the rules ask for.
+    const roomId = room('s21a-wrongsubj');
+    await createRoom(pool, roomId, roomId, 'prince');
+    const bus = new RoomBus();
+    const deps: CommandDeps = {
+      pool,
+      bus,
+      log: { info() {}, warn() {}, error() {} },
+      adapterFactory: (id) => plainAdapter(id),
+      execute: (cx, cmd) => executeCommand(cx, cmd, deps),
+    };
+    const result = await executeCommand(
+      { actorId: 'claude-main', mode: 'hosted' },
+      {
+        kind: 'requestAction',
+        roomId,
+        clientMsgId: 'wrong-subj',
+        subject: 'sol',
+        action: 'pr.review',
+        resource: 'repo:playroom/playroom#pr-1',
+      },
+      deps,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal.code).toBe(ERROR_SUBJECT_NOT_JUSTIFIED);
+    // NO decision event — the fabric evaluated nothing, because the ATTRIBUTION was refused.
+    expect(await decisionRows(roomId)).toHaveLength(0);
+  });
+
+  it('malformed or hostile arguments are refused at the schema, before evaluate — a valid emission still gets through', async () => {
+    const emissions = [
+      { action: 'pr.review', arguments: {} }, // missing resource
+      { action: 'pr.review', arguments: { resource: 42 } as unknown as Record<string, unknown> }, // wrong type
+      { action: 'pr.review', arguments: { resource: 'x'.repeat(600) } }, // over-long
+      { action: 'pr.review', arguments: [] as unknown as Record<string, unknown> }, // not an object
+      { action: 'secrets.read', arguments: { resource: 'vault:real', injected: 'evil' } }, // VALID (+ extra key)
+    ];
+    const server = await startTestServer({
+      adapterFactory: (id) =>
+        id === 'claude-main' ? actingAdapter(id, emissions) : plainAdapter(id),
+    });
+    const roomId = room('s21a-malformed');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
+    try {
+      await c.open();
+      c.send('@claude try things', 'adv-malformed');
+      const rows = await until(
+        () => decisionRows(roomId),
+        (r) => r.length >= 1,
+      );
+      await new Promise((r) => setTimeout(r, 500));
+      // EXACTLY ONE decision — from the single VALID emission. The four malformed ones never reached
+      // evaluate(), so they wrote no decision event; they were refused out loud instead.
+      expect(await decisionRows(roomId)).toHaveLength(1);
+      expect(rows[0].action).toBe('secrets.read');
+      // EXTRA KEYS ARE IGNORED, NEVER FORWARDED: only `resource` reached the fabric — `injected` did not
+      // survive as opaque data, so the decision's resource is exactly what the schema extracted.
+      expect(rows[0].resource).toBe('vault:real');
+      expect(await systemSays(roomId, 'malformed action')).toBe(true);
+    } finally {
+      c.close();
+      await server.close();
+    }
+  });
+
+  it('an emission burst is capped and the cap names the count it refused past', async () => {
+    const burst = MAX_ACTIONS_PER_TURN + 5;
+    const emissions = Array.from({ length: burst }, (_v, i) => ({
+      action: 'secrets.read',
+      arguments: { resource: `vault:k-${i}` },
+      call_id: `b${i}`,
+    }));
+    const server = await startTestServer({
+      adapterFactory: (id) =>
+        id === 'claude-main' ? actingAdapter(id, emissions) : plainAdapter(id),
+    });
+    const roomId = room('s21a-burst');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
+    try {
+      await c.open();
+      c.send('@claude flood', 'adv-burst');
+      await until(
+        () => decisionRows(roomId),
+        (r) => r.length >= MAX_ACTIONS_PER_TURN,
+      );
+      await new Promise((r) => setTimeout(r, 500));
+      expect(await decisionRows(roomId)).toHaveLength(MAX_ACTIONS_PER_TURN);
+      // The cap names the REAL count it refused past — not a silent truncation.
+      expect(await systemSays(roomId, `emitted ${burst} actions`)).toBe(true);
     } finally {
       c.close();
       await server.close();
