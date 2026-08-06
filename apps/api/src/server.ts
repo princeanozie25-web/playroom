@@ -5,6 +5,7 @@ import Fastify, {
   type FastifyServerOptions,
 } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
+import { randomUUID } from 'node:crypto';
 import {
   PLAYROOM_VERSION,
   ClientFrame,
@@ -31,6 +32,8 @@ import type { Pool } from 'pg';
 import { makePool } from './db.js';
 import { RoomBus } from './bus.js';
 import {
+  decisionEventById,
+  decisionResolutionEvent,
   eventsAfter,
   eventsBefore,
   getRoom,
@@ -43,7 +46,7 @@ import {
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { warmUp } from './warmup.js';
 import { makeScrubStream } from './scrub.js';
-import { authenticate, type AuthFailure } from './credentials.js';
+import { authenticate, diagnoseCredential, type AuthFailure } from './credentials.js';
 import { downgradeInterrupt } from './interrupts.js';
 import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
 import { RedeemRefused, redeemRoomCode } from './room-codes.js';
@@ -79,6 +82,13 @@ export interface BuildOptions {
    */
   redeemRateMax?: number;
   redeemRateWindowMs?: number;
+  /**
+   * S2.1b: the credential-keyed throttle on POST /rooms/:id/actions — governed requests per credential
+   * per window. Configurable so a test can drive it low and burst one caller to a 429. The default lets
+   * a real service (Drift, Claude Code) make governed requests freely while bounding a runaway loop.
+   */
+  actionRateMax?: number;
+  actionRateWindowMs?: number;
 }
 
 const WS_OPEN = 1; // ws.WebSocket.OPEN
@@ -302,6 +312,27 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       for (const [k, v] of redeemHits) if (v[v.length - 1] <= cutoff) redeemHits.delete(k);
     }
     return hits.length > redeemMax;
+  }
+
+  // ── S2.1b: THE /rooms/:id/actions THROTTLE ────────────────────────────────────────────────────
+  //
+  // The door is authenticated, so this is keyed on the CREDENTIAL, not the IP: it bounds ONE caller's
+  // governed-request rate — the denial-of-wallet vector with a stolen or runaway credential holding the
+  // pen — regardless of how many addresses it comes from. Same in-memory sliding window as /redeem
+  // (per-instance; a second machine only makes the effective limit stricter, never looser).
+  const actionMax = opts.actionRateMax ?? 60;
+  const actionWindowMs = opts.actionRateWindowMs ?? 60_000;
+  const actionHits = new Map<string, number[]>();
+  function actionThrottled(credentialId: string): boolean {
+    const now = Date.now();
+    const cutoff = now - actionWindowMs;
+    const hits = (actionHits.get(credentialId) ?? []).filter((t) => t > cutoff);
+    hits.push(now);
+    actionHits.set(credentialId, hits);
+    if (actionHits.size > 20_000) {
+      for (const [k, v] of actionHits) if (v[v.length - 1] <= cutoff) actionHits.delete(k);
+    }
+    return hits.length > actionMax;
   }
 
   app.register(fastifyWebsocket);
@@ -547,6 +578,139 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         return { type: 'error', code: result.refusal.code, message: result.refusal.message };
       }
       return { order_id: result.orderId };
+    });
+
+    // ── S2.1b: THE AUTHENTICATED DOOR ─────────────────────────────────────────────────────────────
+    //
+    // POST /rooms/:id/actions { action, resource, client_msg_id? } → a governed request from a process
+    // OUTSIDE the api (Claude Code from a laptop, Drift as a service). It authenticates a MEMBER and
+    // carries no authority of its own: the credential resolves to a member, the member to a principal and
+    // a mandate, and the request is ruled on against THAT mandate. Identity is DERIVED, never claimed —
+    // `subject` is the credential's member and nothing in the body can change it. Nothing executes under
+    // any verdict; the caller receives the verdict and, for a CO_SIGN, a decision id to poll. This is the
+    // only inbound path from outside the api: every refusal is fail-closed, and an AUTH failure (401/429)
+    // is kept distinct from a MANDATE refusal (a 200 carrying a BLOCK verdict).
+    fastify.post('/rooms/:id/actions', async (req, reply) => {
+      const roomId = (req.params as { id: string }).id;
+      const token = bearerToken(req);
+      const auth = await authenticate(db(), token);
+      if (!auth.ok) {
+        // The WIRE collapses expired/unknown/revoked into one code (credentials.ts ruling); the OPERATOR
+        // distinction lives here in the log, never in the response. Diagnosed only for a present token.
+        const detail =
+          auth.failure === 'credential_required'
+            ? 'missing'
+            : await diagnoseCredential(db(), token ?? '');
+        app.log.warn({ room_id: roomId, reason: detail }, 'action door: credential refused');
+        reply.code(401).send(credentialRefusal(auth.failure, roomId));
+        return;
+      }
+      // CREDENTIAL-KEYED THROTTLE, after auth. A throttled caller learns nothing new — same shape as any
+      // other request, just a 429.
+      if (actionThrottled(auth.auth.credential_id)) {
+        app.log.warn(
+          { room_id: roomId, credential: auth.auth.credential_id },
+          'action door throttled',
+        );
+        reply.code(429);
+        return {
+          type: 'error',
+          code: 'action_throttled',
+          message: 'too many requests — slow down',
+        };
+      }
+      // THE BODY SAYS WHAT IT WANTS, NEVER WHO IT IS. Only `action` and `resource` are read; a `subject`
+      // or `member` in the body is ignored, because the subject is the credential's member. Bounded and
+      // type-checked before the evaluator — a malformed or hostile body is a 400, never a throw.
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const action = b.action;
+      const resource = b.resource;
+      if (
+        typeof action !== 'string' ||
+        action.length < 1 ||
+        action.length > 64 ||
+        typeof resource !== 'string' ||
+        resource.length < 1 ||
+        resource.length > 512
+      ) {
+        reply.code(400);
+        return {
+          type: 'error',
+          code: 'action_malformed',
+          message: 'action and resource are required strings (action ≤64, resource ≤512 chars)',
+        };
+      }
+      const clientMsgId =
+        typeof b.client_msg_id === 'string' && b.client_msg_id.length <= 128
+          ? b.client_msg_id
+          : `door-${randomUUID()}`;
+      if (!(await getRoom(db(), roomId))) {
+        reply.code(404).send(roomNotFound(roomId));
+        return;
+      }
+      // IDENTITY DERIVED: subject is the credential's member; mode is `connected` (ADR-004 — this door IS
+      // the connector). requestAction stays the sole decision constructor: it evaluates, records, and
+      // RETURNS the verdict — it never executes.
+      const decided = await executeCommand(
+        { actorId: auth.auth.member_id, principalId: auth.auth.principal_id, mode: 'connected' },
+        {
+          kind: 'requestAction',
+          roomId,
+          clientMsgId,
+          subject: auth.auth.member_id,
+          action,
+          resource,
+        },
+        deps,
+      );
+      if (!decided.ok) {
+        // subject === actor here, so standing is always `self` and this is unreachable in practice; kept
+        // as a fail-closed guard rather than a claim it cannot happen.
+        reply.code(422);
+        return { type: 'error', code: decided.refusal.code, message: decided.refusal.message };
+      }
+      reply.code(200);
+      return {
+        decision: decided.verdict.decision,
+        reason_code: decided.verdict.reason_code,
+        required_signer: decided.verdict.required_signer,
+        effective_mandate_hash: decided.verdict.effective_mandate_hash,
+        decision_id: decided.decisionId,
+      };
+    });
+
+    // GET /rooms/:id/decisions/:decisionId → the fate of a decision, for the caller that raised a CO_SIGN
+    // to POLL. Playroom never calls the caller back (no webhook, no inbound to a laptop); the caller asks.
+    fastify.get('/rooms/:id/decisions/:decisionId', async (req, reply) => {
+      const { id: roomId, decisionId } = req.params as { id: string; decisionId: string };
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        reply.code(401).send(credentialRefusal(auth.failure, roomId));
+        return;
+      }
+      const ev = await decisionEventById(db(), roomId, decisionId);
+      if (!ev || ev.event_type !== 'decision') {
+        reply.code(404);
+        return {
+          type: 'error',
+          code: 'decision_unknown',
+          message: 'no such decision in this room',
+        };
+      }
+      const d = ev.payload;
+      const res = await decisionResolutionEvent(db(), roomId, decisionId);
+      const resolved = res && res.event_type === 'decision.resolved' ? res.payload : null;
+      reply.code(200);
+      return {
+        decision_id: decisionId,
+        decision: d.decision,
+        reason_code: d.reason_code,
+        required_signer: d.required_signer,
+        effective_mandate_hash: d.effective_mandate_hash,
+        status: resolved ? 'resolved' : 'pending',
+        resolution: resolved ? resolved.resolution : null,
+        signed_by: resolved ? resolved.signed_by : null,
+      };
     });
 
     // POST /ws-ticket { room_id } → a single-use ticket for the authenticated member (S1.3c).

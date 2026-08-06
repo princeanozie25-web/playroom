@@ -111,6 +111,32 @@ export async function revokeCredential(pool: Pool, id: string): Promise<void> {
 }
 
 /**
+ * Diagnose WHY a credential was rejected — FOR THE OPERATOR LOG ONLY, never the wire (S2.1b).
+ *
+ * `authenticate` collapses unknown / expired / revoked into one outward `credential_invalid`
+ * deliberately (see AuthFailure): telling a caller "that one expired" confirms the token was real,
+ * which a stranger holding a guessed string has not earned. But an OPERATOR must still be able to tell
+ * them apart — a revoked token is a leak being contained, an expired one is a client that needs a fresh
+ * credential, an unknown one is a wrong deployment or a typo. This is that distinction, and it must
+ * NEVER be returned to a caller. `'unknown'` also covers a malformed token: a bad-shaped string simply
+ * matches no row.
+ */
+export async function diagnoseCredential(
+  pool: Pool,
+  token: string,
+): Promise<'unknown' | 'expired' | 'revoked'> {
+  const { rows } = await pool.query<{ revoked_at: Date | null; expires_at: Date | null }>(
+    'SELECT revoked_at, expires_at FROM member_credentials WHERE token_hash = $1',
+    [hashSecret(token)],
+  );
+  const row = rows[0];
+  if (!row) return 'unknown';
+  if (row.revoked_at) return 'revoked';
+  if (row.expires_at && row.expires_at.getTime() <= Date.now()) return 'expired';
+  return 'unknown';
+}
+
+/**
  * Why a connection was refused. Two codes, because they send an operator to different places.
  *
  * AN EXPIRED CREDENTIAL IS `credential_invalid`, NOT A THIRD CODE — and that is a decision, not an

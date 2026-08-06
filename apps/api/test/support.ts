@@ -101,6 +101,9 @@ export async function startTestServer(
     // SLIVE-N1: a test can drive the /redeem throttle low to reach a 429 without a real deployment.
     redeemRateMax?: number;
     redeemRateWindowMs?: number;
+    // S2.1b: drive the /rooms/:id/actions throttle low so a test can burst one caller to a 429.
+    actionRateMax?: number;
+    actionRateWindowMs?: number;
   } = {},
 ): Promise<TestServer> {
   const app = buildServer({
@@ -110,6 +113,8 @@ export async function startTestServer(
     logLevel: opts.logLevel,
     redeemRateMax: opts.redeemRateMax,
     redeemRateWindowMs: opts.redeemRateWindowMs,
+    actionRateMax: opts.actionRateMax,
+    actionRateWindowMs: opts.actionRateWindowMs,
   });
   await app.listen({ port: 0, host: '127.0.0.1' });
   // Narrow, don't cast: a port-0 TCP listen returns an AddressInfo object, never

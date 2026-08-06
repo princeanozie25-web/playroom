@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { evaluate } from '@playroom/fabric';
+import { evaluate, type Verdict } from '@playroom/fabric';
 import { ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
 // The process-wide mandate cache, shared with the handoff and the turn stamp (S1.3). It used to
 // live here as a module-local `let`, which meant every new reader grew its own.
@@ -37,7 +37,12 @@ import type { CommandContext, CommandDeps } from './context.js';
  * resumes anything.
  */
 export type RequestActionResult =
-  { ok: true } | { ok: false; refusal: { code: string; message: string } };
+  // On success the caller learns the VERDICT and, when a decision event was written (CO_SIGN/BLOCK),
+  // its id — so an out-of-process caller (the S2.1b door) can return the verdict and poll the decision.
+  // ALLOW carries a null decisionId: A4-F1 rules it writes no event. Enriched fields; existing callers
+  // (runAgentTurn, the ws request_action handler) read only `.ok` and are unaffected.
+  | { ok: true; verdict: Verdict; decisionId: string | null }
+  | { ok: false; refusal: { code: string; message: string } };
 
 export async function requestActionCommand(
   deps: CommandDeps,
@@ -124,7 +129,7 @@ export async function requestActionCommand(
   // ALLOW is recorded in the log above and nothing else happens: there is no executor.
   // Deliberately NOT written as a decision event — the room log would fill with
   // approvals for actions that never ran, which reads as work having happened.
-  if (verdict.decision === 'ALLOW') return { ok: true };
+  if (verdict.decision === 'ALLOW') return { ok: true, verdict, decisionId: null };
 
   // THE EVENT'S ACTOR IS THE REQUESTER, NOT THE SUBJECT (the requester CAUSED it; the subject is
   // whose mandate was evaluated, recorded in the payload). Built through the shared constructor
@@ -139,6 +144,10 @@ export async function requestActionCommand(
     resource: input.resource,
     verdict,
   });
+
+  // The decision event's id, so an out-of-process caller (the S2.1b door) can poll this decision later.
+  // A decision event always exists here (the ALLOW branch returned above), so this is never null.
+  const decisionId = event.event_type === 'decision' ? event.payload.decision_id : null;
 
   // ── A CO_SIGN IS AN INTERRUPT (Bible §12.1) ─────────────────────────────────────────
   //
@@ -169,5 +178,5 @@ export async function requestActionCommand(
     });
   }
 
-  return { ok: true };
+  return { ok: true, verdict, decisionId };
 }
