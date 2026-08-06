@@ -32,8 +32,10 @@ decorative.
 **What is STILL bridged, and this is the line that matters: its WORK.** claude-code invokes a coding
 agent whose side effects are real — files written, commands run, commits made — in a scratch workspace,
 OUTSIDE the fabric. The mandate governs its **participation and its requests** (it authenticates as a
-member, reads and speaks, asks before a protected action and waits); it does NOT govern its **workspace
-work**, because that work does not travel the command layer. Nothing stops it running `pr.merge` in its
+member, reads and speaks, asks before a protected action and waits, and — since SCC-3 — raises a bare
+hand when it needs a human but has nothing to ask for, priced by the same `interrupts_per_day` budget as
+any other claim on a person's attention); it does NOT govern its **workspace work**, because that work
+does not travel the command layer. Nothing stops it running `pr.merge` in its
 own shell and narrating it afterwards — the fabric refuses that only when it is ASKED through the door.
 That residual is RT-005 (`docs/security/red-team-log.md`), and SCC-2 does not close it. The one sentence
 every surface rendering this member must honour, per ADR-004: **participation and requests governed;
