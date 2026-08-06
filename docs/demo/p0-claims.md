@@ -148,6 +148,26 @@ bridged). **The channel governs the ASKING; it does not contain the DOING.** A p
 (`MAX_ACTIONS_PER_TURN`) bounds how many asks one turn may make, so the channel itself is not a
 denial-of-wallet vector — but a cap on asks is not a cap on an agent's out-of-band effects either.
 
+**S2.1b — the door: the refusal now reaches OUTSIDE the api.** S2.1a's channel was in-process. S2.1b
+opens `POST /rooms/:id/actions`, the first inbound path from outside the api, and it changes what can be
+CLAIMED: a process the server has never met — Claude Code from a laptop, Drift as a service — can present
+a member credential and be refused by a mandate IT DOES NOT CONTROL, by reason code and mandate hash, at a
+200 that carries a BLOCK verdict rather than a 401. Identity is DERIVED from the credential, never read
+from the body; a request naming another member is stamped to the credential's member regardless. A CO_SIGN
+comes back with an id the caller POLLS — Playroom never calls the caller, so a laptop member is safe by
+construction. Revocation and expiry both refuse immediately, and an auth failure never wears the shape of
+a mandate refusal.
+
+**The limits, stated as precisely as the upgrade.** (1) NOTHING EXECUTES — every verdict, including an
+approved co-sign, ends at a record; there is still no executor (S2.6), so the door cannot cause a side
+effect any more than the channel could. (2) It does NOT contain an agent's OWN side-effect powers: a
+credential proves WHO ASKED, and a caller whose real work happens outside the fabric — a coding CLI in a
+workspace — is exactly as ungoverned in that work as before. RT-005's residual and Claude Code's situation
+are untouched. (3) The door proves the ASKER's identity to a member, NOT that the asker is TRUSTWORTHY: a
+stolen credential asks with exactly the mandate's authority and not one action more, which is why a leak
+here is survivable — but the door makes no claim beyond authentication. Replay is not yet deduplicated
+(S21B-N1): two byte-identical requests produce two decisions until S2.1's nonce lands.
+
 **2. The mandate is unsigned.** There is no `sig` field, by design in v0 — omit, never stub.
 A fake `ed25519:` string would have been worse than an absent one. The hash on screen proves
 _which document was evaluated_, not that anyone authorised it. S2.1.
