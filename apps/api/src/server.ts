@@ -48,6 +48,7 @@ import { warmUp } from './warmup.js';
 import { makeScrubStream } from './scrub.js';
 import { authenticate, diagnoseCredential, type AuthFailure } from './credentials.js';
 import { downgradeInterrupt } from './interrupts.js';
+import { DECISION_POLL_HINT_MS, decisionExpiryMs, isExpired } from './decisions.js';
 import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
 import { RedeemRefused, redeemRoomCode } from './room-codes.js';
 import { listMembers, listRoomMembers, memberRecord, roomAccess } from './members.js';
@@ -676,6 +677,10 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         required_signer: decided.verdict.required_signer,
         effective_mandate_hash: decided.verdict.effective_mandate_hash,
         decision_id: decided.decisionId,
+        // WAIT WELL (SCC-3): a CO_SIGN hands back an honest interval to wait before the FIRST poll. A
+        // fresh decision is never expired, so the hint applies whenever there is a decision to poll;
+        // ALLOW/BLOCK carry no decision and so no hint. A number, never a callback.
+        poll_after_ms: decided.decisionId ? DECISION_POLL_HINT_MS : null,
       };
     });
 
@@ -700,6 +705,11 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       const d = ev.payload;
       const res = await decisionResolutionEvent(db(), roomId, decisionId);
       const resolved = res && res.event_type === 'decision.resolved' ? res.payload : null;
+      // THE BACKOFF HINT (SCC-3, closes SCC2-N2): a number the caller may honour before its next poll —
+      // never a connection this server opens. It is offered ONLY while the decision can still resolve:
+      // a resolved one is done, and an unresolved-but-EXPIRED one will never resolve, so suggesting a
+      // retry for either would be the spin this closes. `ev.ts` is the decision's opened-at.
+      const stillOpen = !resolved && !isExpired(ev.ts, new Date(), decisionExpiryMs());
       reply.code(200);
       return {
         decision_id: decisionId,
@@ -710,6 +720,7 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         status: resolved ? 'resolved' : 'pending',
         resolution: resolved ? resolved.resolution : null,
         signed_by: resolved ? resolved.signed_by : null,
+        poll_after_ms: stillOpen ? DECISION_POLL_HINT_MS : null,
       };
     });
 

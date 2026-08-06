@@ -53,3 +53,25 @@ export function decisionStatus(
 export function isExpired(openedAtIso: string, now: Date, expiryMs: number): boolean {
   return now.getTime() - new Date(openedAtIso).getTime() > expiryMs;
 }
+
+/**
+ * SUGGESTED NEXT-POLL INTERVAL for a PENDING decision, in ms (SCC-3, SCC3-2 — closes SCC2-N2).
+ *
+ * A caller that raised a CO_SIGN learns its fate by POLLING (Playroom never calls a laptop back — no
+ * webhook, no push, no socket held open to a caller; that property is what makes a connected member
+ * safe, and a backoff hint does not trade it away). This is a NUMBER the caller may honour, carried in
+ * the poll and the CO_SIGN response body — not a promise, not a contract, and never a connection this
+ * server opens.
+ *
+ * ── WHY 15 SECONDS, AND NOT TWO ──
+ *
+ * The thing being waited on is a PERSON's signature. A two-second retry would read as machine time —
+ * "this is nearly done, keep hammering" — and it is not: it is a human deciding, and the interval must
+ * say so. Fifteen seconds is that honesty made a number. It is not minutes either, because the
+ * interrupt reaches the signer in real time and the signature can land at any moment, so a blocked
+ * caller should resume within a quarter-minute of it rather than sleep through it. The rate that falls
+ * out — four polls a minute at most — sits far under the 60/min action throttle, and each poll is one
+ * indexed read. A constant, deliberately: the honest interval does not change with how long the person
+ * has already taken, and a decaying backoff would just make a caller that waited longest wait longer.
+ */
+export const DECISION_POLL_HINT_MS = 15_000;

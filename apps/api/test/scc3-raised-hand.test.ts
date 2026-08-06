@@ -1,5 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { Writable } from 'node:stream';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import {
   startTestServer,
   testPool,
@@ -8,6 +12,9 @@ import {
   type TestServer,
 } from './support.js';
 import { issueCredential } from '../src/credentials.js';
+import { executeCommand, type CommandDeps } from '../src/commands/index.js';
+import { RoomBus } from '../src/bus.js';
+import { DECISION_POLL_HINT_MS } from '../src/decisions.js';
 
 /**
  * ═══ SCC-3 — THE RAISED HAND AND THE WAIT ═══
@@ -266,5 +273,162 @@ describe('SCC-3 Phase 1 — the raised hand: a standalone interrupt that is not 
     } finally {
       await server.close();
     }
+  });
+});
+
+interface DecisionBody {
+  decision?: string;
+  decision_id?: string | null;
+  status?: string;
+  resolution?: string | null;
+  signed_by?: string | null;
+  poll_after_ms?: number | null;
+}
+async function postAction(
+  server: TestServer,
+  roomId: string,
+  token: string,
+  body: unknown,
+): Promise<DecisionBody> {
+  const res = await fetch(`${server.httpBase}/rooms/${roomId}/actions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  return (await res.json()) as DecisionBody;
+}
+async function getDecision(
+  server: TestServer,
+  roomId: string,
+  token: string,
+  decisionId: string,
+): Promise<DecisionBody> {
+  const res = await fetch(`${server.httpBase}/rooms/${roomId}/decisions/${decisionId}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  return (await res.json()) as DecisionBody;
+}
+// A CommandDeps for driving Prince's signature directly — an agent has no resolve endpoint and may never
+// sign, so a signature is dispatched at the command (the same shape SCC-2 used). The stub adapter is
+// never called: a pr.merge approval has no executor (S2.6).
+function makeDeps(): CommandDeps {
+  const stub: AgentAdapter = { id: 'stub', async *stream(): AsyncGenerator<AgentTurnChunk> {} };
+  const deps: CommandDeps = {
+    pool,
+    bus: new RoomBus(),
+    log: { info() {}, warn() {}, error() {} },
+    adapterFactory: () => stub,
+    execute: (cx, cmd) => executeCommand(cx, cmd, deps),
+  };
+  return deps;
+}
+
+describe('SCC-3 Phase 2 — waiting well: an honest backoff hint, never a callback', () => {
+  it('a CO_SIGN hands back a poll hint; an ALLOW carries none — a number to wait, not a connection', async () => {
+    const server = await startTestServer();
+    const roomId = room('scc3-hint');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-code');
+    try {
+      await resetInterruptBudget('claude-code');
+      // A protected ask → CO_SIGN → the response carries the interval to wait before the first poll.
+      const cosign = await postAction(server, roomId, token, {
+        action: 'pr.merge',
+        resource: 'repo:x#1',
+      });
+      expect(cosign.decision).toBe('CO_SIGN');
+      expect(cosign.poll_after_ms).toBe(DECISION_POLL_HINT_MS);
+      expect(cosign.poll_after_ms).toBeGreaterThan(2000); // honest human time, not a 2s machine retry
+      // An in-scope ALLOW has no decision to poll, so it offers no hint.
+      const allow = await postAction(server, roomId, token, {
+        action: 'pr.review',
+        resource: 'repo:x#1',
+      });
+      expect(allow.decision).toBe('ALLOW');
+      expect(allow.poll_after_ms).toBeNull();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a PENDING decision poll carries the hint; a RESOLVED one carries none and names the signer', async () => {
+    const server = await startTestServer();
+    const roomId = room('scc3-poll');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-code');
+    try {
+      await resetInterruptBudget('claude-code');
+      const cosign = await postAction(server, roomId, token, {
+        action: 'pr.merge',
+        resource: 'repo:playroom#pr-9',
+      });
+      const decId = cosign.decision_id as string;
+      expect(decId).toBeTruthy();
+
+      // WHILE PENDING: the poll offers the honest interval — the caller may honour it.
+      const pending = await getDecision(server, roomId, token, decId);
+      expect(pending.status).toBe('pending');
+      expect(pending.poll_after_ms).toBe(DECISION_POLL_HINT_MS);
+
+      // Prince signs (the human in the loop).
+      const signed = await executeCommand(
+        { actorId: 'prince', mode: 'human' },
+        {
+          kind: 'signDecision',
+          roomId,
+          clientMsgId: 'scc3-sign',
+          decisionId: decId,
+          resolution: 'APPROVED',
+        },
+        makeDeps(),
+      );
+      expect(signed.ok).toBe(true);
+
+      // ONCE RESOLVED: reads resolved with the signer named (unchanged from SCC-2), and offers NO further
+      // poll — continuing would be the spin this closes.
+      const done = await getDecision(server, roomId, token, decId);
+      expect(done.status).toBe('resolved');
+      expect(done.resolution).toBe('APPROVED');
+      expect(done.signed_by).toBe('prince');
+      expect(done.poll_after_ms).toBeNull();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('no code path in the api opens an outbound connection to a caller — grep-proven, with a denominator', () => {
+    // THE PROPERTY THAT MAKES A LAPTOP MEMBER SAFE: Playroom never initiates a connection to a caller. A
+    // backoff hint is a number in a body, not a webhook, not a push, not a long-poll holding a socket
+    // open. Asserted by mechanism: no source file under apps/api/src uses a client-dial primitive. The
+    // pg Pool dials Postgres (not a caller) and @fastify/websocket is a SERVER; neither is here.
+    const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, entry.name);
+        if (entry.isDirectory()) walk(p);
+        else if (entry.name.endsWith('.ts')) files.push(p);
+      }
+    };
+    walk(srcDir);
+    const OUTBOUND = [
+      /\bfetch\s*\(/,
+      /new\s+WebSocket\b/,
+      /\bhttps?\.request\s*\(/,
+      /\bnet\.(?:connect|createConnection)\s*\(/,
+      /\bcreateConnection\s*\(/,
+      /\bundici\b/,
+      /\baxios\b/,
+      /\bgot\s*\(/,
+      /\bdgram\b/,
+    ];
+    const hits: string[] = [];
+    for (const f of files) {
+      const text = readFileSync(f, 'utf8');
+      for (const rx of OUTBOUND) if (rx.test(text)) hits.push(`${f} :: ${rx}`);
+    }
+    // DENOMINATOR STATED: every source file × every dial primitive, zero hits.
+    expect(files.length).toBeGreaterThan(30);
+    expect(hits).toEqual([]);
   });
 });
