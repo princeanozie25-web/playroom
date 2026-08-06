@@ -15,6 +15,7 @@ import { issueCredential } from '../src/credentials.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 import { RoomBus } from '../src/bus.js';
 import { DECISION_POLL_HINT_MS } from '../src/decisions.js';
+import { budgetFor, downgradeInterrupt } from '../src/interrupts.js';
 
 /**
  * ═══ SCC-3 — THE RAISED HAND AND THE WAIT ═══
@@ -430,5 +431,229 @@ describe('SCC-3 Phase 2 — waiting well: an honest backoff hint, never a callba
     // DENOMINATOR STATED: every source file × every dial primitive, zero hits.
     expect(files.length).toBeGreaterThan(30);
     expect(hits).toEqual([]);
+  });
+});
+
+/** Every interrupt.raised in a room, from ALL raisers — for asserting who could and could not appear. */
+async function allRaisedInRoom(
+  roomId: string,
+): Promise<
+  Array<{ raised_by: string; addressed_to: string; about_kind: string; urgency: string }>
+> {
+  const { rows } = await pool.query<{
+    raised_by: string;
+    addressed_to: string;
+    about_kind: string;
+    urgency: string;
+  }>(
+    `SELECT payload ->> 'raised_by' AS raised_by,
+            payload ->> 'addressed_to' AS addressed_to,
+            payload ->> 'about_kind' AS about_kind,
+            payload ->> 'urgency' AS urgency
+       FROM events
+      WHERE room_id = $1 AND event_type = 'interrupt.raised'
+      ORDER BY seq`,
+    [roomId],
+  );
+  return rows;
+}
+/** Every decision_id minted in a room — the co-sign fact a raised hand must never produce. */
+async function decisionIds(roomId: string): Promise<string[]> {
+  const { rows } = await pool.query<{ decision_id: string }>(
+    "SELECT payload ->> 'decision_id' AS decision_id FROM events WHERE room_id = $1 AND event_type = 'decision' ORDER BY seq",
+    [roomId],
+  );
+  return rows.map((r) => r.decision_id);
+}
+
+describe('SCC-3 Phase 3 — adversarial: the hand cannot become a decision, a demand, or a refund', () => {
+  it('spam holds: the budget binds, refusals are legible, and NOT ONE decision event is created', async () => {
+    const server = await startTestServer();
+    const roomId = room('scc3-spam');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-code');
+    try {
+      await resetInterruptBudget('claude-code');
+      // Twenty hands as fast as they will go. Six land; fourteen are refused by budget. Nothing here
+      // touches the decision table — a raised hand is never a co-sign, no matter how many are thrown.
+      let ok = 0;
+      let refused = 0;
+      for (let i = 0; i < 20; i++) {
+        const r = await postHand(server, roomId, token, {
+          urgency: 'blocker',
+          reason: `spam ${i}`,
+          client_msg_id: `spam-${i}`,
+        });
+        if (r.status === 201) ok++;
+        else if (r.status === 429) {
+          refused++;
+          expect((await handBody(r)).code).toBe('interrupt_budget_exhausted');
+        }
+      }
+      // Denominator: 6 landed + 14 refused = 20 asked. The budget held; the refusals named themselves.
+      expect(ok).toBe(6);
+      expect(refused).toBe(14);
+      expect(await raisedEvents(roomId, 'claude-code')).toHaveLength(6);
+      expect(await decisionEventCount(roomId)).toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a hand cannot be raised AS or AT another member — cross-member is not expressible at the door', async () => {
+    const server = await startTestServer();
+    const roomId = room('scc3-cross');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-code');
+    try {
+      await resetInterruptBudget('claude-code');
+      // The body TRIES to raise as prince, at claude-main, about sol, for ada. Every one of those fields
+      // is ignored: the door reads only urgency and reason. raised_by is the credential's member and
+      // addressed_to is that member's principal's humans — DERIVED, never claimed.
+      const res = await postHand(server, roomId, token, {
+        urgency: 'blocker',
+        reason: 'try to point this elsewhere',
+        raised_by: 'prince',
+        addressed_to: 'claude-main',
+        subject: 'sol',
+        member: 'ada',
+        for: 'bo',
+      });
+      expect(res.status).toBe(201);
+      const all = await allRaisedInRoom(roomId);
+      expect(all).toHaveLength(1);
+      expect(all[0].raised_by).toBe('claude-code'); // NOT prince
+      expect(all[0].addressed_to).toBe('prince'); // NOT claude-main — the raiser's own principal's human
+      // Nothing was raised by, or addressed to, any of the names the body tried to smuggle in.
+      expect(all.some((r) => r.raised_by !== 'claude-code')).toBe(false);
+      expect(all.some((r) => r.addressed_to === 'claude-main')).toBe(false);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a hostile or oversized reason is schema-rejected BEFORE anything is written', async () => {
+    const server = await startTestServer();
+    const roomId = room('scc3-hostile');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-code');
+    try {
+      await resetInterruptBudget('claude-code');
+      const bad: unknown[] = [
+        { urgency: 'blocker', reason: 'x'.repeat(1001) }, // oversized
+        { urgency: 'blocker', reason: '' }, // empty
+        { urgency: 'blocker' }, // missing reason
+        { urgency: 'blocker', reason: 42 }, // non-string
+        { urgency: 'DECISION', reason: 'a hand is never a decision' }, // forbidden urgency
+        { urgency: 'panic', reason: 'unknown urgency' }, // unknown urgency
+        { reason: 'no urgency at all' }, // missing urgency
+      ];
+      for (const body of bad) {
+        const r = await postHand(server, roomId, token, body);
+        expect(r.status).toBe(400);
+        expect((await handBody(r)).code).toBe('interrupt_malformed');
+      }
+      // NOTHING WAS WRITTEN by any rejected request — the schema gate is before the construction site.
+      expect(await raisedEvents(roomId, 'claude-code')).toHaveLength(0);
+      expect(await decisionEventCount(roomId)).toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('an agent cannot lift its own ceiling, nor lower (refund) an interrupt it raised', async () => {
+    const server = await startTestServer();
+    const roomId = room('scc3-refund');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-code');
+    try {
+      await resetInterruptBudget('claude-code');
+      // Spend the whole budget, then confirm the ceiling is the MANDATE's and unliftable by the agent:
+      // it is still 6, and a further raise is still refused. There is no command that widens a mandate.
+      for (let i = 0; i < 6; i++) {
+        expect(
+          (
+            await postHand(server, roomId, token, {
+              urgency: 'blocker',
+              reason: `c ${i}`,
+              client_msg_id: `ceil-${i}`,
+            })
+          ).status,
+        ).toBe(201);
+      }
+      const budget = await budgetFor(pool, 'claude-code');
+      expect(budget.limit).toBe(6); // read from the immutable mandate, not a runtime-writable counter
+      expect(budget.remaining).toBe(0);
+      expect(
+        (
+          await postHand(server, roomId, token, {
+            urgency: 'blocker',
+            reason: 'over the top',
+            client_msg_id: 'ceil-6',
+          })
+        ).status,
+      ).toBe(429);
+
+      // And the raiser may NOT lower (refund) its own claim — only the member it is ADDRESSED TO may.
+      // The first hand landed; claude-code is its raiser, prince its recipient.
+      const mine = await pool.query<{ id: string }>(
+        `SELECT id FROM interrupts WHERE room_id = $1 AND raised_by = 'claude-code' AND about_kind = 'hand' ORDER BY created_at LIMIT 1`,
+        [roomId],
+      );
+      const handId = mine.rows[0].id;
+      const asRaiser = await downgradeInterrupt(pool, handId, 'claude-code'); // the raiser tries to refund
+      expect(asRaiser.ok).toBe(false);
+      if (!asRaiser.ok) expect(asRaiser.failure).toBe('not_addressed_to_you');
+      // The recipient CAN — the control belongs to whose attention was claimed, not to who claimed it.
+      const asRecipient = await downgradeInterrupt(pool, handId, 'prince');
+      expect(asRecipient.ok).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('to a reader who was not present, a raised hand and a pending co-sign are DIFFERENT FACTS', async () => {
+    const server = await startTestServer();
+    const roomId = room('scc3-distinct');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-code');
+    try {
+      await resetInterruptBudget('claude-code');
+      // ONE room, BOTH facts. A raised hand (BLOCKER) and a co-sign (pr.merge → DECISION).
+      expect(
+        (
+          await postHand(server, roomId, token, {
+            urgency: 'blocker',
+            reason: 'I need your call on the schema',
+            client_msg_id: 'the-hand',
+          })
+        ).status,
+      ).toBe(201);
+      const cosign = await postAction(server, roomId, token, {
+        action: 'pr.merge',
+        resource: 'repo:x#1',
+      });
+      expect(cosign.decision).toBe('CO_SIGN');
+      const decId = cosign.decision_id as string;
+
+      // THE READER'S VIEW — the raw interrupt.raised facts. The two are told apart by about_kind and by
+      // urgency, with no need to have been in the room:
+      const all = await allRaisedInRoom(roomId);
+      const hand = all.find((r) => r.about_kind === 'hand');
+      const forCosign = all.find((r) => r.about_kind === 'decision');
+      expect(hand).toBeTruthy();
+      expect(hand!.urgency).toBe('BLOCKER'); // a raised hand
+      expect(forCosign).toBeTruthy();
+      expect(forCosign!.urgency).toBe('DECISION'); // a co-sign
+
+      // AND THE DECIDING DIFFERENCE: exactly ONE decision event exists, and it is the co-sign's — the hand
+      // produced none. A reader matches the DECISION interrupt to a real decision_id; the hand matches
+      // nothing in the decision table.
+      const decs = await decisionIds(roomId);
+      expect(decs).toEqual([decId]);
+      expect(decs).toHaveLength(1); // the hand did NOT mint a second one
+    } finally {
+      await server.close();
+    }
   });
 });
