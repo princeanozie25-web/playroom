@@ -431,3 +431,143 @@ describe('S2.1b Phase 2 — the round trip: verdicts over the wire, and polling 
     }
   });
 });
+
+describe('S2.1b Phase 3 — adversarial: a stranger, refused by a record it cannot edit', () => {
+  it('THE HEADLINE: a valid credential asking an out-of-scope action is refused by the MANDATE, not by auth', async () => {
+    const server = await startTestServer();
+    const roomId = room('s21b-headline');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-main'); // a credential the server issued moments ago and never "met"
+    try {
+      const res = await postAction(server, roomId, token, {
+        action: 'secrets.read',
+        resource: 'vault:prod/db',
+      });
+      // Auth SUCCEEDED — the door met the caller — so this is a 200 carrying a verdict, NOT a 401. The
+      // refusal is the MANDATE's, by scope, on a record the caller cannot edit. That is the whole slice.
+      expect(res.status).toBe(200);
+      const body = await jsonBody(res);
+      expect(body.decision).toBe('BLOCK');
+      expect(body.reason_code).toBe('OUT_OF_SCOPE');
+      expect(body.effective_mandate_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('replay is NOT deduplicated today — two identical requests produce two decisions (recorded gap, S21B-N1)', async () => {
+    // Replay protection needs a decisions table + nonce (evaluate.ts: "S2.1 … neither of which exists").
+    // So a replayed request produces a SECOND decision. This is PINNED, not implied away: the day replay
+    // protection lands, this fails and forces the update, rather than the door pretending to a guarantee
+    // it does not have. TRIGGER: S2.1's replay branch (nonce + resource-hash against the decisions table).
+    const server = await startTestServer();
+    const roomId = room('s21b-replay');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-main');
+    try {
+      const body = { action: 'secrets.read', resource: 'vault:x', client_msg_id: 'replay-1' };
+      await postAction(server, roomId, token, body);
+      await postAction(server, roomId, token, body); // byte-identical replay, same client_msg_id
+      // TWO decisions — replay is not deduped. The recorded gap, not a silent one.
+      expect(await decisionRows(roomId)).toHaveLength(2);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a credential determines the member — a sol credential acts as sol, never as another', async () => {
+    const server = await startTestServer();
+    const roomId = room('s21b-crossmember');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('sol');
+    try {
+      const res = await postAction(server, roomId, token, {
+        action: 'secrets.read',
+        resource: 'vault:x',
+      });
+      expect(res.status).toBe(200);
+      const rows = await decisionRows(roomId);
+      expect(rows).toHaveLength(1);
+      // The decision is sol's, decided by WHICH CREDENTIAL was presented — never claude-main's or anyone's.
+      expect(rows[0].subject).toBe('sol');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a credential whose member has NO mandate is refused deny-by-default — distinct from an out-of-scope refusal', async () => {
+    const server = await startTestServer();
+    const roomId = room('s21b-nomandate');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('prince'); // prince is a human member with no mandate document
+    try {
+      const res = await postAction(server, roomId, token, {
+        action: 'pr.review',
+        resource: 'repo:x#1',
+      });
+      // Auth SUCCEEDED (a valid credential) — so this is a MANDATE refusal, not an auth one. A member with
+      // no mandate has NO authority at all: BLOCK / NO_MANDATE, deny-by-default (§10). NO_MANDATE is a
+      // different reason code from OUT_OF_SCOPE — "no authority" is not "authority that omits this action".
+      expect(res.status).toBe(200);
+      const body = await jsonBody(res);
+      expect(body.decision).toBe('BLOCK');
+      expect(body.reason_code).toBe('NO_MANDATE');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('oversized, malformed and hostile bodies are rejected at the schema, before the evaluator', async () => {
+    const server = await startTestServer();
+    const roomId = room('s21b-badbody');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-main');
+    try {
+      const bad: unknown[] = [
+        {}, // missing both
+        { action: 'pr.review' }, // missing resource
+        { resource: 'repo:x#1' }, // missing action
+        { action: 'x'.repeat(65), resource: 'repo:x#1' }, // action too long
+        { action: 'pr.review', resource: 'x'.repeat(600) }, // resource too long / oversized
+        { action: 42, resource: 'repo:x#1' }, // wrong type
+        { action: 'pr.review', resource: { evil: true } }, // hostile shape
+      ];
+      for (const body of bad) {
+        const res = await postAction(server, roomId, token, body);
+        expect(res.status).toBe(400);
+        expect((await jsonBody(res)).code).toBe('action_malformed');
+      }
+      // NONE of them reached the evaluator: no decision event exists.
+      expect(await decisionRows(roomId)).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('the throttle holds under burst and says so', async () => {
+    const server = await startTestServer({ actionRateMax: 2, actionRateWindowMs: 60_000 });
+    const roomId = room('s21b-burst');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-main');
+    try {
+      let throttled: DoorBody | undefined;
+      let sawThrottle = false;
+      for (let i = 0; i < 6; i++) {
+        const r = await postAction(server, roomId, token, {
+          action: 'pr.review',
+          resource: `r-${i}`,
+        });
+        if (r.status === 429) {
+          sawThrottle = true;
+          throttled = await jsonBody(r);
+          break;
+        }
+      }
+      // The burst hit the ceiling, and the refusal NAMES itself — never a silent drop.
+      expect(sawThrottle).toBe(true);
+      expect(throttled?.code).toBe('action_throttled');
+    } finally {
+      await server.close();
+    }
+  });
+});
