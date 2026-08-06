@@ -17,22 +17,26 @@ exist until S1.1).
 protected because it is beat 5 of the demo; **nothing executes it, and nothing needs to.**
 The refusal happens before any executor exists, which is the architecture working.
 
-## `claude-code` — the bridged member (S-CC), and the disclosure the JSON cannot carry
+## `claude-code` — the connected member (SCC-2), and the line the JSON still cannot carry
 
-`claude-code.json` grants **nothing**: `scope: []`, no protected actions, no `summon.initiate`, and
-`interrupts_per_day: 0` (a cap of zero, not an omission — an absent limit would read as _unlimited_).
-That emptiness is deliberate and load-bearing. This member's adapter invokes a coding agent whose
-side effects are **real** — files written, commands run, commits made — in a scratch workspace,
-**outside the fabric**. Its mandate governs its **participation** (it is summoned, briefed, budgeted,
-depth-capped, attributed); it does **not** govern its **work**, because its work does not travel the
-command layer the evaluator sees. An empty scope is the honest shape of that: the fabric grants it
-nothing, because the fabric is not what its work answers to — yet.
+`claude-code.json` now grants authority over its REQUESTS, not its work — Prince's ruling (SCC-2),
+transcribed, not a value a slice chose: `scope` grants `pr.open` / `pr.review` / `pr.comment` outright,
+and `pr.merge` / `deploy` under co-signature by `principal:prince`; `interrupts_per_day: 6`. Each
+protected action is in BOTH `scope` and `protected_actions` on purpose — `evaluate` checks scope before
+protection (RA-007), so a protected action absent from scope would BLOCK as out-of-scope rather than
+co-sign. The scope was empty until SCC-2 for a reason that has now been answered: an agent's consequential
+ASK can travel the command layer the evaluator sees — in-process (S2.1a) and from a laptop through the
+authenticated door (S2.1b) — so a mandate that governs those asks is finally enforceable rather than
+decorative.
 
-**The disclosure lives here, not in the mandate, because the mandate schema is `.strict()`** — an
-extra `note` field is a parse error, and rightly so. So it is written where it can be read: this
-paragraph, and in full (with the compensating controls and the named residual) in the red-team
-ledger's RT-005 retirement (`docs/security/red-team-log.md`). The one sentence every surface that
-renders this member must honour, per ADR-004: **participation governed; work bridged.** Nothing may
-imply its work is governed until tool-call mapping brings that work inside the fabric.
+**What is STILL bridged, and this is the line that matters: its WORK.** claude-code invokes a coding
+agent whose side effects are real — files written, commands run, commits made — in a scratch workspace,
+OUTSIDE the fabric. The mandate governs its **participation and its requests** (it authenticates as a
+member, reads and speaks, asks before a protected action and waits); it does NOT govern its **workspace
+work**, because that work does not travel the command layer. Nothing stops it running `pr.merge` in its
+own shell and narrating it afterwards — the fabric refuses that only when it is ASKED through the door.
+That residual is RT-005 (`docs/security/red-team-log.md`), and SCC-2 does not close it. The one sentence
+every surface rendering this member must honour, per ADR-004: **participation and requests governed;
+work bridged.** A posted closeout is a message, not a receipt.
 
 Changes ship under a `feat/mandate` prefix (Bible §9.5).

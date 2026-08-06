@@ -35,13 +35,15 @@ describe('listMembers', () => {
     // agents-only. The agents' fields are what the roster strip draws and must not move.
     const members = (await listMembers(pool)).filter((m) => m.kind === 'agent');
     expect(members).toEqual([
-      // ── THE BRIDGED MEMBER (S-CC) ──────────────────────────────────────────────────
+      // ── THE CONNECTED MEMBER (SCC-2) ───────────────────────────────────────────────
       //
       // Ordinal 0 (principal:prince) like claude-main, and ordered before it because the tiebreak
-      // within a principal is the member id and 'claude-code' < 'claude-main'. Its scope is EMPTY on
-      // purpose: it participates, it is granted nothing, and its real work happens outside the fabric
-      // (see the RT-005 retirement). An empty scope pinned here is what catches that emptiness being
-      // "helpfully" filled in later — the same reason the others are enumerated.
+      // within a principal is the member id and 'claude-code' < 'claude-main'. Its scope was EMPTY until
+      // SCC-2, which transcribed Prince's ruling: it may open/review/comment, and pr.merge/deploy are in
+      // scope AND protected — co-signed by its principal. Its real WORK still happens outside the fabric
+      // (RT-005); the mandate governs its REQUESTS through the door, never its workspace. These values are
+      // pinned so a later NON-owner change to CC's authority fails here — the same reason the empty scope
+      // was pinned before it.
       {
         id: 'claude-code',
         kind: 'agent',
@@ -50,12 +52,10 @@ describe('listMembers', () => {
         principal_name: 'Prince',
         principal_ordinal: 0,
         adapter_id: 'claude-code',
-        scope: [],
-        protected_actions: [],
-        // co_sign.actions is EMPTY, not absent: claude-code HAS a mandate (that is why scope is [] and
-        // not null) that gates nothing. This is the empty-≠-absent anchor the dedicated test leans on.
-        co_sign: { actions: [], by: 'principal' },
-        limits: { interrupts_per_day: 0 },
+        scope: ['pr.open', 'pr.review', 'pr.comment', 'pr.merge', 'deploy'],
+        protected_actions: ['pr.merge', 'deploy'],
+        co_sign: { actions: ['pr.merge', 'deploy'], by: 'principal' },
+        limits: { interrupts_per_day: 6 },
         policy_version: 'playroom-policy/1.0',
         expires: '2026-11-30T00:00:00Z',
         mandate_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
@@ -185,10 +185,10 @@ describe('listMembers', () => {
     expect(claude?.mandate_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it('keeps ABSENT (no mandate → null) distinct from EMPTY (mandate present, field []/{}) on the wire', async () => {
+  it('keeps ABSENT (no mandate → null) distinct from PRESENT (mandate → real values) on the wire', async () => {
     const members = await listMembers(pool);
     const prince = members.find((m) => m.id === 'prince'); // human, no mandate at all
-    const code = members.find((m) => m.id === 'claude-code'); // a mandate that gates nothing
+    const code = members.find((m) => m.id === 'claude-code'); // a real mandate
 
     // ABSENT: a member with no mandate is null across every mandate field — never [] or {}, which
     // would read as "a mandate that grants/gates nothing" rather than "no mandate exists".
@@ -198,8 +198,10 @@ describe('listMembers', () => {
     expect(prince?.expires).toBeNull();
     expect(prince?.mandate_hash).toBeNull();
 
-    // EMPTY: claude-code HAS a mandate whose co_sign gates nothing — `actions: []` is a value, not null.
-    expect(code?.co_sign).toEqual({ actions: [], by: 'principal' });
+    // PRESENT: claude-code HAS a mandate, so its fields serialise as VALUES, never null. SCC-2 populated
+    // its co_sign (it gates pr.merge/deploy now — it gated nothing before); the wire distinction this
+    // test guards is unchanged: a present mandate is real values where an absent one (prince) is null.
+    expect(code?.co_sign).toEqual({ actions: ['pr.merge', 'deploy'], by: 'principal' });
     expect(code?.co_sign).not.toBeNull();
     expect(code?.mandate_hash).toMatch(/^sha256:/); // it has a document; the hash identifies it
   });
