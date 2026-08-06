@@ -31,7 +31,10 @@ import { getTask, transitionTask } from './tasks.js';
 export type Urgency = 'BLOCKER' | 'DECISION' | 'FYI';
 // 'order' (S-LOOP): a standing order that stops on its own claims its owner's attention. See
 // migration 023 for why the fourth kind exists and commands/runOrders.ts for the raiser.
-export type AboutKind = 'task' | 'decision' | 'message' | 'order';
+// 'hand' (SCC-3): a connected member raises a standalone BLOCKER/FYI that is about nothing but
+// itself — the bare hand SCC2-N1 said the door could not raise. See migration 025 and
+// commands/raiseHand.ts.
+export type AboutKind = 'task' | 'decision' | 'message' | 'order' | 'hand';
 
 export interface InterruptRow {
   id: string;

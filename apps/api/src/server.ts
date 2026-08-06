@@ -1019,6 +1019,97 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       return { seq: event.seq, actor_id: event.actor_id };
     });
 
+    // POST /rooms/:id/interrupts { urgency, reason, client_msg_id? } — a connected member RAISES A BARE
+    // HAND (SCC-3): a standalone BLOCKER or FYI, the non-decision concern SCC2-N1 said the door could not
+    // surface. It is NOT a co-sign: no decision event is minted, and DECISION urgency is rejected here so
+    // a hand can never masquerade as one. The reason is a SHORT string, bounded before anything is
+    // written. Attribution and addressee are DERIVED (the credential's member, and that member's
+    // principal's humans) — the body says what is wrong, never who raised it or whom to reach. The daily
+    // interrupt budget binds it; an exhausted budget refuses with its own named code.
+    fastify.post('/rooms/:id/interrupts', async (req, reply) => {
+      const roomId = (req.params as { id: string }).id;
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        reply.code(401);
+        return credentialRefusal(auth.failure, roomId);
+      }
+      const access = await roomAccess(db(), roomId, auth.auth.member_id);
+      if (!access.room_exists || !access.is_member) {
+        reply.code(404);
+        return roomNotFound(roomId);
+      }
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      // A raised hand is a BLOCKER or an FYI, case-insensitively. DECISION is refused: it is the co-sign
+      // path's urgency and accompanies a real decision — a standalone hand must not be able to mint one.
+      const urgency = typeof b.urgency === 'string' ? b.urgency.toUpperCase() : '';
+      if (urgency !== 'BLOCKER' && urgency !== 'FYI') {
+        reply.code(400);
+        return {
+          type: 'error',
+          code: 'interrupt_malformed',
+          message: 'urgency must be "blocker" or "fyi"',
+        };
+      }
+      const reason = b.reason;
+      if (typeof reason !== 'string' || reason.length < 1 || reason.length > 1000) {
+        reply.code(400);
+        return {
+          type: 'error',
+          code: 'interrupt_malformed',
+          message: 'reason is a required string (a short sentence, ≤1000 chars)',
+        };
+      }
+      const clientMsgId =
+        typeof b.client_msg_id === 'string' && b.client_msg_id.length <= 128
+          ? b.client_msg_id
+          : `hand-${randomUUID()}`;
+      if (!(await getRoom(db(), roomId))) {
+        reply.code(404).send(roomNotFound(roomId));
+        return;
+      }
+      const result = await executeCommand(
+        { actorId: auth.auth.member_id, principalId: auth.auth.principal_id, mode: 'connected' },
+        // Validated to exactly these two above; the cast carries that past the string-typed body.
+        { kind: 'raiseHand', roomId, clientMsgId, urgency: urgency as 'BLOCKER' | 'FYI', reason },
+        deps,
+      );
+      if (result.raised.length === 0) {
+        if (result.refused) {
+          // THE PRICED CLAIM WAS REFUSED, not the concern — a daily rate hit, named so the agent can stop
+          // or continue without escalating. 429 (a limit), and its code distinguishes it from the action
+          // throttle and from every other refusal the door produces.
+          reply.code(429);
+          return {
+            type: 'error',
+            code: result.refused.code,
+            message: 'no interrupt budget left today',
+            budget: {
+              limit: result.refused.budget.limit,
+              spent: result.refused.budget.spent,
+              remaining: result.refused.budget.remaining,
+            },
+          };
+        }
+        // No human behind the raiser's principal is in this room to reach. Fail-closed and legible: a
+        // hand with nobody to raise it to is refused, not silently dropped.
+        reply.code(422);
+        return {
+          type: 'error',
+          code: 'no_human_addressee',
+          message: 'no human to raise a hand to in this room',
+        };
+      }
+      reply.code(201);
+      return {
+        raised: true,
+        interrupts: result.raised.map((r) => ({
+          interrupt_id: r.interrupt_id,
+          addressed_to: r.addressed_to,
+          budget_remaining: r.budget_remaining,
+        })),
+      };
+    });
+
     // GET /rooms/:id/ws?after=<seq> — hello, then replay events seq > after in
     // order, then live-tail via the in-process bus.
     fastify.get('/rooms/:id/ws', { websocket: true }, (socket, req) => {

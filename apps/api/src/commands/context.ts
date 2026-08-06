@@ -76,6 +76,17 @@ export type Command =
       action: string;
       resource: string;
     }
+  // Raise a bare hand (SCC-3): a connected member surfaces a standalone BLOCKER/FYI — a claim on a
+  // human's attention that is NOT a decision. Mints no decision event; charged to the raiser's daily
+  // interrupt budget. `actorId` is the credential's member; `urgency` is never DECISION (that is the
+  // co-sign path's, and the door rejects it before here).
+  | {
+      kind: 'raiseHand';
+      roomId: string;
+      clientMsgId: string;
+      urgency: 'BLOCKER' | 'FYI';
+      reason: string;
+    }
   // Complete a co-signature (S2.2): a human approves or denies a pending decision. `actorId` is the
   // SIGNER, authenticated by the socket — an agent can never reach a landing resolution through here.
   | {

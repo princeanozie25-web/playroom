@@ -14,6 +14,7 @@ import { summonCommand } from './summon.js';
 import { triggerAgentTurnCommand } from './triggerAgentTurn.js';
 import { handoffCommand, type HandoffResult } from './handoff.js';
 import { requestActionCommand, type RequestActionResult } from './requestAction.js';
+import { raiseHandCommand, type RaiseHandResult } from './raiseHand.js';
 import { signDecisionCommand, type SignDecisionResult } from './signDecision.js';
 import {
   createOrderCommand,
@@ -84,6 +85,17 @@ export function executeCommand(
   },
   deps: CommandDeps,
 ): Promise<RequestActionResult>;
+export function executeCommand(
+  ctx: CommandContext,
+  command: {
+    kind: 'raiseHand';
+    roomId: string;
+    clientMsgId: string;
+    urgency: 'BLOCKER' | 'FYI';
+    reason: string;
+  },
+  deps: CommandDeps,
+): Promise<RaiseHandResult>;
 export function executeCommand(
   ctx: CommandContext,
   command: {
@@ -178,6 +190,8 @@ export function executeCommand(
       return handoffCommand(deps, ctx, command);
     case 'requestAction':
       return requestActionCommand(deps, ctx, command);
+    case 'raiseHand':
+      return raiseHandCommand(deps, ctx, command);
     case 'signDecision':
       return signDecisionCommand(deps, ctx, command);
     case 'createOrder':
