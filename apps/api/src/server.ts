@@ -978,6 +978,47 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       return { events, has_older };
     });
 
+    // POST /rooms/:id/messages { body, client_msg_id? } — the SPEAK half of a connected member's minimum
+    // surface (SCC-2): a puller that read the transcript above posts back into it, over HTTP, outbound
+    // only. ATTRIBUTION IS DERIVED, exactly as the door does it — the author is the credential's member,
+    // never a name from the body. It reuses postMessage, the one message construction site; it adds none.
+    fastify.post('/rooms/:id/messages', async (req, reply) => {
+      const roomId = (req.params as { id: string }).id;
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        reply.code(401);
+        return credentialRefusal(auth.failure, roomId);
+      }
+      // The same membership gate the read half uses: a non-member gets the room-not-found silence, so the
+      // door cannot be used to probe which rooms exist or who is in them.
+      const access = await roomAccess(db(), roomId, auth.auth.member_id);
+      if (!access.room_exists || !access.is_member) {
+        reply.code(404);
+        return roomNotFound(roomId);
+      }
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const body = b.body;
+      if (typeof body !== 'string' || body.length < 1 || body.length > 8000) {
+        reply.code(400);
+        return {
+          type: 'error',
+          code: 'message_malformed',
+          message: 'body is a required string (≤8000 chars)',
+        };
+      }
+      const clientMsgId =
+        typeof b.client_msg_id === 'string' && b.client_msg_id.length <= 128
+          ? b.client_msg_id
+          : `msg-${randomUUID()}`;
+      const event = await executeCommand(
+        { actorId: auth.auth.member_id, principalId: auth.auth.principal_id, mode: 'connected' },
+        { kind: 'postMessage', roomId, clientMsgId, body },
+        deps,
+      );
+      reply.code(201);
+      return { seq: event.seq, actor_id: event.actor_id };
+    });
+
     // GET /rooms/:id/ws?after=<seq> — hello, then replay events seq > after in
     // order, then live-tail via the in-process bus.
     fastify.get('/rooms/:id/ws', { websocket: true }, (socket, req) => {
