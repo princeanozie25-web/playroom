@@ -125,6 +125,29 @@ entry stands exactly as it did before: **the request in beat 5 is still issued o
 behalf by a caller**, and the agency is still not demonstrated. The screen no longer works
 against the caption; the caption still has to be right.
 
+**S2.1a — the tool-call channel exists now (in-process, hosted), and this is the first genuine
+UPGRADE this document records rather than a caveat.** As of S2.1a a hosted agent's turn can EMIT a
+governed action — a `pr.merge`, say — as a structured `action` chunk, and it is routed to the SAME
+evaluator (`requestAction`, the one decision-event constructor) and ruled on against that agent's OWN
+mandate: ALLOW / CO_SIGN / BLOCK, each by reason code and effective mandate hash. The subject is pinned
+to the EMITTING member — the model cannot name another — and standing is checked as `self`, unweakened.
+So the earlier line in this entry — "agents cannot initiate structured actions at all… no tool-call
+channel" — is no longer the general state: what the surface could once only show, what a mandate _says_,
+the fabric can now be shown _doing_ — **refusing an agent's own request.** The BLOCK is provably the
+mandate's and not tool-exposure: an action the model was never offered still reaches `evaluate()` and is
+denied by scope. **Take 13 predates this**; in the film the beat-5 request is still harness-issued on
+Claude's behalf, and every earlier sentence here stands unchanged.
+
+**The limit, stated as precisely as the upgrade, so the two do not blur.** This binds only actions that
+TRAVEL THE CHANNEL, and every one of them ends at a decision event — **nothing executes under any
+verdict** (there is no executor; even an approved co-sign runs nothing, S2.6). It is not, and must never
+be captioned as, containment of an agent that has side-effect powers of its OWN _outside_ the channel: a
+coding CLI writing files and running commands in a workspace is exactly that, and it is untouched here.
+That is RT-005's standing residual and `claude-code`'s whole situation (participation governed, work
+bridged). **The channel governs the ASKING; it does not contain the DOING.** A per-turn cap
+(`MAX_ACTIONS_PER_TURN`) bounds how many asks one turn may make, so the channel itself is not a
+denial-of-wallet vector — but a cap on asks is not a cap on an agent's out-of-band effects either.
+
 **2. The mandate is unsigned.** There is no `sig` field, by design in v0 — omit, never stub.
 A fake `ed25519:` string would have been worse than an absent one. The hash on screen proves
 _which document was evaluated_, not that anyone authorised it. S2.1.
