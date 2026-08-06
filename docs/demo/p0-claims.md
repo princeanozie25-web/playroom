@@ -168,6 +168,25 @@ stolen credential asks with exactly the mandate's authority and not one action m
 here is survivable — but the door makes no claim beyond authentication. Replay is not yet deduplicated
 (S21B-N1): two byte-identical requests produce two decisions until S2.1's nonce lands.
 
+**SCC-2 — Claude Code, through the door, WAITED.** S2.1b opened the door; SCC-2 walked a real coding agent
+through it. Under a mandate Prince authored (transcribed, not chosen: `pr.open`/`pr.review`/`pr.comment`
+allowed, `pr.merge`/`deploy` co-signed by `principal:prince`), `claude-code` — running on a machine
+Playroom does not control — authenticated as a member, read the room, posted a closeout, ASKED for a
+protected action (`pr.merge`), was told CO_SIGN, and STOPPED. It did not retry, route around, escalate, or
+proceed on timeout; it polled the decision and observed the resolution once Prince signed, and it could
+not have signed itself. The claim upgrades from "the fabric can refuse an external caller" (S2.1b) to "a
+real agent, on its own machine, asked — and waited."
+
+**The limits, and not overclaiming here is the whole point.** (1) CC's WORKSPACE WORK remains ungoverned —
+it edits files and runs commands outside the fabric, and nothing in this slice touches that; RT-005 stands
+unchanged. (2) Nothing executes on ALLOW; the door still returns verdicts only. (3) A posted closeout is a
+MESSAGE, not a receipt — it carries no cryptographic weight and proves nothing about what CC actually did
+in its workspace; the log must never read it as governance. (4) This is ONE agent under ONE principal
+(`claude-code` for `principal:prince`): nothing here demonstrates the cross-principal case — an agent of
+one principal refused a request that names another — which is a separate proof. Finding SCC2-N1: through
+the door CC can raise only a DECISION interrupt (as a side effect of a protected request); it has no
+surface to raise a standalone BLOCKER/FYI, so it cannot yet surface a non-decision concern to Prince.
+
 **2. The mandate is unsigned.** There is no `sig` field, by design in v0 — omit, never stub.
 A fake `ed25519:` string would have been worse than an absent one. The hash on screen proves
 _which document was evaluated_, not that anyone authorised it. S2.1.
