@@ -1,5 +1,9 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { Writable } from 'node:stream';
+import { writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ERROR_SIGNER_NOT_HUMAN, type AgentAdapter, type AgentTurnChunk } from '@playroom/shared';
 import {
   startTestServer,
   testPool,
@@ -8,6 +12,8 @@ import {
   type TestServer,
 } from './support.js';
 import { issueCredential } from '../src/credentials.js';
+import { RoomBus } from '../src/bus.js';
+import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 
 /**
  * ═══ SCC-2 — CLAUDE CODE THROUGH THE DOOR ═══
@@ -262,6 +268,153 @@ describe('SCC-2 Phase 2 — read and speak, and the interrupt', () => {
       // BLOCKER/FYI, so CC cannot surface a NON-decision concern ("blocked, need input") to Prince. The
       // loop can surface things that are decisions; it cannot yet raise a bare hand.
     } finally {
+      await server.close();
+    }
+  });
+});
+
+async function getDecision(
+  server: TestServer,
+  roomId: string,
+  token: string,
+  decisionId: string,
+): Promise<Response> {
+  return fetch(`${server.httpBase}/rooms/${roomId}/decisions/${decisionId}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+}
+// A CommandDeps for driving the human sign directly — there is no agent-signing frame, and CC has no
+// resolve endpoint, so a signature is dispatched at the command. The stub adapter is never called: a
+// pr.merge approval has no executor (S2.6), and this decision is not a summon.
+function makeDeps(): CommandDeps {
+  const stub: AgentAdapter = { id: 'stub', async *stream(): AsyncGenerator<AgentTurnChunk> {} };
+  const deps: CommandDeps = {
+    pool,
+    bus: new RoomBus(),
+    log: { info() {}, warn() {}, error() {} },
+    adapterFactory: () => stub,
+    execute: (cx, cmd) => executeCommand(cx, cmd, deps),
+  };
+  return deps;
+}
+
+describe('SCC-2 Phase 3 — one real cycle: pull, work, post, ask, WAIT', () => {
+  it('CC pulls a brief, does real workspace work, posts a closeout, asks — and STOPS at CO_SIGN until Prince signs', async () => {
+    const server = await startTestServer();
+    const roomId = room('scc2-cycle');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const codeToken = await cred('claude-code');
+    await resetInterruptBudget('claude-code');
+    const workspace = join(tmpdir(), `scc2-workspace-${Date.now()}`);
+    const shape: Record<string, number> = {};
+    try {
+      // Prince pins the brief.
+      expect(
+        (
+          await postMsg(server, roomId, server.token, {
+            body: 'BRIEF: review PR #7, and if it is good, merge it.',
+          })
+        ).status,
+      ).toBe(201);
+
+      // 1. PULL — CC reads the room and finds its brief.
+      const t0 = Date.now();
+      const hist = await jsonBody(await getHistory(server, roomId, codeToken));
+      const brief = (hist.events ?? [])
+        .filter((e) => e.event_type === 'message')
+        .map((e) => e.payload.body)
+        .find((b) => typeof b === 'string' && b.includes('BRIEF'));
+      expect(brief).toBeTruthy();
+      shape.pull_ms = Date.now() - t0;
+
+      // 2. WORK — a small piece of REAL work in CC's own workspace, OUTSIDE the fabric. A real file write
+      //    stands in for CC editing files / running commands. It is UNGOVERNED (RT-005): nothing here
+      //    traverses the evaluator. The point of the cycle is the ask-and-wait, not the work.
+      const w0 = Date.now();
+      writeFileSync(workspace, 'reviewed pr-7: LGTM\n', 'utf8');
+      shape.work_ms = Date.now() - w0;
+
+      // 3. POST — CC posts a closeout MESSAGE. A message is NOT a receipt: it proves nothing about what
+      //    happened, and the log must not read it as governance.
+      const p0 = Date.now();
+      expect(
+        (
+          await postMsg(server, roomId, codeToken, {
+            body: 'Reviewed PR #7 in my workspace — looks good. Requesting merge.',
+          })
+        ).status,
+      ).toBe(201);
+      shape.post_ms = Date.now() - p0;
+
+      // 4. ASK — CC requests the protected action through the door.
+      const a0 = Date.now();
+      const ask = await jsonBody(
+        await postAction(server, roomId, codeToken, {
+          action: 'pr.merge',
+          resource: 'repo:playroom/playroom#pr-7',
+        }),
+      );
+      shape.ask_ms = Date.now() - a0;
+
+      // 5. THE PROOF: CO_SIGN, and CC STOPS. It was refused PROGRESS by a named rule — asserted by the
+      //    reason code, the signer, and the mandate hash, not by "a merge happened not to occur". There is
+      //    nothing for CC to do but wait; it does not retry, route around, escalate, or proceed on timeout.
+      expect(ask.decision).toBe('CO_SIGN');
+      expect(ask.reason_code).toBe('PROTECTED_ACTION');
+      expect(ask.required_signer).toBe('principal:prince');
+      expect(ask.effective_mandate_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+      const decId = ask.decision_id as string;
+      expect(decId).toBeTruthy();
+
+      // CC polls: PENDING. This is the wait, made observable.
+      expect((await jsonBody(await getDecision(server, roomId, codeToken, decId))).status).toBe(
+        'pending',
+      );
+
+      // And CC CANNOT resolve it itself — an agent may never sign (checked against member KIND).
+      const cantSign = await executeCommand(
+        { actorId: 'claude-code', mode: 'connected' },
+        {
+          kind: 'signDecision',
+          roomId,
+          clientMsgId: 'cc-self',
+          decisionId: decId,
+          resolution: 'APPROVED',
+        },
+        makeDeps(),
+      );
+      expect(cantSign.ok).toBe(false);
+      if (!cantSign.ok) expect(cantSign.refusal.code).toBe(ERROR_SIGNER_NOT_HUMAN);
+
+      // 6. PRINCE SIGNS (the human in the loop).
+      const w1 = Date.now();
+      const signed = await executeCommand(
+        { actorId: 'prince', mode: 'human' },
+        {
+          kind: 'signDecision',
+          roomId,
+          clientMsgId: 'prince-sign',
+          decisionId: decId,
+          resolution: 'APPROVED',
+        },
+        makeDeps(),
+      );
+      expect(signed.ok).toBe(true);
+      shape.wait_ms = Date.now() - w1;
+
+      // CC polls again: RESOLVED, with the signer named — the fate learned by asking, never pushed.
+      const done = await jsonBody(await getDecision(server, roomId, codeToken, decId));
+      expect(done.status).toBe('resolved');
+      expect(done.resolution).toBe('APPROVED');
+      expect(done.signed_by).toBe('prince');
+
+      // 7. THE WALL-CLOCK SHAPE of the cycle (ms), for the report.
+      console.log(
+        `[scc2-cycle] pull=${shape.pull_ms} work=${shape.work_ms} post=${shape.post_ms} ask=${shape.ask_ms} wait=${shape.wait_ms}`,
+      );
+    } finally {
+      rmSync(workspace, { force: true });
+      await new Promise((r) => setTimeout(r, 200));
       await server.close();
     }
   });
