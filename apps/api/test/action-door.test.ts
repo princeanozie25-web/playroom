@@ -1,6 +1,12 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { Writable } from 'node:stream';
-import { ERROR_CREDENTIAL_INVALID, ERROR_CREDENTIAL_REQUIRED } from '@playroom/shared';
+import {
+  ERROR_CREDENTIAL_INVALID,
+  ERROR_CREDENTIAL_REQUIRED,
+  ERROR_SIGNER_NOT_HUMAN,
+  type AgentAdapter,
+  type AgentTurnChunk,
+} from '@playroom/shared';
 import {
   startTestServer,
   testPool,
@@ -9,6 +15,8 @@ import {
   type TestServer,
 } from './support.js';
 import { issueCredential, revokeCredential } from '../src/credentials.js';
+import { RoomBus } from '../src/bus.js';
+import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 
 /**
  * ═══ S2.1b — THE AUTHENTICATED DOOR (Phase 1: the door, identity derived) ═══
@@ -253,6 +261,171 @@ describe('S2.1b Phase 1 — the door: authenticated ingress, identity derived', 
       expect(statuses.slice(0, 3)).toEqual([200, 200, 200]);
       expect(statuses[3]).toBe(429);
       expect(statuses[4]).toBe(429);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+async function getDecision(
+  server: TestServer,
+  roomId: string,
+  token: string | undefined,
+  decisionId: string,
+): Promise<Response> {
+  return fetch(`${server.httpBase}/rooms/${roomId}/decisions/${decisionId}`, {
+    headers: { ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+}
+
+// A CommandDeps for driving the human sign path directly — there is no agent-signing frame by design,
+// and the door has no resolve endpoint, so a signature is dispatched at the command. The stub adapter is
+// never called: a pr.merge approval has no executor (S2.6), and none of these decisions is a summon.
+function makeDeps(): CommandDeps {
+  const stub: AgentAdapter = {
+    id: 'stub',
+    async *stream(): AsyncGenerator<AgentTurnChunk> {},
+  };
+  const deps: CommandDeps = {
+    pool,
+    bus: new RoomBus(),
+    log: { info() {}, warn() {}, error() {} },
+    adapterFactory: () => stub,
+    execute: (cx, cmd) => executeCommand(cx, cmd, deps),
+  };
+  return deps;
+}
+
+describe('S2.1b Phase 2 — the round trip: verdicts over the wire, and polling a decision', () => {
+  it('all three verdicts travel the wire against the real mandate', async () => {
+    const { lines, stream } = capture();
+    const server = await startTestServer({ loggerStream: stream, logLevel: 'info' });
+    const roomId = room('s21b-verdicts');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-main');
+    try {
+      // ALLOW — in scope, not protected. A4-F1: no decision event, so the decision_id is null and the
+      // verdict is proven from the wire body plus the audit line.
+      const allow = await jsonBody(
+        await postAction(server, roomId, token, { action: 'pr.review', resource: 'repo:x#1' }),
+      );
+      expect(allow.decision).toBe('ALLOW');
+      expect(allow.reason_code).toBe('ALLOWED_IN_SCOPE');
+      expect(allow.decision_id).toBeNull();
+      expect(lines.join('')).toContain('ALLOWED_IN_SCOPE');
+
+      // CO_SIGN — protected. The signer is named and a decision id comes back to poll.
+      const cosign = await jsonBody(
+        await postAction(server, roomId, token, { action: 'pr.merge', resource: 'repo:x#1' }),
+      );
+      expect(cosign.decision).toBe('CO_SIGN');
+      expect(cosign.reason_code).toBe('PROTECTED_ACTION');
+      expect(cosign.required_signer).toBe('principal:prince');
+      expect(cosign.decision_id).toMatch(/^dec_/);
+
+      // BLOCK — out of scope, deny-by-default, by reason code and mandate hash.
+      const block = await jsonBody(
+        await postAction(server, roomId, token, { action: 'deploy', resource: 'env:prod' }),
+      );
+      expect(block.decision).toBe('BLOCK');
+      expect(block.reason_code).toBe('OUT_OF_SCOPE');
+      expect(block.effective_mandate_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a pending CO_SIGN reads as pending, then resolved with who signed — by polling, never a callback', async () => {
+    const server = await startTestServer();
+    const roomId = room('s21b-poll');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-main');
+    try {
+      const raised = await jsonBody(
+        await postAction(server, roomId, token, { action: 'pr.merge', resource: 'repo:x#1' }),
+      );
+      expect(raised.decision).toBe('CO_SIGN');
+      expect(raised.decision_id).toBeTruthy();
+      const decId = raised.decision_id as string;
+
+      // POLL: pending. The caller ASKS; Playroom never calls the caller back.
+      const p1 = await jsonBody(await getDecision(server, roomId, token, decId));
+      expect(p1.status).toBe('pending');
+      expect(p1.decision).toBe('CO_SIGN');
+      expect(p1.required_signer).toBe('principal:prince');
+      expect(p1.resolution).toBeNull();
+
+      // A HUMAN signs — the separate human path (the door offers no resolution endpoint).
+      const signed = await executeCommand(
+        { actorId: 'prince', mode: 'human' },
+        {
+          kind: 'signDecision',
+          roomId,
+          clientMsgId: 'sign-1',
+          decisionId: decId,
+          resolution: 'APPROVED',
+        },
+        makeDeps(),
+      );
+      expect(signed.ok).toBe(true);
+
+      // POLL: resolved, with who signed — the fate learned by asking again.
+      const p2 = await jsonBody(await getDecision(server, roomId, token, decId));
+      expect(p2.status).toBe('resolved');
+      expect(p2.resolution).toBe('APPROVED');
+      expect(p2.signed_by).toBe('prince');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a caller may not resolve its own pending decision — an agent may never sign', async () => {
+    const server = await startTestServer();
+    const roomId = room('s21b-nosign');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-main');
+    try {
+      const raised = await jsonBody(
+        await postAction(server, roomId, token, { action: 'pr.merge', resource: 'repo:x#1' }),
+      );
+      const decId = raised.decision_id as string;
+      // The door caller is claude-main (an agent). The door has no resolve endpoint, and if the sign
+      // command is reached at all, an agent may never sign — checked against the member's KIND.
+      const attempt = await executeCommand(
+        { actorId: 'claude-main', mode: 'connected' },
+        {
+          kind: 'signDecision',
+          roomId,
+          clientMsgId: 'agent-sign',
+          decisionId: decId,
+          resolution: 'APPROVED',
+        },
+        makeDeps(),
+      );
+      expect(attempt.ok).toBe(false);
+      if (!attempt.ok) expect(attempt.refusal.code).toBe(ERROR_SIGNER_NOT_HUMAN);
+      // Still pending — the agent's refused attempt changed nothing.
+      const poll = await jsonBody(await getDecision(server, roomId, token, decId));
+      expect(poll.status).toBe('pending');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('nothing executes on ALLOW — the verdict returns, no decision event, no side effect', async () => {
+    const server = await startTestServer();
+    const roomId = room('s21b-allow-noexec');
+    expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    const token = await cred('claude-main');
+    try {
+      const allow = await jsonBody(
+        await postAction(server, roomId, token, { action: 'pr.comment', resource: 'repo:x#1' }),
+      );
+      expect(allow.decision).toBe('ALLOW');
+      expect(allow.decision_id).toBeNull();
+      // No decision event was written (A4-F1), and there is no executor to run — the mechanism by which
+      // "nothing happened" is a property of the design, not the absence of an observable.
+      expect(await decisionRows(roomId)).toHaveLength(0);
     } finally {
       await server.close();
     }
