@@ -47,6 +47,46 @@ export const SUMMON_TOOL: AgentTool = {
   },
 };
 
+/**
+ * The most governed actions ONE turn may emit (S2.1a). A turn legitimately asks for a handful; a
+ * burst is the denial-of-wallet case with the model holding the pen — each emission is an evaluation
+ * and, on CO_SIGN/BLOCK, a persisted decision event, so an uncapped path lets a single turn write the
+ * log full. This bounds the COUNT of governed emissions in one turn; SUMMON_DEPTH_CAP bounds a chain's
+ * DEPTH, a different axis. Summons keep their own bounds (dedup + depth). Small and revisitable.
+ */
+export const MAX_ACTIONS_PER_TURN = 8;
+
+/**
+ * The shape a governed emission must take (S2.1a). MODEL OUTPUT IS UNTRUSTED INPUT: an emitted action
+ * carries an arbitrary action string and arbitrary arguments. The action name is length-bounded and
+ * then handed to evaluate() unchanged — an unknown-but-well-formed name resolves to OUT_OF_SCOPE, never
+ * a throw. The arguments must yield exactly a bounded `resource` string; any other shape (missing
+ * resource, wrong type, over-long, or not an object) is refused BEFORE evaluate() rather than passed
+ * through as opaque data. Extra keys are ignored, never forwarded — only `resource` reaches the fabric.
+ * A refusal here is fail-closed and distinguishable from a mandate BLOCK: it produces no decision event.
+ */
+const EMITTED_ACTION_NAME_MAX = 64;
+const EMITTED_RESOURCE_MAX = 512;
+
+/**
+ * Parse a governed emission's arguments (S2.1a) — a hand-written schema, no new dependency. Returns
+ * the one field the fabric uses, `resource`, or `null` when the shape is anything else: not an object,
+ * an array, or a missing / empty / over-long / non-string `resource`. Extra keys are IGNORED, never
+ * forwarded — only `resource` reaches evaluate().
+ */
+export function parseEmittedArgs(args: unknown): { resource: string } | null {
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) return null;
+  const resource = (args as Record<string, unknown>).resource;
+  if (
+    typeof resource !== 'string' ||
+    resource.length < 1 ||
+    resource.length > EMITTED_RESOURCE_MAX
+  ) {
+    return null;
+  }
+  return { resource };
+}
+
 // The system prompt and its SHA-256, read once from prompts/room-agent.v1.md.
 let promptCache: { text: string; hash: string } | undefined;
 function systemPrompt(): { text: string; hash: string } {
@@ -421,6 +461,12 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
   // first, and B's summon reads in the log after A's turn, in the order the decisions happened.
   const emittedSummons: string[] = [];
 
+  // GOVERNED (non-summon) ACTIONS this turn emitted (S2.1a), collected during the stream and routed to
+  // the evaluator AFTER the turn's own events are in the log. `emittedActionCount` counts EVERY emission
+  // including those past the cap, so the cap is reported out loud rather than dropping them in silence.
+  const emittedActions: { action: string; args: Record<string, unknown>; call_id?: string }[] = [];
+  let emittedActionCount = 0;
+
   // ── THE DAILY SPEND CEILING, CHECKED BEFORE ANYTHING COSTS MONEY (§18, S-LIVE) ──
   //
   // HERE, and not at the summon construction site, for two reasons. The constructor is off limits in
@@ -565,13 +611,22 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         publish(delta);
         if (tFirstFanout === null) tFirstFanout = performance.now(); // span: first delta frame written
       } else if (chunk.kind === 'action') {
-        // A STRUCTURED ACTION the model emitted (S1.8). This slice's ONLY consumer is a summon; any
-        // other action is ignored here (pr.merge emission is S2.1's and is deliberately not built).
-        // A summon's raw target is collected and dispatched AFTER the turn completes, through the
-        // same constructor a human tag uses — never a parallel path, and governed there.
+        // A STRUCTURED ACTION the model emitted. A summon (S1.8) is collected and dispatched through the
+        // summon constructor after the turn; EVERY OTHER action (S2.1a) is a governed request, collected
+        // here to be routed to requestAction — the evaluator — after the turn completes. Neither path
+        // acts during the stream: the turn's own events land first (persist-before-fanout).
         if (chunk.action === 'summon') {
           const target = typeof chunk.arguments.member === 'string' ? chunk.arguments.member : '';
           if (target) emittedSummons.push(target);
+        } else {
+          emittedActionCount += 1;
+          if (emittedActions.length < MAX_ACTIONS_PER_TURN) {
+            emittedActions.push({
+              action: chunk.action,
+              args: chunk.arguments,
+              call_id: chunk.call_id,
+            });
+          }
         }
       } else if (chunk.kind === 'done') {
         tokensIn = chunk.tokens_in;
@@ -671,6 +726,73 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
           ).catch(() => {}); // the summon path logs its own refusals; this guards the fire-and-forget
         }
       }
+    }
+
+    // ── EMITTED GOVERNED ACTIONS → THE EVALUATOR, AFTER THE TURN (S2.1a) ───────────────────
+    //
+    // The turn's own events are in the log now. Each governed (non-summon) action this turn emitted is
+    // routed to requestAction — THE ONE decision-event constructor — evaluated against the EMITTING
+    // member's OWN mandate. Standing is checked as it is for any requester and resolves to `self` (the
+    // member acting on its own request); subjectBasis is unweakened. NOTHING IS EXECUTED under any
+    // verdict — this path ends at the decision event. Arguments are parsed against a schema and a
+    // malformed emission is refused HERE, before evaluate(), out loud and with no decision event, so it
+    // is distinguishable from a mandate BLOCK. Wrapped so a post-completion throw can never write a
+    // second completed row.
+    try {
+      if (emittedActionCount > MAX_ACTIONS_PER_TURN) {
+        publish(
+          await appendMessage(
+            pool,
+            roomId,
+            'system',
+            `sys-actioncap-${turnId}`,
+            `${adapterId} emitted ${emittedActionCount} actions this turn; only the first ${MAX_ACTIONS_PER_TURN} were evaluated (per-turn cap).`,
+          ),
+        );
+      }
+      for (let i = 0; i < emittedActions.length; i++) {
+        const em = emittedActions[i];
+        const clientMsgId = `act-${turnId}-${em.call_id ?? i}`;
+        const nameOk =
+          typeof em.action === 'string' &&
+          em.action.length > 0 &&
+          em.action.length <= EMITTED_ACTION_NAME_MAX;
+        const argsParsed = parseEmittedArgs(em.args);
+        if (!nameOk || !argsParsed) {
+          console.warn(
+            `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} refused=malformed_emission action=${String(em.action).slice(0, EMITTED_ACTION_NAME_MAX)}`,
+          );
+          publish(
+            await appendMessage(
+              pool,
+              roomId,
+              'system',
+              `sys-malformed-${clientMsgId}`,
+              `${adapterId} emitted a malformed action; it was refused before evaluation.`,
+            ),
+          );
+          continue;
+        }
+        // The subject is the EMITTING member — the model cannot name another. requestAction evaluates it
+        // and constructs the decision event (CO_SIGN/BLOCK) or audits the ALLOW; it never executes.
+        // Awaited, not fire-and-forget like a summon: each is quick — one evaluation and at most one
+        // decision insert — and awaiting lands the decisions in order before the loop runner fires.
+        await execute(
+          { actorId: adapterId, mode: 'hosted' },
+          {
+            kind: 'requestAction',
+            roomId,
+            clientMsgId,
+            subject: adapterId,
+            action: em.action,
+            resource: argsParsed.resource,
+          },
+        );
+      }
+    } catch (routingErr) {
+      console.warn(
+        `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} action-routing error: ${String(routingErr)}`,
+      );
     }
 
     // ── THE LOOP RUNNER (S-LOOP) ──────────────────────────────────────────────────────────
