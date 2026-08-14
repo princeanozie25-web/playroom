@@ -10,6 +10,7 @@ import {
   type Assembly,
 } from '../src/assembly.js';
 import { withPrincipalStore } from '../src/principal-store.js';
+import { setBriefing } from '../src/briefings.js';
 
 /**
  * ═══ THE CI-BLOCKING TEST: A FOREIGN STORE IS UNREACHABLE FROM ASSEMBLY ═══
@@ -240,6 +241,59 @@ describe("a foreign store cannot reach the window — through any of §7.1's thr
       FOREIGN_MARKER,
     );
     expect(text).not.toContain(OWN_MARKER);
+  });
+});
+
+describe('a briefing is common ground, not a cross-principal path — §7.1 with S1.7 present', () => {
+  // The briefing region (S1.7) is delivered to EVERY member of the room. So the question this job must
+  // now answer is the one the parenthetical in §7.1 always asked, on the new path: does adding a briefing
+  // open a route from one principal's private store into another's assembly? It cannot — a briefing is
+  // owner-authored text stored as a SHARED part (principal_id null), structurally incapable of carrying a
+  // private store — and this proves the three foreign paths above stay closed with a briefing present.
+  //
+  // Corpus, so the assertion is not vacuous: the room already holds ONE foreign store item (body +
+  // summary + embedding) and >=1 own item (the planted rows, logged by the positive control above), the
+  // shared common-ground messages, and now a briefing — and the foreign store stays unreachable through
+  // all of it.
+  it('both principals inherit the same briefing, and the foreign store is STILL unreachable', async () => {
+    await setBriefing(pool, {
+      roomId,
+      content:
+        'STANDING BRIEF for the room — shared framing, authored by the owner, nobody’s private note',
+      purpose: 'isolation-with-briefing',
+      setBy: 'prince',
+    });
+
+    const princeWin = windowFor(await assembleFor(PRINCE_MEMBER, PRINCE));
+    const jerryWin = windowFor(await assembleFor(JERRY_MEMBER, JERRY));
+
+    // COMMON GROUND: both members see the SAME briefing — it is shared, not resolved per principal.
+    expect(flatten(princeWin)).toContain('STANDING BRIEF for the room');
+    expect(flatten(jerryWin)).toContain('STANDING BRIEF for the room');
+
+    // AND THE FOREIGN STORE IS STILL UNREACHABLE — a briefing opened no new path. The private-store
+    // BODIES (never shared as messages, so their presence would be a real leak regardless of test order)
+    // stay out of the other principal's window.
+    expect(flatten(princeWin), 'Jerry’s private body reached Prince’s window').not.toContain(
+      FOREIGN_MARKER,
+    );
+    expect(flatten(jerryWin), 'Prince’s private body reached Jerry’s window').not.toContain(
+      OWN_MARKER,
+    );
+
+    // STRUCTURALLY, which is the stronger half: the briefing part is SHARED (principal_id null) in BOTH
+    // assemblies — never a private part that could name a foreign principal — so windowFor's §7.1
+    // assertion passes with it, and the leak is impossible rather than merely absent.
+    for (const [member, principal] of [
+      [PRINCE_MEMBER, PRINCE],
+      [JERRY_MEMBER, JERRY],
+    ] as const) {
+      const a = await assembleFor(member, principal);
+      const briefingParts = a.parts.filter((p) => p.source === 'briefing');
+      expect(briefingParts).toHaveLength(1);
+      expect(briefingParts[0].principal_id).toBeNull();
+      expect(() => windowFor(a)).not.toThrow();
+    }
   });
 });
 

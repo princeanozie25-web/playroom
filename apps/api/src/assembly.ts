@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { AgentMessage } from '@playroom/shared';
 import { latestRoomSummary, messagesAfterSeq, recentCompletedTurns } from './events.js';
+import { activeBriefing } from './briefings.js';
 import { ROOM_SUMMARY_AUTHOR, SUMMARY_TRIGGER_BATCH } from './summary.js';
 import { withPrincipalStore } from './principal-store.js';
 import type { TaskRow } from './tasks.js';
@@ -38,8 +39,14 @@ import type { TaskRow } from './tasks.js';
  * unattended cycle sees the prior member's work (which the message window excludes by PM7). It is
  * COMMON GROUND — shared, principal_id null, the room's own log — and NEVER a `message` event, so the
  * activation boundary is untouched; it changes what an agent reads, not what can summon one.
+ *
+ * `briefing` was added ON PURPOSE for S1.7: the room's owner-authored briefing, its OWN region ahead of
+ * the summary and the recent window. Also COMMON GROUND (shared, principal_id null) — every member of
+ * the room inherits it, it is nobody's private context, and it is NOT a `message` event, so a briefing
+ * that reads like `@sol` summons nobody. It is PINNED: read from the active record, not from the
+ * windowed message tail, so window pressure cannot evict it.
  */
-export type PartSource = 'common-ground' | 'room-turns' | 'own-store' | 'task';
+export type PartSource = 'briefing' | 'common-ground' | 'room-turns' | 'own-store' | 'task';
 
 /** How many recent completed turns feed a summon's cycle context (S-LOOP). Bounded, like the window. */
 const RECENT_TURNS_IN_CONTEXT = 8;
@@ -85,6 +92,8 @@ export class AssemblyInvariantError extends Error {
 /** Authors for the non-conversational parts. Not member ids, and not addressable. */
 const OWN_STORE_AUTHOR = 'context/your-own-notes';
 const TASK_AUTHOR = 'context/task-state';
+/** The room's briefing (S1.7). A context author, not a member — so it frames, and cannot be addressed. */
+const ROOM_BRIEFING_AUTHOR = 'context/room-briefing';
 
 /**
  * THE ASSERTION. Every private part belongs to the principal being summoned, and there is exactly
@@ -96,7 +105,7 @@ const TASK_AUTHOR = 'context/task-state';
  *  - a part claims an UNDECLARED source — an input was added without a decision about it
  */
 export function assertOwnPrincipalOnly(assembly: Assembly): void {
-  const allowed: PartSource[] = ['common-ground', 'own-store', 'task'];
+  const allowed: PartSource[] = ['briefing', 'common-ground', 'own-store', 'task'];
   const principals = new Set<string>();
   for (const part of assembly.parts) {
     if (!allowed.includes(part.source)) {
@@ -144,16 +153,17 @@ export function assertOwnPrincipalOnly(assembly: Assembly): void {
 /**
  * Flatten an assembly into what the adapter is handed. THE ONLY SUCH PATH, and it asserts first.
  *
- * Order is deliberate: common ground, then the member's own notes, then the task's state — the
- * shared record first so private context reads as an addition to it, and the task last so the thing
- * being worked on is nearest the response.
+ * Order is deliberate: the briefing, then common ground, then the member's own notes, then the task's
+ * state — the owner's framing FIRST so it frames everything that follows, the shared record next so
+ * private context reads as an addition to it, and the task last so the thing being worked on is
+ * nearest the response.
  */
 export function windowFor(assembly: Assembly): {
   systemPrompt: string;
   messages: AgentMessage[];
 } {
   assertOwnPrincipalOnly(assembly);
-  const order: PartSource[] = ['common-ground', 'own-store', 'task'];
+  const order: PartSource[] = ['briefing', 'common-ground', 'own-store', 'task'];
   const messages: AgentMessage[] = [];
   for (const source of order) {
     for (const part of assembly.parts.filter((p) => p.source === source)) {
@@ -168,6 +178,7 @@ export function assemblyShape(assembly: Assembly): Record<string, number> {
   const count = (s: PartSource): number =>
     assembly.parts.filter((p) => p.source === s).reduce((n, p) => n + p.messages.length, 0);
   return {
+    briefing: count('briefing'),
     common_ground: count('common-ground'),
     room_turns: count('room-turns'),
     own_store: count('own-store'),
@@ -213,6 +224,21 @@ export interface AssembleInput {
  */
 export async function assembleContext(pool: Pool, input: AssembleInput): Promise<Assembly> {
   const parts: AssemblyPart[] = [];
+
+  // 0. THE ROOM BRIEFING (S1.7) — owner-authored framing, its OWN region AHEAD of the summary and the
+  //    recent window. Common ground (shared, principal_id null): every member of the room inherits it,
+  //    it is nobody's private context, and it is NOT a `message` event, so it cannot activate a summon.
+  //    PINNED: read from the ACTIVE RECORD, not the windowed message tail, so no amount of recent-window
+  //    pressure can evict it — a briefing the room has is a briefing every summon sees. Absent → no part,
+  //    so a room with no briefing assembles exactly as it did before this slice.
+  const briefing = await activeBriefing(pool, input.roomId);
+  if (briefing) {
+    parts.push({
+      source: 'briefing',
+      principal_id: null,
+      messages: [{ author: ROOM_BRIEFING_AUTHOR, body: briefing.content }],
+    });
+  }
 
   // 1. COMMON GROUND — the room's own log, shared by construction: every member can read it, so it
   //    is the one part that is nobody's private context. As of S1.6 it is a ROLLING SUMMARY of the
