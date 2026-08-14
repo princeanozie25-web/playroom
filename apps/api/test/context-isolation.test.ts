@@ -349,7 +349,9 @@ describe('the invariant is enforced by the code, and it FIRES', () => {
       principal_id: null,
       messages: [{ author: 'x', body: 'y' }],
     };
-    expect(() => windowFor(base([smuggled]))).toThrow(/unknown source/);
+    // "undeclared", not "unknown": the parts of a window are declared once (SL2-1), and the refusal
+    // names both the source that arrived and the ones that are declared. See assembly-parts.test.ts.
+    expect(() => windowFor(base([smuggled]))).toThrow(/undeclared source/);
   });
 
   it('refuses a private part that names NOBODY — an unprovable part is refused', () => {

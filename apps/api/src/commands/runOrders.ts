@@ -264,15 +264,21 @@ async function pauseOrderOnError(
   roomId: string,
   orderId: string,
   member: string,
+  errorClass?: string | null,
 ): Promise<void> {
   const order = await orderById(deps.pool, roomId, orderId);
   if (!order) return;
+  // THE CLASS IS IN THE SENTENCE. A pause that says only "ended in error" reads identically whether
+  // the provider was down or the fabric refused the window it was about to send, and the room is
+  // where the owner reads it. Naming the class costs one clause and is the difference between "the
+  // model had a bad night" and "this loop cannot run until someone fixes assembly".
+  const named = errorClass ? ` (${errorClass})` : '';
   await stopOrder(
     deps,
     roomId,
     order,
     'PAUSED',
-    `${member}'s turn ended in error, so the loop paused rather than cycling on a failure`,
+    `${member}'s turn ended in error${named}, so the loop paused rather than cycling on a failure`,
   );
 }
 
@@ -290,10 +296,12 @@ export async function runOrdersCommand(
     completedSeq: number;
     success: boolean;
     orderId?: string;
+    errorClass?: string | null;
   },
 ): Promise<void> {
   if (!input.success) {
-    if (input.orderId) await pauseOrderOnError(deps, input.roomId, input.orderId, input.member);
+    if (input.orderId)
+      await pauseOrderOnError(deps, input.roomId, input.orderId, input.member, input.errorClass);
     return;
   }
   const orders = await activeOrdersForTrigger(

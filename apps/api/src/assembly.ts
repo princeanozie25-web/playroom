@@ -33,20 +33,108 @@ import type { TaskRow } from './tasks.js';
  */
 
 /**
- * The message-bearing sources §7.1 allows. A new one requires editing this union, on purpose.
+ * ══ THE PARTS OF A WINDOW, DECLARED ONCE ══
  *
- * `room-turns` was added ON PURPOSE for S-LOOP: the recent agent turns, so a member summoned into an
- * unattended cycle sees the prior member's work (which the message window excludes by PM7). It is
- * COMMON GROUND — shared, principal_id null, the room's own log — and NEVER a `message` event, so the
- * activation boundary is untouched; it changes what an agent reads, not what can summon one.
+ * This table is the ONLY place a part of the window is declared. The type below is derived from it,
+ * so a part that is not here cannot be named; the allowed set, the flatten order, the shared/private
+ * rule, the telemetry keys and the telemetry labels are all read FROM it rather than restated.
  *
- * `briefing` was added ON PURPOSE for S1.7: the room's owner-authored briefing, its OWN region ahead of
- * the summary and the recent window. Also COMMON GROUND (shared, principal_id null) — every member of
- * the room inherits it, it is nobody's private context, and it is NOT a `message` event, so a briefing
- * that reads like `@sol` summons nobody. It is PINNED: read from the active record, not from the
- * windowed message tail, so window pressure cannot evict it.
+ * ── WHY IT IS A TABLE AND NOT A UNION PLUS SOME ARRAYS ──
+ *
+ * It used to be a union plus a list in `assertOwnPrincipalOnly`, a list in `windowFor`, a branch on
+ * `own-store`, a literal per key in `assemblyShape`, and a hand-written telemetry string in agent.ts —
+ * six enumerations of one fact. S-LOOP added `room-turns` to the union and to `assembleContext` and
+ * touched none of the rest, so every order-rooted cycle threw §7.1 on its own feature, `agent.ts`
+ * caught it into a failed turn, and the standing order paused wearing a reason that read like an
+ * ordinary model failure (S17-N1). S1.7 then hit the same shape and survived it by REMEMBERING to edit
+ * four sites. The next part would have had to remember too.
+ *
+ * The suite could not have caught it: the part is only pushed when the room already holds a completed
+ * turn to carry, and the order tests synthesise the trigger without writing one.
+ *
+ * So the enumerations are gone rather than synchronised. Adding a part is one entry here, and there is
+ * no second place that can be forgotten — the failure mode is deleted, not documented.
+ *
+ * A part is COMMON GROUND unless it says `private`. Common ground is the room's own log, readable by
+ * every member, holding nobody's private context; `private` is the one kind that must name whose it is
+ * and is checked against the summoned principal below.
  */
-export type PartSource = 'briefing' | 'common-ground' | 'room-turns' | 'own-store' | 'task';
+interface PartDeclaration {
+  /** The name a part carries. Also the key of the assertion and the order below. */
+  readonly source: string;
+  /** `private` parts MUST name their principal and it must be the summoned one. `shared` must not. */
+  readonly ownership: 'shared' | 'private';
+  /** The short name this part wears on the telemetry line, so the log follows the declaration. */
+  readonly label: string;
+  /** Why §7.1 allows it. Written here because this is where the decision is actually made. */
+  readonly why: string;
+}
+
+/**
+ * DECLARATION ORDER IS WINDOW ORDER. Reordering these reorders the window, deliberately.
+ *
+ * Exported so the tests can walk the declaration itself rather than a copy of it: a test that listed
+ * the parts again would be the seventh enumeration, and would pass while the sixth was wrong.
+ */
+export const ASSEMBLY_PARTS = [
+  {
+    source: 'briefing',
+    ownership: 'shared',
+    label: 'brief',
+    why:
+      "the room's owner-authored framing (S1.7), FIRST so it frames everything after it. Pinned — read " +
+      'from the active record, not the message tail, so window pressure cannot evict it. Inherited by ' +
+      'every member, and NOT a `message` event, so a briefing that reads like a tag summons nobody.',
+  },
+  {
+    source: 'common-ground',
+    ownership: 'shared',
+    label: 'common',
+    why:
+      "the room's own append-only log — the rolling summary of the older messages (S1.6) followed by " +
+      'the recent window. Shared by construction: every member of the room can read it.',
+  },
+  {
+    source: 'room-turns',
+    ownership: 'shared',
+    label: 'turns',
+    why:
+      'the recent completed agent turns (S-LOOP), so a member summoned into an unattended cycle sees ' +
+      'the prior member’s work — which PM7 deliberately keeps out of the message window. Also the ' +
+      'room’s own log, and never a `message` event, so the activation boundary is untouched: it ' +
+      'changes what an agent READS, not what can summon one.',
+  },
+  {
+    source: 'own-store',
+    ownership: 'private',
+    label: 'own',
+    why:
+      "the summoned member's OWN principal store (§7.1) — the only part that may name a principal, " +
+      'and the only one the assertion below has anything to compare.',
+  },
+  {
+    source: 'task',
+    ownership: 'shared',
+    label: 'task',
+    why: "the task's state — LAST, so the thing being worked on sits nearest the response.",
+  },
+] as const satisfies readonly PartDeclaration[];
+
+/** Derived, not restated: a source is a source because it is in the table above. */
+export type PartSource = (typeof ASSEMBLY_PARTS)[number]['source'];
+
+/** The lookup the assertion uses. One map, built from the one declaration. */
+const DECLARED: ReadonlyMap<string, PartDeclaration> = new Map(
+  ASSEMBLY_PARTS.map((part) => [part.source, part]),
+);
+
+/** The declared sources, for a refusal that says what WAS expected rather than only what was wrong. */
+const DECLARED_SOURCES = ASSEMBLY_PARTS.map((part) => part.source).join(', ');
+
+/** `common-ground` → `common_ground`. The telemetry key for a source, derived from its name. */
+function shapeKey(source: string): string {
+  return source.replace(/-/g, '_');
+}
 
 /** How many recent completed turns feed a summon's cycle context (S-LOOP). Bounded, like the window. */
 const RECENT_TURNS_IN_CONTEXT = 8;
@@ -105,17 +193,21 @@ const ROOM_BRIEFING_AUTHOR = 'context/room-briefing';
  *  - a part claims an UNDECLARED source — an input was added without a decision about it
  */
 export function assertOwnPrincipalOnly(assembly: Assembly): void {
-  const allowed: PartSource[] = ['briefing', 'common-ground', 'own-store', 'task'];
   const principals = new Set<string>();
   for (const part of assembly.parts) {
-    if (!allowed.includes(part.source)) {
+    // THE REFUSAL NAMES WHAT WAS EXPECTED. An undeclared part is not a mystery failure deep in
+    // assembly: it says which source arrived and which ones the table declares, so the operator
+    // reading a paused loop's turn row can tell a forgotten declaration from a provider outage.
+    const declared = DECLARED.get(part.source);
+    if (!declared) {
       throw new AssemblyInvariantError(
-        `part declares an unknown source "${String(part.source)}"`,
+        `part declares the undeclared source "${String(part.source)}" — the window's parts are ` +
+          `declared once, and this is not one of them (${DECLARED_SOURCES})`,
         assembly.principal_id,
         [],
       );
     }
-    if (part.source === 'own-store') {
+    if (declared.ownership === 'private') {
       if (part.principal_id === null) {
         throw new AssemblyInvariantError(
           'a private part names no principal, so it cannot be shown to belong to this one',
@@ -153,37 +245,48 @@ export function assertOwnPrincipalOnly(assembly: Assembly): void {
 /**
  * Flatten an assembly into what the adapter is handed. THE ONLY SUCH PATH, and it asserts first.
  *
- * Order is deliberate: the briefing, then common ground, then the member's own notes, then the task's
- * state — the owner's framing FIRST so it frames everything that follows, the shared record next so
- * private context reads as an addition to it, and the task last so the thing being worked on is
- * nearest the response.
+ * The order is the DECLARATION ORDER — the owner's framing first so it frames everything that follows,
+ * the shared record next so private context reads as an addition to it, and the task last so the thing
+ * being worked on is nearest the response. A part cannot be missing from the order, because there is
+ * no order to be missing from: this walks the same table that says the part exists.
  */
 export function windowFor(assembly: Assembly): {
   systemPrompt: string;
   messages: AgentMessage[];
 } {
   assertOwnPrincipalOnly(assembly);
-  const order: PartSource[] = ['briefing', 'common-ground', 'own-store', 'task'];
   const messages: AgentMessage[] = [];
-  for (const source of order) {
-    for (const part of assembly.parts.filter((p) => p.source === source)) {
+  for (const declared of ASSEMBLY_PARTS) {
+    for (const part of assembly.parts.filter((p) => p.source === declared.source)) {
       messages.push(...part.messages);
     }
   }
   return { systemPrompt: assembly.system.text, messages };
 }
 
-/** What went into a window, for telemetry and for a test to assert the corpus was not empty. */
+/**
+ * What went into a window, for telemetry and for a test to assert the corpus was not empty. Keyed off
+ * the declaration, so a new part is counted the day it exists rather than the day someone remembers.
+ */
 export function assemblyShape(assembly: Assembly): Record<string, number> {
-  const count = (s: PartSource): number =>
-    assembly.parts.filter((p) => p.source === s).reduce((n, p) => n + p.messages.length, 0);
-  return {
-    briefing: count('briefing'),
-    common_ground: count('common-ground'),
-    room_turns: count('room-turns'),
-    own_store: count('own-store'),
-    task: count('task'),
-  };
+  const shape: Record<string, number> = {};
+  for (const declared of ASSEMBLY_PARTS) {
+    shape[shapeKey(declared.source)] = assembly.parts
+      .filter((p) => p.source === declared.source)
+      .reduce((n, p) => n + p.messages.length, 0);
+  }
+  return shape;
+}
+
+/**
+ * The window's composition as one telemetry field — `brief:1+common:12+turns:3+own:0+task:1`.
+ *
+ * DERIVED FROM THE DECLARATION, because the hand-written version was already wrong: it was written
+ * before the briefing existed and never grew a `brief:` term, so every logged turn since S1.7 reported
+ * a composition that silently omitted a whole region of what the model was sent.
+ */
+export function shapeSummary(shape: Record<string, number>): string {
+  return ASSEMBLY_PARTS.map((d) => `${d.label}:${shape[shapeKey(d.source)] ?? 0}`).join('+');
 }
 
 export interface AssembleInput {

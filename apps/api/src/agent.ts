@@ -7,7 +7,7 @@ import type { AgentAdapter, AgentTool, ServerEvent } from '@playroom/shared';
 import { costUsd, getAdapterConfig, listAdapters } from '@playroom/adapters';
 import type { RoomBus } from './bus.js';
 import { appendAgentEvent, appendMessage, type SummonRef, type TaskRef } from './events.js';
-import { assembleContext, assemblyShape, windowFor } from './assembly.js';
+import { assembleContext, assemblyShape, shapeSummary, windowFor } from './assembly.js';
 import { RECENT_WINDOW_MESSAGES } from './summary.js';
 import { mandateFor } from './mandates.js';
 import { stampFor } from './stamp.js';
@@ -656,7 +656,7 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     // test.
     const shape = assemblyShape(assembly);
     console.log(
-      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms ttft=${timings.t_provider_ttft}ms ttfd=${timings.ttfd_total}ms ctx=common:${shape.common_ground}+turns:${shape.room_turns}+own:${shape.own_store}+task:${shape.task}`,
+      `[agent] turn=${turnId} room=${roomId} adapter=${adapterId} in=${tokensIn} out=${tokensOut} cost=$${cost} latency=${latencyMs}ms ttft=${timings.t_provider_ttft}ms ttfd=${timings.ttfd_total}ms ctx=${shapeSummary(shape)}`,
     );
 
     const completedEvent = await appendAgentEvent(
@@ -873,6 +873,10 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         completedSeq: failedEvent.seq,
         success: false,
         orderId: deps.chain?.orderId,
+        // THE REASON THE LOOP STOPPED, NAMED. Without it the pause sentence is the same words for a
+        // provider outage and for a refusal the fabric itself made, and S17-N1 spent a slice looking
+        // like the former while being the latter.
+        errorClass,
       },
     ).catch(() => {});
 

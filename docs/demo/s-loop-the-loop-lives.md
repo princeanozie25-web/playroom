@@ -7,6 +7,31 @@ summon constructor, is human-rooted through the order's creator, and is refused 
 tag would be. This is the record of what the four commits built, the numbers that back it, and the shot
 list for filming the loop. Local build (deploy still billing-blocked — see [[playroom-deploy-blocked]]).
 
+## CORRECTION (15 Aug 2026, SL2-1) — the cycle in this document had never run
+
+**Everything below about what a standing order IS was true when written. The two-member cycle was
+not.** From `bc588bd` (SLOOP-2, this slice's own second commit) until `SL2-1`, an order-rooted turn
+assembled a `room-turns` part that neither of assembly's two gates permitted, so `windowFor` threw
+§7.1 on the feature this slice added, `agent.ts` caught it into `agent.turn.completed{success:false}`,
+and the standing order paused — wearing "ended in error", the same sentence a provider outage wears.
+
+**Every real cycle hit it, deterministically**, because the thing that triggers a cycle IS a
+successful completed turn with text, which is exactly the row `recentCompletedTurns` reads. What ran
+green was the suite: `order-firing.test.ts` synthesises `runOrders` directly and never writes a
+completed-turn row, so the part was never built and the gate was never asked.
+
+So the paragraph below — "Claude drafts and completes → Order B fires → Sol reviews … carries the
+recent turns as context" — described a design, not a behaviour, for eleven days. **The shot list was
+never shot**: no take of §3's "≥3 unattended cycles" exists, and searching both Neon databases for
+the evidence found **zero `order.*` events and zero completed turns in either**, so there is no run
+to point at in any direction. The correction is recorded here rather than quietly fixed because this
+document is the durable record of what S-LOOP built, and what it built did not work.
+
+**Fixed in `SL2-1`**, not hidden: the parts of a window are now declared once, and the permitted set,
+the order, the shared/private rule and the telemetry all derive from that declaration — see
+`apps/api/src/assembly.ts` and `assembly-parts.test.ts`. The first cycle to actually run is asserted
+end to end in `loop-briefed-cycle.test.ts` (SL2-2).
+
 ## What a standing order is, and is not
 
 - **It is delegated human intent.** Only a human creates one (checked against the socket's authenticated
@@ -32,6 +57,10 @@ A person kicks it off with a normal tag (`@claude draft the opening`). Claude dr
 Order B fires → Sol reviews and completes → Order A fires → Claude revises → … The kick-off is cycle 0
 and directly human-rooted; every cycle after is order-rooted, human-rooted through the creator, and
 carries the recent turns as context so the reviewer sees the draft.
+
+> **As of SL2-1 this paragraph is true.** Between `bc588bd` and `SL2-1` it was not: the "carries the
+> recent turns as context" clause is the exact part that threw, so no cycle after the kick-off ever
+> completed. See the correction at the top.
 
 ## The two runaway bounds, in two places
 

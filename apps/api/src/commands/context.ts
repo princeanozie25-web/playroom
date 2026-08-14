@@ -142,7 +142,8 @@ export type Command =
   | { kind: 'clearBriefing'; roomId: string; clientMsgId: string }
   // The loop runner (S-LOOP): a completed turn drives the next cycle. Dispatched fire-and-forget from
   // the post-completion seam under a `system` actor — it is the room running its own standing orders,
-  // not a member acting. `orderId` is the completed turn's order (from its chain), for the error-pause.
+  // not a member acting. `orderId` is the completed turn's order (from its chain), for the error-pause;
+  // `errorClass` is that failure's class, so the pause the owner reads names what actually stopped it.
   | {
       kind: 'runOrders';
       roomId: string;
@@ -150,6 +151,7 @@ export type Command =
       completedSeq: number;
       success: boolean;
       orderId?: string;
+      errorClass?: string | null;
     }
   // Fold the room's older messages into its rolling summary, if the tail has grown past the window
   // (S1.6). Dispatched fire-and-forget from postMessage so the summary is maintained AHEAD of the

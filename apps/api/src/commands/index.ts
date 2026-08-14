@@ -172,6 +172,7 @@ export function executeCommand(
     completedSeq: number;
     success: boolean;
     orderId?: string;
+    errorClass?: string | null;
   },
   deps: CommandDeps,
 ): Promise<void>;
