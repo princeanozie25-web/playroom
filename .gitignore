@@ -13,6 +13,11 @@ next-env.d.ts
 __pycache__/
 .venv/
 
+# A separate project that lives inside this working tree but is NOT part of this repo
+# (its own venv, its own tooling). Excluded so it does not show as untracked noise and so this
+# repo's prettier/verify never scans it (see .prettierignore).
+packet-tracer-mcp/
+
 # Env
 .env
 .env.*

@@ -8,3 +8,7 @@ pnpm-lock.yaml
 .claude/settings.local.json
 # Impeccable critique snapshots — machine-persisted evidence artifacts (SHELL-B1), not hand-formatted.
 .impeccable/
+# A separate project that lives inside this working tree but is NOT part of this repo. Its files are
+# not hand-formatted to this repo's config, and scanning them broke `pnpm verify` (and the pre-commit
+# hook) for everyone. Excluded here; also gitignored.
+packet-tracer-mcp/
