@@ -30,6 +30,7 @@ import {
 } from '../../TaskChip';
 import { InterruptChip, type InterruptItemView } from '../../InterruptChip';
 import { PromotionRow, type PromotionItemView } from '../../PromotionRow';
+import { BriefingRow, type BriefingItemView } from '../../BriefingRow';
 import { Welcome } from '../../Welcome';
 import { PanelPresence } from '../../Panel';
 import { HOOK, pr } from '../../hooks';
@@ -81,6 +82,10 @@ type InterruptItem = { kind: 'interrupt'; key: string; view: InterruptItemView }
 // unlike a task or an interrupt there is no later event that changes it, because a disclosure has
 // no second state — it cannot be lowered, moved or undone.
 type PromotionItem = { kind: 'promotion'; key: string; view: PromotionItemView };
+// A briefing is the room's owner-authored framing (S1.7). One row per set/replace/clear ACT, where it
+// happened — never updated in place: a replace and a clear are their own acts with their own rows, so
+// the transcript keeps what the room was told and when it changed, the same discipline as a handoff.
+type BriefingItem = { kind: 'briefing'; key: string; view: BriefingItemView };
 // An AGENT-INITIATED summon (S1.8): agent A summoned agent B through the tool-call channel. That is a
 // visible ACT, unlike a human tag — which is already visible as the @-mention in the human's message.
 // So ONLY agent-rooted summons render here; a human summon (requested_by is a human) does not.
@@ -96,6 +101,7 @@ type Item =
   | HandoffItem
   | InterruptItem
   | PromotionItem
+  | BriefingItem
   | SummonItem
   | OrderItem;
 
@@ -212,6 +218,33 @@ function buildItems(events: ServerEvent[], agentIds: Set<string>): Item[] {
           purpose: ev.payload.purpose,
           approved_by: ev.payload.approved_by,
           content: ev.payload.content,
+        },
+      });
+    } else if (ev.event_type === 'briefing.set') {
+      // STRAIGHT FROM THE EVENT, nothing derived — who set it, why, the framing itself, and whether it
+      // REPLACED a prior one (replaces_hash present). One row per set/replace, where it happened.
+      order.push({
+        kind: 'briefing',
+        key: `b${ev.seq}`,
+        view: {
+          kind: 'set',
+          briefing_id: ev.payload.briefing_id,
+          by: ev.payload.set_by,
+          purpose: ev.payload.purpose,
+          content: ev.payload.content,
+          replaced: ev.payload.replaces_hash !== null,
+        },
+      });
+    } else if (ev.event_type === 'briefing.cleared') {
+      // The clear is its own act with its own row — so history shows a cleared room apart from one that
+      // was never briefed. No content: a cleared briefing has none.
+      order.push({
+        kind: 'briefing',
+        key: `b${ev.seq}`,
+        view: {
+          kind: 'cleared',
+          briefing_id: ev.payload.briefing_id,
+          by: ev.payload.cleared_by,
         },
       });
     } else if (ev.event_type === 'interrupt.raised') {
@@ -819,6 +852,10 @@ export function Room({
           ) : it.kind === 'promotion' ? (
             <li key={it.key}>
               <PromotionRow promotion={it.view} roster={byId} />
+            </li>
+          ) : it.kind === 'briefing' ? (
+            <li key={it.key}>
+              <BriefingRow briefing={it.view} roster={byId} />
             </li>
           ) : (
             /* `data-accent` on the ROW, so the caret and the working indicator inherit the

@@ -48,6 +48,7 @@ import { warmUp } from './warmup.js';
 import { makeScrubStream } from './scrub.js';
 import { authenticate, diagnoseCredential, type AuthFailure } from './credentials.js';
 import { downgradeInterrupt } from './interrupts.js';
+import { activeBriefing } from './briefings.js';
 import { DECISION_POLL_HINT_MS, decisionExpiryMs, isExpired } from './decisions.js';
 import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
 import { RedeemRefused, redeemRoomCode } from './room-codes.js';
@@ -986,7 +987,25 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           : await eventsAfter(db(), id, await roomWindowFloor(db(), id));
       const oldest = events[0]?.seq;
       const has_older = oldest !== undefined ? await hasEventsBefore(db(), id, oldest) : false;
-      return { events, has_older };
+      // THE ACTIVE BRIEFING (S1.7), as a SEPARATE top-level field — NOT interleaved into `events`. A
+      // briefing is PINNED, not a message with a seq: folding it into the paginated feed would put it on
+      // the first page only (or on every page) and distort the cursor. As its own field it fits the
+      // endpoint's shape and lets a PULLER (claude-code reads history; it is never summoned) inherit the
+      // same framing a summoned member gets — the second delivery point. Null when the room has none.
+      // Cheaper than a dedicated GET /rooms/:id/briefing: no new route, and no extra round-trip for a
+      // puller that already fetches history to read the room.
+      const active = await activeBriefing(db(), id);
+      const briefing = active
+        ? {
+            briefing_id: active.id,
+            content: active.content,
+            content_hash: active.content_hash,
+            purpose: active.purpose,
+            set_by: active.set_by,
+            set_at: active.created_at,
+          }
+        : null;
+      return { events, has_older, briefing };
     });
 
     // POST /rooms/:id/messages { body, client_msg_id? } — the SPEAK half of a connected member's minimum

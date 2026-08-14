@@ -1049,6 +1049,46 @@ body {
   font-size: var(--t-sm);
 }
 
+/* ── THE ROOM BRIEFING (S1.7) ──────────────────────────────────────────────────────────
+   Owner-authored framing, PINNED to the room. Unlike a promotion — a quiet record of a one-off
+   disclosure — a briefing is the room's STANDING framing, meant to be read, so it is a FRAMED,
+   LABELLED PANEL in a register of its own: not a bubble (a human would mistake it for a message),
+   not the muted promotion line (an agent's reader could scroll past it). NO PRINCIPAL ACCENT — a
+   briefing carries no authority, so it wears none. */
+.briefing {
+  margin: var(--s-2) 0;
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+}
+.briefing-head {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  align-items: baseline;
+}
+/* The label is what makes it unmistakably the room's standing brief and not a message. */
+.briefing-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.briefing-purpose {
+  color: var(--ink-2);
+}
+/* THE FRAMING STAYS TEXT — pre-wrap, no markup parsed, the same discipline as promoted text and
+   agent output (A4-F8, §13). Rendered in the strongest ink because a briefing is meant to be read. */
+.briefing-body {
+  white-space: pre-wrap;
+  margin: var(--s-1) 0 0;
+  color: var(--ink);
+  font-size: var(--t-sm);
+}
+
 /* ── THE JOIN SCREEN (S-LIVE) ──────────────────────────────────────────────────────────
    Built at phone width first and allowed to grow, because a phone is the only place it
    will ever be used: a code arrives in a text message and is typed with a thumb. The

@@ -112,6 +112,12 @@ export const HOOK = {
   promotionPurpose: 'promotion-purpose',
   /** The disclosed text itself, quoted and inset. */
   promotionBody: 'promotion-body',
+  /** The room briefing (S1.7) — owner-authored framing pinned to the room. Carries `data-pr-kind`. */
+  briefing: 'briefing',
+  /** The quiet head: the room briefing, set/updated/cleared, by whom, and why. */
+  briefingHead: 'briefing-head',
+  /** The briefing content itself, inset. Absent on a cleared briefing. */
+  briefingBody: 'briefing-body',
   /** The composer form. */
   composer: 'composer',
   /** The room refusal banner (RT-001). */
