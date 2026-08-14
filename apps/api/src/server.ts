@@ -1449,6 +1449,58 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
               }
               return;
             }
+            if (msg.type === 'briefing_set') {
+              // SET OR REPLACE THE ROOM'S BRIEFING (S1.7). The actor is the authenticated member; the
+              // command refuses anyone who is not the room's human owner, so an agent socket — or a
+              // human who is not the owner — cannot set one, whatever this frame says. It confers no
+              // authority: the command writes framing, never a mandate field.
+              const result = await executeCommand(
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+                {
+                  kind: 'setBriefing',
+                  roomId,
+                  clientMsgId: msg.client_msg_id,
+                  content: msg.content,
+                  purpose: msg.purpose,
+                },
+                deps,
+              );
+              if (!result.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: result.refusal.code,
+                      message: result.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
+              return;
+            }
+            if (msg.type === 'briefing_clear') {
+              // CLEAR THE ROOM'S BRIEFING (S1.7). Owner-only and human-only, like the set; a room with
+              // no active briefing is refused (nothing to clear), not silently no-op'd.
+              const result = await executeCommand(
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+                { kind: 'clearBriefing', roomId, clientMsgId: msg.client_msg_id },
+                deps,
+              );
+              if (!result.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: result.refusal.code,
+                      message: result.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
+              return;
+            }
             if (msg.type === 'downgrade') {
               // ONE TAP, and it costs the raiser (Bible §21.3). The actor is the authenticated
               // member, which is also the authorisation: only the member an interrupt is

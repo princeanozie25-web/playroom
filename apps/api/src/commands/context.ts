@@ -129,6 +129,17 @@ export type Command =
       maxUnattendedCycles: number;
       expiresAt: string | null;
     }
+  // Set or replace the room's briefing (S1.7): owner-authored framing pinned to the room. Owner-only
+  // and human-only (checked against the authenticated member, never the frame); confers no authority.
+  | {
+      kind: 'setBriefing';
+      roomId: string;
+      clientMsgId: string;
+      content: string;
+      purpose: string;
+    }
+  // Clear the room's briefing (S1.7). Explicit — a room with no active briefing has nothing to clear.
+  | { kind: 'clearBriefing'; roomId: string; clientMsgId: string }
   // The loop runner (S-LOOP): a completed turn drives the next cycle. Dispatched fire-and-forget from
   // the post-completion seam under a `system` actor — it is the room running its own standing orders,
   // not a member acting. `orderId` is the completed turn's order (from its chain), for the error-pause.

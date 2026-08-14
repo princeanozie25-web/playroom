@@ -119,7 +119,7 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     expect(dispatchers).toEqual(['commands/summon.ts']);
   });
 
-  it('the wire admits exactly seven frames, and every path to agent work traces to a human', () => {
+  it('the wire admits exactly nine frames, and every path to agent work traces to a human', () => {
     // Read off the schema at runtime rather than grepped, so this cannot pass against a stale
     // build or a comment. A new frame type makes this test fail, which is the point: adding one
     // is then a decision about the activation boundary rather than an addition to a union.
@@ -151,8 +151,18 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     // HUMAN-ROOTED through the order's creator. So the boundary still holds — every agent turn traces
     // to a human — the order is a standing authorisation a person gave, not a way for an agent to
     // authorise itself. An agent can send neither frame that lands, which is what keeps it a door.
+    //
+    // IT FIRED AGAIN in S1.7, for `briefing_set` and `briefing_clear` — and the answer is the CLEANEST
+    // of all: a briefing puts NO agent to work. It is owner-authored framing delivered as inert
+    // assembled context (its own event type, never a `message`), so a briefing that reads like `@sol`
+    // summons nobody. Only a HUMAN OWNER may set or clear one (commands/briefing.ts refuses a non-human
+    // before ownership, and a non-owner after), and it CONFERS NO AUTHORITY — a member's evaluated
+    // mandate is byte-identical with and without it. So the boundary holds untouched: no agent turn
+    // traces to a briefing, and an agent can send neither frame that lands.
     const types = ClientFrame.options.map((o) => o.shape.type.value).sort();
     expect(types).toEqual([
+      'briefing_clear',
+      'briefing_set',
       'downgrade',
       'handoff',
       'order_control',

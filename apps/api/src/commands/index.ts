@@ -22,6 +22,7 @@ import {
   updateOrderCommand,
   type OrderResult,
 } from './order.js';
+import { setBriefingCommand, clearBriefingCommand, type BriefingResult } from './briefing.js';
 import { runOrdersCommand } from './runOrders.js';
 import { maintainSummaryCommand } from './maintainSummary.js';
 
@@ -149,6 +150,22 @@ export function executeCommand(
 export function executeCommand(
   ctx: CommandContext,
   command: {
+    kind: 'setBriefing';
+    roomId: string;
+    clientMsgId: string;
+    content: string;
+    purpose: string;
+  },
+  deps: CommandDeps,
+): Promise<BriefingResult>;
+export function executeCommand(
+  ctx: CommandContext,
+  command: { kind: 'clearBriefing'; roomId: string; clientMsgId: string },
+  deps: CommandDeps,
+): Promise<BriefingResult>;
+export function executeCommand(
+  ctx: CommandContext,
+  command: {
     kind: 'runOrders';
     roomId: string;
     member: string;
@@ -200,6 +217,10 @@ export function executeCommand(
       return updateOrderCommand(deps, ctx, command);
     case 'controlOrder':
       return controlOrderCommand(deps, ctx, command);
+    case 'setBriefing':
+      return setBriefingCommand(deps, ctx, command);
+    case 'clearBriefing':
+      return clearBriefingCommand(deps, ctx, command);
     case 'runOrders':
       return runOrdersCommand(deps, ctx, command);
     case 'maintainSummary':

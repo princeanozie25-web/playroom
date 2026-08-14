@@ -5,6 +5,12 @@ export interface RoomRow {
   id: string;
   title: string;
   created_at: string;
+  /**
+   * THE ROOM'S OWNER (S1.7) — the member who created it, or null for a room that predates the column
+   * (migration 026). The one member who may set the room's briefing. Nullable, and a NULL owner is
+   * un-briefable rather than owned-by-the-next-asker.
+   */
+  created_by: string | null;
 }
 
 interface EventRow {
@@ -75,11 +81,14 @@ export async function createRoom(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // `created_by` is the creator, stored so the room has an OWNER (S1.7) — the one member who may set
+    // its briefing. On a repeated POST of an existing id the ON CONFLICT DO NOTHING keeps the original
+    // owner, so ownership never silently changes hands on a re-create.
     const inserted = await client.query<RoomRow>(
-      `INSERT INTO rooms (id, title) VALUES ($1, $2)
+      `INSERT INTO rooms (id, title, created_by) VALUES ($1, $2, $3)
        ON CONFLICT (id) DO NOTHING
-       RETURNING id, title, created_at`,
-      [id, title],
+       RETURNING id, title, created_at, created_by`,
+      [id, title, creator],
     );
     await client.query(
       // EVERY MEMBER EXCEPT A GUEST'S. The blanket enrolment is unchanged for the members that
@@ -112,8 +121,12 @@ export async function createRoom(
     );
     const row =
       inserted.rows[0] ??
-      (await client.query<RoomRow>('SELECT id, title, created_at FROM rooms WHERE id = $1', [id]))
-        .rows[0];
+      (
+        await client.query<RoomRow>(
+          'SELECT id, title, created_at, created_by FROM rooms WHERE id = $1',
+          [id],
+        )
+      ).rows[0];
     await client.query('COMMIT');
     return row;
   } catch (err) {
@@ -126,7 +139,7 @@ export async function createRoom(
 
 export async function getRoom(pool: Pool, id: string): Promise<RoomRow | null> {
   const { rows } = await pool.query<RoomRow>(
-    'SELECT id, title, created_at FROM rooms WHERE id = $1',
+    'SELECT id, title, created_at, created_by FROM rooms WHERE id = $1',
     [id],
   );
   return rows[0] ?? null;
@@ -825,6 +838,49 @@ export async function appendPromotionEvent(
   const { rows } = await client.query<EventRow>(
     `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
      VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'context.promoted', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+/**
+ * The room-visible half of a briefing set/replace (S1.7). Takes a CLIENT, not the pool, for the same
+ * reason `appendPromotionEvent` does: the record and the copy are one transaction (briefings.ts), so
+ * the event's content is derived from the row that recorded it, inside the same transaction.
+ */
+export async function appendBriefingSet(
+  client: PoolClient,
+  roomId: string,
+  actorId: string,
+  payload: {
+    briefing_id: string;
+    content: string;
+    content_hash: string;
+    purpose: string;
+    set_by: string;
+    replaces_hash: string | null;
+  },
+): Promise<ServerEvent> {
+  const { rows } = await client.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'briefing.set', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+/** The room-visible half of a briefing clear (S1.7). In the transaction with the record, as the set is. */
+export async function appendBriefingCleared(
+  client: PoolClient,
+  roomId: string,
+  actorId: string,
+  payload: { briefing_id: string; content_hash: string; cleared_by: string },
+): Promise<ServerEvent> {
+  const { rows } = await client.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'briefing.cleared', $3)
      RETURNING ${EVENT_COLS}`,
     [roomId, actorId, JSON.stringify(payload)],
   );

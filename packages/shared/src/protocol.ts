@@ -159,6 +159,35 @@ export const ClientOrderControl = z.object({
 });
 export type ClientOrderControl = z.infer<typeof ClientOrderControl>;
 
+/**
+ * Client → server: SET or REPLACE the room's briefing (S1.7) — owner-authored framing pinned to the
+ * room, inherited by every summoned member and readable by every puller.
+ *
+ * A briefing CONFERS NO AUTHORITY, and there is deliberately no field on this frame that could: no
+ * scope, no mandate reference, no member. It carries framing (`content`) and why it was set
+ * (`purpose`) and nothing else. Only the room OWNER, and only a HUMAN, may set one — the command
+ * checks the socket's authenticated member against `rooms.created_by` and `members.kind`, never this
+ * frame. Setting when a briefing already exists REPLACES it, as one evented before/after change.
+ */
+export const ClientBriefingSet = z.object({
+  type: z.literal('briefing_set'),
+  client_msg_id: z.string().min(1),
+  content: z.string().min(1),
+  purpose: z.string().min(1),
+});
+export type ClientBriefingSet = z.infer<typeof ClientBriefingSet>;
+
+/**
+ * Client → server: CLEAR the room's briefing (S1.7). Clearing is EXPLICIT — there is no implicit
+ * empty briefing, and a room with no active briefing has nothing to clear (the command refuses it by
+ * a named reason rather than writing a clear-of-nothing). Owner-only and human-only, like the set.
+ */
+export const ClientBriefingClear = z.object({
+  type: z.literal('briefing_clear'),
+  client_msg_id: z.string().min(1),
+});
+export type ClientBriefingClear = z.infer<typeof ClientBriefingClear>;
+
 /** Every frame a client may send. Parsed as a union; an unknown `type` is dropped. */
 export const ClientFrame = z.discriminatedUnion('type', [
   ClientSend,
@@ -168,6 +197,8 @@ export const ClientFrame = z.discriminatedUnion('type', [
   ClientSignDecision,
   ClientOrderCreate,
   ClientOrderControl,
+  ClientBriefingSet,
+  ClientBriefingClear,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
@@ -714,6 +745,62 @@ export const OrderUpdatedEvent = z.object({
 });
 export type OrderUpdatedEvent = z.infer<typeof OrderUpdatedEvent>;
 
+/**
+ * THE ROOM'S BRIEFING WAS SET OR REPLACED (S1.7) — owner-authored framing pinned to the room.
+ *
+ * ── WHY THIS IS ITS OWN EVENT TYPE, AND NOT A `message` ──
+ *
+ * The same reason `context.promoted` is not (RA-005): barrier 1 of the activation boundary reads
+ * text from `message` events and from nothing else (`memberAuthoredText`), so a briefing that said
+ * `@sol` inside a message would summon Sol. Carrying the briefing on its own event type makes the
+ * span INERT by construction — a briefing's `@sol` resolves to NOT_ROOM_CONTENT and summons nobody.
+ * A briefing is delivered as assembled CONTEXT, never as a tool and never as room content that can
+ * activate; this event is what the room RENDERS and what a puller reads, derived from the record.
+ *
+ * `replaces_hash` is the BEFORE to this event's AFTER (the `order.updated` shape): the content hash
+ * of the briefing this one replaced, or null when the room had no briefing before. So a replacement
+ * is legible from the log alone — what the room was told, and what it was told before.
+ *
+ * In the union for the same reason the summary is: `rowToServerEvent` parses every replayed row
+ * through the strict union, so a room holding one would not open at all if the type were unknown here.
+ */
+export const BriefingSetEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('briefing.set'),
+  payload: z.object({
+    briefing_id: z.string(),
+    /** The framing itself. Non-empty by construction — absent and empty are different states. */
+    content: z.string(),
+    /** SHA-256 of `content`, so the line shown can be checked against the record. */
+    content_hash: z.string(),
+    /** Why this framing was set, in the owner's words. Never a template. */
+    purpose: z.string(),
+    /** The room owner who set it. A briefing an agent set does not exist — the command refuses it. */
+    set_by: z.string(),
+    /** The prior briefing's hash (the BEFORE), or null when this is the room's first briefing. */
+    replaces_hash: z.string().nullable(),
+  }),
+});
+export type BriefingSetEvent = z.infer<typeof BriefingSetEvent>;
+
+/**
+ * THE ROOM'S BRIEFING WAS CLEARED (S1.7) — explicitly, by the owner.
+ *
+ * Clearing is an ACT with a record, not the absence of one: a room that was briefed and then cleared
+ * is a different history from a room that never had a briefing, and this event is that difference.
+ * After it, assembly and the read side deliver no briefing region — absent again, but on the record.
+ */
+export const BriefingClearedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('briefing.cleared'),
+  payload: z.object({
+    briefing_id: z.string(), // the briefing that was cleared
+    content_hash: z.string(), // its hash, so the cleared briefing is identifiable in the log
+    cleared_by: z.string(), // the room owner who cleared it
+  }),
+});
+export type BriefingClearedEvent = z.infer<typeof BriefingClearedEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
   SummonEvent,
   RouteSelectedEvent,
@@ -734,6 +821,8 @@ export const ServerEvent = z.discriminatedUnion('event_type', [
   OrderStatusEvent,
   OrderCycledEvent,
   OrderUpdatedEvent,
+  BriefingSetEvent,
+  BriefingClearedEvent,
 ]);
 export type ServerEvent = z.infer<typeof ServerEvent>;
 export type DecisionEvent = z.infer<typeof DecisionEvent>;
@@ -894,6 +983,31 @@ export const ERROR_ORDER_MEMBER_UNKNOWN = 'order_member_unknown';
 export const ERROR_ORDER_BAD_STATE = 'order_bad_state';
 /** An edit carried an out-of-range value — the dial below 1, a non-positive cycle cap, a bad date. */
 export const ERROR_ORDER_INVALID_CONFIG = 'order_invalid_config';
+
+/**
+ * THE BRIEFING REFUSALS (S1.7), kept apart because they are different mistakes.
+ *
+ * The load-bearing one is the first: an AGENT tried to set, replace or clear a briefing. A briefing
+ * configures FRAMING, and letting an agent set one — directly, or by being talked into it through its
+ * own context — is the fabric routing around itself, the same self-authorisation reasoning that keeps
+ * an agent from signing a co-signature or minting a standing order. Checked against the authenticated
+ * member's kind, and refused before ownership so an agent-owner is stopped by kind, not by identity.
+ */
+export const ERROR_BRIEFING_NOT_HUMAN = 'briefing_not_human';
+/** A human who is not the room's owner tried to set, replace or clear it. Names the owner-only rule. */
+export const ERROR_BRIEFING_NOT_OWNER = 'briefing_not_owner';
+/** The room predates owner records (`created_by` is NULL), so no one can brief it. Fail-closed, honest. */
+export const ERROR_BRIEFING_NO_ROOM_OWNER = 'briefing_no_room_owner';
+/** Blank content or blank purpose — the S1.5 shape requires both, and neither may be empty. */
+export const ERROR_BRIEFING_MALFORMED = 'briefing_malformed';
+/**
+ * The briefing exceeds the size cap. ITS OWN CODE, because a briefing is paid on every summon and the
+ * answer is to shorten it, not that the frame was broken — refused AT SET TIME, never truncated at
+ * assembly, so a briefing the room believes it has is always the one the model saw.
+ */
+export const ERROR_BRIEFING_TOO_LARGE = 'briefing_too_large';
+/** Clearing a room that has no active briefing. Nothing to clear — absent and cleared are distinct. */
+export const ERROR_BRIEFING_ABSENT = 'briefing_absent';
 
 /**
  * Valid JSON, and not a frame this server accepts.
