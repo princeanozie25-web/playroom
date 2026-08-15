@@ -403,6 +403,12 @@ export async function fireSummon(deps: CommandDeps, input: FireSummonInput): Pro
         // summon of its own, that is the chain it extends — so the depth cap sees one more hop, and
         // the human root at the head is preserved down the chain. A human-rooted turn (depth 0)
         // passes depth 0; an agent-emitted turn passes its depth, and the constructor increments.
+        // THE CYCLE THIS TURN IS, if it is one (S-CYCLE). Set only for an order's OWN first summon:
+        // `depth === 0` is what an order fires at, and a summon this turn goes on to emit inherits
+        // the order id at depth ≥ 1 — so this field distinguishes "the cycle's turn" from "a turn
+        // downstream of the cycle", and only the former counts. Outside the chain on purpose: the
+        // chain is inherited, and a cycle is counted once.
+        orderTriggerSeq: input.orderId && input.depth === 0 ? input.causeSeq : undefined,
         chain: {
           rootActor: input.rootActor,
           rootIsHuman: input.rootIsHuman,

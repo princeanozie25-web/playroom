@@ -63,7 +63,18 @@ export type Command =
       spans?: TurnSpans;
       // The chain this turn carries, so if it emits a summon the constructor knows the root and depth.
       chain?: SummonChain;
+      // The completion that triggered this turn's CYCLE — present only for a standing order's own
+      // first turn (S-CYCLE), which is the one that counts. Outside the chain because a chain is
+      // inherited by emitted summons and a cycle is counted once.
+      orderTriggerSeq?: number;
     }
+  // A standing order's cycle has a turn (S-CYCLE). Dispatched under `system` from the seam that just
+  // wrote `agent.turn.started` — the durable proof that the cycle is doing something — and it is the
+  // ONLY writer of the cycle counters. Before it existed, a cycle was counted when it was allowed to
+  // begin, so a summon that never became a turn still moved the numbers the loop's bounds read
+  // (SD-N1). Awaited by its caller, unlike the post-completion runner: an uncounted cycle is one the
+  // cap will not bound, so a failure here must stop the turn rather than be swallowed.
+  | { kind: 'orderCycleStarted'; roomId: string; orderId: string; triggerSeq: number }
   // Hand a task to another member (S1.3). Returns a refusal rather than throwing: four
   // preconditions, four reasons, and the caller turns them into typed frames.
   | { kind: 'handoff'; roomId: string; taskId: string; toMember: string; action: string }

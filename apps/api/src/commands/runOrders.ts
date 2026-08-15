@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { ERROR_INTERRUPT_BUDGET } from '@playroom/shared';
-import { appendOrderCycled, appendOrderStatus } from '../events.js';
+import { appendMessage, appendOrderCycled, appendOrderStatus } from '../events.js';
+import { isTurnInFlight } from '../agent.js';
 import {
   activeOrdersForTrigger,
+  claimTrigger,
+  countCycleStarted,
   orderById,
   setOrderStatus,
   TERMINAL_ORDER_STATUSES,
-  tryOpenCycle,
   type OrderRow,
   type OrderStatus,
 } from '../orders.js';
@@ -35,10 +37,18 @@ import type { CommandContext, CommandDeps } from './context.js';
 //   MAX CYCLES    (terminal)  the count the creator set has been reached — the work is done.
 //   ATTENDANCE    (pause)     it has run its unattended budget of cycles with nobody watching.
 //
-// The two pauses can resume; the two terminals cannot. Expiry and the ceiling are checked BEFORE a
-// cycle opens (an expired or unfundable order must not run one more); the count and the dial are read
-// FROM the atomic open (orders.tryOpenCycle) and checked AFTER the cycle fires, so the cycle that
-// reaches the limit is the last one that runs, not the one that is refused.
+// The two pauses can resume; the two terminals cannot. Expiry, the voice and the ceiling are checked
+// BEFORE a cycle opens (an expired, mute or unfundable order must not run one more); the count and
+// the dial are read from the increment that a STARTED TURN causes and checked there, so the cycle
+// that reaches the limit is the last one that runs, not the one that is refused.
+//
+// ── A CYCLE IS A TURN TAKEN (S-CYCLE) ───────────────────────────────────────────────
+//
+// Firing a cycle is TWO acts now, in two places, because they mean two different things: this file's
+// `fireOrderCycle` consumes the trigger and asks for the turn, and `orderCycleStartedCommand` counts
+// the cycle once that turn demonstrably began. SD-N1 is why: a cycle used to be counted at the
+// moment it was ALLOWED to begin, so a summon that never became a turn still moved the number the
+// loop's two bounds are made of.
 // ============================================================================
 
 /**
@@ -148,18 +158,49 @@ export async function fireOrderCycle(
     return false;
   }
 
-  // ── OPEN THE CYCLE — the atomic idempotency + one-in-flight guard (migration 022) ────
-  const opened = await tryOpenCycle(deps.pool, order.id, triggerSeq);
-  if (opened === null) return false;
-  const { cycle, unattended } = opened;
+  // ── PRE-OPEN GATE 3: THE MEMBER IS ALREADY REPLYING (S-CYCLE, defer) ────────────────
+  //
+  // §22b allows one turn per member per room. Until S-CYCLE that rule was enforced at the END of the
+  // summon path, inside `runAgentTurn` — downstream of the cycle counter, of `order.cycled`, of the
+  // task and of the summon row. So a cycle that collided with a turn already in flight was counted,
+  // evented, and then quietly did nothing (SD-N1: one in seven on the live tier, and it reached its
+  // cap and told a phone it had finished). Asked here, the doomed summon is never constructed.
+  //
+  // A DEFERRAL, NOT A STOP, AND NOT A CLAIM. The trigger is left UNCONSUMED: the turn currently in
+  // flight will complete, and that completion is a newer trigger this order fires on. So a collision
+  // costs the loop nothing except the cycle it never opened — which is the honest outcome, because
+  // the member was busy doing the room's work either way.
+  //
+  // THIS IS THE FAST PATH, NOT THE GUARANTEE. `isTurnInFlight` reads a per-process Set (S05a-N1), so
+  // a turn running on another machine is invisible to it. That is exactly why the COUNT no longer
+  // depends on this answer: `countCycleStarted` is driven by the durable `agent.turn.started` row.
+  // This gate exists to stop a doomed summon being written, not to make the count true.
+  if (isTurnInFlight(roomId, order.action_member_id)) {
+    const notice = await appendMessage(
+      deps.pool,
+      roomId,
+      'system',
+      `sys-cycle-busy-${order.id}-${triggerSeq}`,
+      `the standing order did not open a cycle: ${order.action_member_id} is already replying in ` +
+        `this room. It will run on the next completed turn.`,
+    );
+    deps.bus.publish(roomId, notice);
+    deps.log.info(
+      {
+        room_id: roomId,
+        order_id: order.id,
+        member: order.action_member_id,
+        trigger_seq: triggerSeq,
+      },
+      'standing order deferred a cycle: the member is already replying',
+    );
+    return false;
+  }
 
-  const cycled = await appendOrderCycled(deps.pool, roomId, order.creator_member_id, {
-    order_id: order.id,
-    cycle,
-    trigger_seq: triggerSeq,
-    member: order.action_member_id,
-  });
-  if (cycled) deps.bus.publish(roomId, cycled);
+  // ── CLAIM THE TRIGGER — idempotency + one-cycle-in-flight (migration 022) ───────────
+  // This CONSUMES the completion and nothing more. The cycle is counted where a turn is proved to
+  // exist, not here; see orders.ts for why the two were separated.
+  if (!(await claimTrigger(deps.pool, order.id, triggerSeq))) return false;
 
   await fireSummon(deps, {
     roomId,
@@ -186,39 +227,97 @@ export async function fireOrderCycle(
     orderId: order.id,
   });
   deps.log.info(
-    { room_id: roomId, order_id: order.id, cycle, unattended, member: order.action_member_id },
-    'standing order fired a cycle',
+    {
+      room_id: roomId,
+      order_id: order.id,
+      trigger_seq: triggerSeq,
+      member: order.action_member_id,
+    },
+    'standing order fired a summon for a cycle',
+  );
+  return true;
+}
+
+/**
+ * A CYCLE'S TURN HAS STARTED — count it, event it, and apply the two limits that read the count.
+ *
+ * ═══ WHY THE LIMITS LIVE HERE NOW (S-CYCLE) ══════════════════════════════════════════
+ *
+ * `max_cycles` and the attendance dial are the loop's two bounds, and both are counts. Applying them
+ * where the cycle was OPENED meant applying them to a number that could include cycles in which
+ * nothing happened — so both bounds were softer than they read, and LIMIT_REACHED could be reached
+ * by a cycle that took no turn (SD-N1). Applied here, they read a number that means work: every
+ * increment has an `agent.turn.started` row behind it.
+ *
+ * THE SEMANTICS DID NOT CHANGE: the cycle that reaches the limit is still the LAST ONE THAT RUNS,
+ * not the one that is refused — the stop is written while that turn is streaming, exactly as before.
+ *
+ * AT MOST ONCE PER CYCLE, without a guard of its own: the caller is the seam that just wrote
+ * `agent.turn.started`, and migration 006's unique index makes that row at-most-once per summon. A
+ * second call for one cycle would need a second started row for one summon, which the database
+ * refuses.
+ */
+export async function orderCycleStartedCommand(
+  deps: CommandDeps,
+  _ctx: CommandContext,
+  input: { roomId: string; orderId: string; triggerSeq: number },
+): Promise<void> {
+  const order = await orderById(deps.pool, input.roomId, input.orderId);
+  if (!order) return;
+
+  // Null when the order stopped between its summon and its turn (revoked by a person, paused by
+  // another cycle's limit). Nothing is counted and nothing is owed — the turn still runs, because it
+  // was already authorised; what it must not do is advance a count on a stopped order.
+  const counted = await countCycleStarted(deps.pool, order.id);
+  if (counted === null) return;
+  const { cycle, unattended } = counted;
+
+  const cycled = await appendOrderCycled(deps.pool, input.roomId, order.creator_member_id, {
+    order_id: order.id,
+    cycle,
+    trigger_seq: input.triggerSeq,
+    member: order.action_member_id,
+  });
+  if (cycled) deps.bus.publish(input.roomId, cycled);
+  deps.log.info(
+    {
+      room_id: input.roomId,
+      order_id: order.id,
+      cycle,
+      unattended,
+      member: order.action_member_id,
+    },
+    'standing order cycle started',
   );
 
-  // ── POST-OPEN GATE 3: MAX CYCLES (terminal) ─────────────────────────────────────────
-  // The cycle just fired was allowed; if it reached the count the creator set, it was the LAST one.
-  // Terminal — the work the order described is finished, not merely resting.
+  // ── LIMIT 1: MAX CYCLES (terminal) ─────────────────────────────────────────────────
+  // The cycle that just started was allowed; if it reached the count the creator set, it is the LAST
+  // one. Terminal — the work the order described is finished, not merely resting.
   if (order.max_cycles !== null && cycle >= order.max_cycles) {
     await stopOrder(
       deps,
-      roomId,
+      input.roomId,
       order,
       'LIMIT_REACHED',
       `the standing order finished the ${order.max_cycles} ${plural(order.max_cycles, 'cycle')} ` +
         `it was set to run`,
     );
-    return true;
+    return;
   }
 
-  // ── POST-OPEN GATE 4: THE ATTENDANCE DIAL (pause) ───────────────────────────────────
+  // ── LIMIT 2: THE ATTENDANCE DIAL (pause) ───────────────────────────────────────────
   // It has now run this many cycles since a person last watched (a message in the room, or a resume).
   // At the dial it pauses and taps its owner on the shoulder — a loop should not run forever unseen.
   if (unattended >= order.max_unattended_cycles) {
     await stopOrder(
       deps,
-      roomId,
+      input.roomId,
       order,
       'PAUSED',
       `the standing order ran ${unattended} ${plural(unattended, 'cycle')} without you — ` +
         `resume it to keep the loop going`,
     );
   }
-  return true;
 }
 
 /** Is this order past its expiry? Null expiry never expires. Compared against the DB clock. */

@@ -382,6 +382,22 @@ export function summonRuling(event: ServerEvent): SummonRuling {
 const inFlight = new Set<string>();
 const inFlightKey = (roomId: string, adapterId: string): string => `${roomId} ${adapterId}`;
 
+/**
+ * Is this member already answering in this room? (S-CYCLE.)
+ *
+ * Exported so the loop runner can ask BEFORE it constructs a summon that §22b would refuse at the far
+ * end — which is how SD-N1 happened: a task, a summon and a counted cycle were all written for a turn
+ * that was then declined. Reading the same Set rather than a copy of the rule, because two answers to
+ * "is a turn running" is how they drift apart.
+ *
+ * IT INHERITS S05a-N1 IN FULL. A turn on another machine is invisible here, so this is a fast path
+ * that avoids obvious waste — never a correctness guarantee. Nothing that must be true depends on it:
+ * the cycle count comes from the durable `agent.turn.started` row, not from this answer.
+ */
+export function isTurnInFlight(roomId: string, adapterId: string): boolean {
+  return inFlight.has(inFlightKey(roomId, adapterId));
+}
+
 // End time of the previous turn in THIS process — lets each turn record the gap
 // since the last one, so cold-start/autosuspend effects are visible (S0.3c).
 let lastTurnEndedAt: number | undefined;
@@ -422,6 +438,12 @@ export interface AgentTurnDeps {
   // emits a summon, this is the chain it extends — the constructor increments the depth. Absent is
   // treated as a human root at depth 0 (the pre-S1.8 shape).
   chain?: SummonChain;
+  /**
+   * The completion that triggered this turn's CYCLE, present only when this turn is a standing
+   * order's own first turn (S-CYCLE). Deliberately NOT part of `chain`: a chain is inherited by every
+   * summon a turn emits, and a cycle must be counted once.
+   */
+  orderTriggerSeq?: number;
   spans?: { t0: number; t1: number }; // S0.3c: command-entry + message-committed boundaries
 }
 
@@ -554,6 +576,32 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     );
     publish(startedEvent);
     const startedSeq = startedEvent.seq;
+
+    // ── A STANDING ORDER'S CYCLE IS COUNTED HERE, AND ONLY HERE (S-CYCLE) ────────────────
+    //
+    // The row above is the durable proof that this turn exists. Everything that could still refuse a
+    // summoned turn — the ceiling, §22b, a lost race for migration 006's index — happens BEFORE it,
+    // so a count taken from this point cannot include a cycle in which nothing ran (SD-N1).
+    //
+    // AWAITED, ON THE TURN'S OWN PATH, and that is the trade this slice makes deliberately: it costs
+    // one round trip before the provider call, and it buys a count that cannot be wrong. If it
+    // throws, this turn fails as `completed{success:false}` and the order pauses out loud — which is
+    // the fail-closed direction, because an UNCOUNTED cycle is one the cap will not bound.
+    //
+    // `orderTriggerSeq` is set at exactly one construction site (commands/summon.ts) and only for a
+    // cycle's OWN first summon, so a summon that this turn goes on to emit — which inherits the
+    // order id — cannot count a second cycle for the same one.
+    if (deps.orderTriggerSeq !== undefined && deps.chain?.orderId) {
+      await execute(
+        { actorId: 'system', mode: 'system' },
+        {
+          kind: 'orderCycleStarted',
+          roomId,
+          orderId: deps.chain.orderId,
+          triggerSeq: deps.orderTriggerSeq,
+        },
+      );
+    }
 
     // TOOLS OFFERED TO THIS TURN (S1.8). The summon tool is handed to the model ONLY when this
     // member's mandate grants `summon.initiate` — an agent that cannot summon is not offered the
@@ -689,6 +737,20 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
       },
     );
     publish(completedEvent);
+
+    // ── THE TURN IS OVER HERE, SO THE SLOT IS FREE HERE (S-CYCLE) ─────────────────────
+    //
+    // §22b's key used to be released in `finally`, AFTER this function's tail — the emitted summons
+    // and the loop runner. That made "is a turn in flight" answer YES during the very dispatch that
+    // asks the question, and whether it did was a race: `void execute(...)` runs to its first await
+    // and yields, so the runner's read landed either side of the `finally` depending on scheduling.
+    // Nothing could be built on an answer like that. Released HERE, where the completed row is in
+    // the log, the answer is deterministic and it is also more accurate: the turn ended at that row,
+    // and everything below is bookkeeping about a turn that is already over.
+    //
+    // `finally` still deletes, and must: every path that leaves before this line — a refusal, a
+    // throw, a lost race for the started row — has to release the slot too.
+    inFlight.delete(flightKey);
 
     // THE WORK IS FINISHED, so the task says so — and the member who finished it is the actor.
     // Written after the completed row, in the same order the decisions happened: the turn ends,

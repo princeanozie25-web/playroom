@@ -194,10 +194,15 @@ describe('max cycles is a terminus', () => {
     const { roomId, orderId } = await makeOrder('lim-cycles', { maxCycles: 2 });
 
     await fireTrigger(roomId, 'sol', 1000);
+    // WAIT FOR THE TURN, NOT MERELY FOR THE COUNT (S-CYCLE). The count now lands when the cycle's
+    // turn STARTS, so a test that fired the next trigger as soon as it moved would be firing while
+    // claude-main was still answering — which the runner now defers rather than counting. Waiting
+    // for the completed turn is also what a real trigger sequence is: triggers ARE completions.
     await until(
-      () => cycleCount(roomId, orderId),
+      () => turnsOf(roomId, 'claude-main'),
       (n) => n >= 1,
     );
+    expect(await cycleCount(roomId, orderId)).toBe(1);
     expect((await order(roomId, orderId)).status).toBe('ACTIVE'); // one of two — not done yet
 
     await fireTrigger(roomId, 'sol', 2000);
@@ -261,8 +266,10 @@ describe('the attendance dial pauses an unwatched loop, and resets clear it', ()
     const { roomId, orderId } = await makeOrder('att-resume', { maxUnattended: 2 });
 
     await fireTrigger(roomId, 'sol', 1000); // cycle 1, unattended 1
+    // The turn, not the count — see the max-cycles case above: a trigger that arrives while the
+    // member is still answering is deferred now, so the next one waits for the turn to end.
     await until(
-      () => cycleCount(roomId, orderId),
+      () => turnsOf(roomId, 'claude-main'),
       (n) => n >= 1,
     );
     expect((await order(roomId, orderId)).status).toBe('ACTIVE');

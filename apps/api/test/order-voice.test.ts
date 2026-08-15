@@ -263,11 +263,14 @@ describe('a failed telling is returned, never swallowed', () => {
   it('the runner’s voice gate sits BEFORE the cycle opens, next to expiry and the ceiling', () => {
     const runner = strip(readFileSync(resolve(SRC, 'runOrders.ts'), 'utf8'));
     const gate = runner.indexOf('budgetFor(deps.pool, order.action_member_id)');
-    const open = runner.indexOf('tryOpenCycle(');
+    // S-CYCLE split the open in two: `claimTrigger` consumes the completion, and the COUNT happens
+    // at the started-turn seam. The gate must still precede the first of them — nothing is claimed,
+    // summoned or counted on behalf of an order that could not report.
+    const claim = runner.indexOf('claimTrigger(');
     const summon = runner.indexOf('fireSummon(');
     expect(gate).toBeGreaterThan(-1);
-    // Before the atomic open, and therefore before anything is spent.
-    expect(gate).toBeLessThan(open);
+    expect(claim).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(claim);
     expect(gate).toBeLessThan(summon);
   });
 

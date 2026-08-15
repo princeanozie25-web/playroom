@@ -234,32 +234,66 @@ export async function activeOrdersForTrigger(
 }
 
 /**
- * OPEN A CYCLE — the atomic fire guard (migration 022). Advances the order's cycle iff the triggering
- * completion is NEWER than the one that opened its current cycle, which is BOTH single-cycle-in-flight
- * (the next cycle cannot start until this completion — the terminal of the running one — arrives) AND
- * idempotency (a replayed completion has a seq not newer than the cycle it already opened, so it does
- * nothing). Returns the new cycle number AND the new unattended count if it fired, or null if the
- * order is not active, not idle, or the completion is a replay. Both counts come from the atomic
- * UPDATE, so the limit check (max_cycles) and the attendance dial (max_unattended_cycles) decide a
- * stop on the number the write produced rather than on a re-read that could have moved.
+ * ═══ TWO WRITES, TWO MEANINGS (S-CYCLE) ══════════════════════════════════════════════
+ *
+ * These were ONE statement until SD-N1: `tryOpenCycle` claimed the trigger AND incremented the
+ * counters in the same UPDATE, so a cycle was counted the moment it was allowed to begin. It then
+ * fired a summon, and if the turn that summon authorised never ran — the room already had one in
+ * flight, the ceiling moved, the route went away — the count stood anyway. On the live tier one
+ * cycle in seven counted nothing, reached its cap and told a phone it had finished.
+ *
+ * So the two writes are separated by MEANING rather than by mechanism:
+ *
+ *   claimTrigger      THIS COMPLETION HAS BEEN CONSUMED. Idempotency and one-cycle-in-flight, both
+ *                     from `open_cycle_seq` — a replayed completion is not newer than the one that
+ *                     already claimed, and the next cycle cannot start until this one's terminal
+ *                     arrives. It says nothing about work.
+ *   countCycleStarted A TURN EXISTS. Called from the seam where `agent.turn.started` was written,
+ *                     which is durable, and which migration 006's unique index makes at-most-once
+ *                     per summon — so the count cannot double even if the seam is reached twice.
+ *
+ * WHY THIS RATHER THAN A GUARD BEFORE THE INCREMENT: a guard would have to ask "is a turn already
+ * running", and that fact lives in a per-process Set (S05a-N1), which cannot be read in the same
+ * statement as the write. Any check that CAN be separated from its increment by a concurrent turn is
+ * not a fix, it is a smaller window. Counting from the started row needs no check at all: the
+ * increment is caused by the durable event that proves the turn exists.
  */
 export interface OpenedCycle {
   cycle: number;
   unattended: number;
 }
 
-export async function tryOpenCycle(
+/**
+ * CLAIM THE TRIGGER (migration 022's atomic fire guard). True iff this completion is newer than the
+ * one that claimed the order's current cycle and the order is still ACTIVE. Writes no counter: a
+ * claimed trigger is a cycle that is allowed to try, not a cycle that happened.
+ */
+export async function claimTrigger(
   pool: Pool,
   orderId: string,
   triggerSeq: number,
-): Promise<OpenedCycle | null> {
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE standing_orders
+        SET open_cycle_seq = $2, updated_at = now()
+      WHERE id = $1 AND status = 'ACTIVE' AND coalesce(open_cycle_seq, -1) < $2`,
+    [orderId, triggerSeq],
+  );
+  return rowCount === 1;
+}
+
+/**
+ * COUNT A CYCLE THAT HAS A TURN. Returns the numbers the write produced — so the cap and the dial
+ * decide on the value written rather than on a re-read that could have moved — or null if the order
+ * stopped between the summon and the turn, in which case nothing is counted and nothing is owed.
+ */
+export async function countCycleStarted(pool: Pool, orderId: string): Promise<OpenedCycle | null> {
   const { rows } = await pool.query<{ cycle_count: number; unattended_count: number }>(
     `UPDATE standing_orders
-        SET open_cycle_seq = $2, cycle_count = cycle_count + 1, unattended_count = unattended_count + 1,
-            updated_at = now()
-      WHERE id = $1 AND status = 'ACTIVE' AND coalesce(open_cycle_seq, -1) < $2
+        SET cycle_count = cycle_count + 1, unattended_count = unattended_count + 1, updated_at = now()
+      WHERE id = $1 AND status = 'ACTIVE'
       RETURNING cycle_count, unattended_count`,
-    [orderId, triggerSeq],
+    [orderId],
   );
   return rows[0] ? { cycle: rows[0].cycle_count, unattended: rows[0].unattended_count } : null;
 }

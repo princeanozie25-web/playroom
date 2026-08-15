@@ -23,7 +23,7 @@ import {
   type OrderResult,
 } from './order.js';
 import { setBriefingCommand, clearBriefingCommand, type BriefingResult } from './briefing.js';
-import { runOrdersCommand } from './runOrders.js';
+import { orderCycleStartedCommand, runOrdersCommand } from './runOrders.js';
 import { maintainSummaryCommand } from './maintainSummary.js';
 
 export * from './context.js';
@@ -66,6 +66,7 @@ export function executeCommand(
     taskId: string;
     spans?: TurnSpans;
     chain?: SummonChain;
+    orderTriggerSeq?: number;
   },
   deps: CommandDeps,
 ): Promise<void>;
@@ -181,6 +182,11 @@ export function executeCommand(
 ): Promise<void>;
 export function executeCommand(
   ctx: CommandContext,
+  command: { kind: 'orderCycleStarted'; roomId: string; orderId: string; triggerSeq: number },
+  deps: CommandDeps,
+): Promise<void>;
+export function executeCommand(
+  ctx: CommandContext,
   command: { kind: 'maintainSummary'; roomId: string },
   deps: CommandDeps,
 ): Promise<ServerEvent | null>;
@@ -227,6 +233,8 @@ export function executeCommand(
       return clearBriefingCommand(deps, ctx, command);
     case 'runOrders':
       return runOrdersCommand(deps, ctx, command);
+    case 'orderCycleStarted':
+      return orderCycleStartedCommand(deps, ctx, command);
     case 'maintainSummary':
       return maintainSummaryCommand(deps, ctx, command);
   }
