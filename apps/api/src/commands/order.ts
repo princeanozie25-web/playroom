@@ -8,6 +8,7 @@ import {
   ERROR_ORDER_TASK_ABSENT,
   ERROR_ORDER_TASK_BLANK,
   ERROR_ORDER_TASK_TOO_LARGE,
+  ERROR_ORDER_UNBOUNDED_DIAL,
   ERROR_ORDER_UNKNOWN,
   ORDER_TASK_MAX_CHARS,
 } from '@playroom/shared';
@@ -47,6 +48,36 @@ const refuse = (code: string, message: string): OrderResult => ({
   ok: false,
   refusal: { code, message },
 });
+
+/**
+ * A LOOP THAT CHECKS IN RARELY MUST HAVE AN END (S-DIAL).
+ *
+ * At a dial of 1 the attendance check-in WAS the bound: a person saw every cycle before the next one
+ * ran, so an order with no count and no deadline still could not get far unattended. SP-4's
+ * observation lifted that gate, and lifting it removes that protection — so the order has to carry
+ * one of the two bounds that actually STOP: a count or a clock.
+ *
+ * THE DAILY CEILING DOES NOT COUNT, and that is the whole reason this exists. It is a BUDGET: it
+ * pauses when reached and resumes after the UTC midnight reset, which turns an unbounded loop into
+ * one that never finishes rather than one that stops.
+ *
+ * Returns the refusal or null. Shared by create and edit, because an EDIT can raise the dial just as
+ * easily as a create can set it, and a rule enforced on one path is a rule with a door in it.
+ */
+function unboundedDial(
+  maxUnattendedCycles: number,
+  maxCycles: number | null,
+  expiresAt: string | null,
+): { code: string; message: string } | null {
+  if (maxUnattendedCycles <= 1) return null;
+  if (maxCycles !== null || expiresAt !== null) return null;
+  return {
+    code: ERROR_ORDER_UNBOUNDED_DIAL,
+    message:
+      'a standing order that checks in less often than every cycle must also say when it ends — ' +
+      'give it a cycle cap or an expiry (the daily spending ceiling pauses a loop, it does not end one)',
+  };
+}
 
 export async function createOrderCommand(
   deps: CommandDeps,
@@ -134,6 +165,16 @@ export async function createOrderCommand(
       ERROR_ORDER_TASK_TOO_LARGE,
       `a standing order's task must be ${ORDER_TASK_MAX_CHARS} characters or fewer (this one is ${task.length}) — the standing framing belongs in the room's briefing`,
     );
+  }
+
+  // 4. A RAISED DIAL NEEDS AN END (S-DIAL). Refused at creation, where the person is.
+  const unbounded = unboundedDial(input.maxUnattendedCycles, input.maxCycles, input.expiresAt);
+  if (unbounded) {
+    deps.log.warn(
+      { ...base, dial: input.maxUnattendedCycles, code: unbounded.code },
+      'order create refused: a dial above 1 with no cycle cap and no expiry',
+    );
+    return refuse(unbounded.code, unbounded.message);
   }
 
   const orderId = `ord_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
@@ -341,6 +382,17 @@ export async function updateOrderCommand(
       ERROR_ORDER_INVALID_CONFIG,
       'the attendance dial must be at least 1, a cycle cap must be a positive whole number or empty, and an expiry must be a valid date or empty',
     );
+  }
+
+  // A RAISED DIAL NEEDS AN END, on this path too (S-DIAL) — checked against the values being
+  // written, so raising the dial and adding a cap in one edit is allowed and raising it alone is not.
+  const unboundedEdit = unboundedDial(input.maxUnattendedCycles, input.maxCycles, input.expiresAt);
+  if (unboundedEdit) {
+    deps.log.warn(
+      { ...base, dial: input.maxUnattendedCycles, code: unboundedEdit.code },
+      'order edit refused: a dial above 1 with no cycle cap and no expiry',
+    );
+    return refuse(unboundedEdit.code, unboundedEdit.message);
   }
 
   // The event carries BEFORE and AFTER — only the editable terms, because only they can change.

@@ -161,7 +161,9 @@ describe('a refusal pauses the loop OUT LOUD, wearing its own name', () => {
         triggerMember: 'sol',
         actionMember: PRINCE_MEMBER,
         task: 'the objective this cycle is for',
-        maxCycles: null,
+        // A CYCLE CAP: S-DIAL refuses a dial above 1 with no end. Generous enough that this
+        // fixture behaves exactly as it did.
+        maxCycles: 50,
         maxUnattendedCycles: 3,
         expiresAt: null,
       },

@@ -75,7 +75,9 @@ async function makeOrder(roomId: string, maxUnattended = 3): Promise<string> {
       triggerMember: 'sol',
       actionMember: ACTION_MEMBER,
       task: 'review the newest draft and say what you would cut',
-      maxCycles: null,
+      // A CYCLE CAP BY DEFAULT: S-DIAL refuses a dial above 1 with no end, and these fixtures
+      // exercise a raised dial. 50 is far above anything they fire, so behaviour is unchanged.
+      maxCycles: 50,
       maxUnattendedCycles: maxUnattended,
       expiresAt: null,
     },

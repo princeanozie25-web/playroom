@@ -76,7 +76,9 @@ async function create(roomId: string, task?: string) {
       triggerEventType: 'agent.turn.completed',
       triggerMember: 'sol',
       actionMember: 'claude-main',
-      maxCycles: null,
+      // A CYCLE CAP: S-DIAL refuses a dial above 1 with no end. Generous enough that this
+      // fixture behaves exactly as it did.
+      maxCycles: 50,
       maxUnattendedCycles: 3,
       expiresAt: null,
       ...(task === undefined ? {} : { task }),

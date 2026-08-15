@@ -65,7 +65,8 @@ async function makeOrder(prefix: string): Promise<{ roomId: string; orderId: str
       triggerMember: 'sol',
       actionMember: 'claude-main',
       task: 'draft, then hand back for review',
-      maxCycles: null,
+      // A CYCLE CAP: S-DIAL refuses a dial above 1 with no end. Unchanged behaviour for these cases.
+      maxCycles: 50,
       maxUnattendedCycles: 3,
       expiresAt: null,
     },
@@ -88,7 +89,9 @@ function edit(
       roomId,
       clientMsgId: `edit-${Date.now()}-${Math.round(performance.now())}`,
       orderId,
-      maxCycles: terms.maxCycles ?? null,
+      // A default cap, because S-DIAL refuses a dial above 1 with no end — but an EXPLICIT null
+      // survives, so a case can still ask for the unbounded shape and be refused for it.
+      maxCycles: 'maxCycles' in terms ? (terms.maxCycles ?? null) : 50,
       maxUnattendedCycles: terms.maxUnattendedCycles ?? 3,
       expiresAt: terms.expiresAt ?? null,
     },
@@ -156,7 +159,7 @@ describe('the creator edits the cadence, and the log carries before + after', ()
     const events = await updatedEvents(roomId, orderId);
     expect(events).toHaveLength(1);
     expect(events[0].before).toEqual({
-      max_cycles: null,
+      max_cycles: 50,
       max_unattended_cycles: 3,
       expires_at: null,
     });
@@ -213,6 +216,24 @@ describe('what the update refuses', () => {
     // The order is untouched by a refused edit.
     const row = await orderRow(roomId, orderId);
     expect(row.max_unattended_cycles).toBe(3);
-    expect(row.max_cycles).toBeNull();
+    expect(row.max_cycles).toBe(50);
+  });
+
+  it('raising the dial while clearing the cap is refused — the S-DIAL rule, on the EDIT path', async () => {
+    const { roomId, orderId } = await makeOrder('edit-unbounded');
+    // The order is legal today (dial 3, cap 50). This edit would leave a dial above 1 with nothing
+    // to end it — the same shape create refuses, reached the other way round.
+    const res = await edit('prince', roomId, orderId, { maxUnattendedCycles: 5, maxCycles: null });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.refusal.code).toBe('order_unbounded_dial');
+      // It says which bound to give it, and that the daily ceiling is not one.
+      expect(res.refusal.message).toMatch(/cycle cap or an expiry/);
+    }
+    // Untouched: a refused edit is not a partial edit.
+    const row = await orderRow(roomId, orderId);
+    expect(row.max_unattended_cycles).toBe(3);
+    expect(row.max_cycles).toBe(50);
+    expect(await updatedEvents(roomId, orderId)).toHaveLength(0);
   });
 });

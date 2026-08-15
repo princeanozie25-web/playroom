@@ -168,7 +168,9 @@ async function makeOrder(
       triggerMember: trigger,
       actionMember: action,
       task: 'review the draft and say what you would cut',
-      maxCycles: limits.maxCycles ?? null,
+      // A CYCLE CAP BY DEFAULT: S-DIAL refuses a dial above 1 with no end, and these fixtures
+      // exercise a raised dial. 50 is far above anything they fire, so behaviour is unchanged.
+      maxCycles: limits.maxCycles ?? 50,
       maxUnattendedCycles: limits.maxUnattended ?? 3,
       expiresAt: null,
     },

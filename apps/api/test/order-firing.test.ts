@@ -67,7 +67,9 @@ async function makeOrder(prefix: string): Promise<{ roomId: string; orderId: str
       triggerMember: 'sol', // sol's completion fires the order
       actionMember: 'claude-main', // and it summons claude-main
       task: 'draft, then hand back for review',
-      maxCycles: null,
+      // A CYCLE CAP: S-DIAL refuses a dial above 1 with no end. Generous enough that this
+      // fixture behaves exactly as it did.
+      maxCycles: 50,
       maxUnattendedCycles: 3,
       expiresAt: null,
     },

@@ -130,7 +130,9 @@ async function makeOrder(roomId: string, task: string, maxUnattended = 3): Promi
       triggerMember: 'sol',
       actionMember: 'claude-main',
       task,
-      maxCycles: null,
+      // A CYCLE CAP BY DEFAULT: S-DIAL refuses a dial above 1 with no end, and these fixtures
+      // exercise a raised dial. 50 is far above anything they fire, so behaviour is unchanged.
+      maxCycles: 50,
       maxUnattendedCycles: maxUnattended,
       expiresAt: null,
     },

@@ -58,6 +58,8 @@ describe('the loops screen reads and steers orders over HTTP', () => {
         action_member: 'claude-main',
         task: 'review the newest draft and say what you would cut',
         max_unattended_cycles: 3,
+        // S-DIAL: a dial above 1 needs an end. Generous, so nothing else about this case changes.
+        max_cycles: 50,
       }),
     });
     expect(create.status).toBe(201);
@@ -93,7 +95,8 @@ describe('the loops screen reads and steers orders over HTTP', () => {
 
     const edited = await api(`/rooms/${roomId}/orders/${orderId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ max_unattended_cycles: 5, max_cycles: null }),
+      // Raising the dial AND keeping a cap: S-DIAL refuses a raised dial with neither bound.
+      body: JSON.stringify({ max_unattended_cycles: 5, max_cycles: 25 }),
     });
     expect(edited.status).toBe(200);
 

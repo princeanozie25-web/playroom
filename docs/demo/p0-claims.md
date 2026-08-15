@@ -438,6 +438,35 @@ cycle asked for clarification — the order's intent is still generic). **Not:**
 
 ---
 
+## S-DIAL — THE LOOP THAT TELLS YOU (the gate lifts, and what replaces it)
+
+**THE DIAL GATE IS LIFTED, AND THE REASON IS THE OBSERVATION.** `max_unattended_cycles` may now
+exceed 1. What lifted it is not this code and not a decision to allow it: it is that **on 15 Aug 2026
+at 10:23:32 UTC a BLOCKER hand raised in a closed room arrived on Prince's iPhone lock screen,
+through Do Not Disturb, and he saw it** (SL2-N4, closed above). The gate existed because a loop that
+stops silently is a loop nobody can leave running; that is no longer true, and only the observation
+made it so. Worth stating precisely: **the gate was always POLICY on this sheet, never code** —
+`validCount(x, 1, false)` enforced a minimum of 1 and there has never been a maximum.
+
+**LIFTING IT REMOVED A BOUND, SO ONE WAS ADDED.** At a dial of 1 the check-in WAS the end: a person
+saw every cycle before the next ran. Above 1 an order must carry something that actually STOPS — a
+cycle cap or an expiry — refused at creation and at edit with `order_unbounded_dial`. The daily
+ceiling explicitly does not count, and the refusal says so: it PAUSES at its limit and RESUMES after
+the UTC midnight reset, which makes an unbounded loop one that never finishes rather than one that
+stops.
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | A loop can be left running further than one cycle without going quiet. AN ORDER THAT CANNOT SPEAK DOES NOT CONTINUE: `interrupts_per_day` is 6 per raiser, it sits below the 20/hour push throttle so it bites first, and an order's stop-interrupt is charged to the SAME member whose cycles run — so a pre-open gate now pauses an order whose voice is spent, before a cycle opens and before a paid turn is spent on work nobody could be told about. The fix is NOT a bigger budget, and a test asserts all five mandates still say 6. Two words reach the phone: a FINISHED (a terminal status the server wrote) arrives silent, a NEEDS-YOU buzzes. Every other bound still binds at a raised dial and names which rule fired. |
+| **What it does NOT** | **The budget-exhaustion pause cannot reach a closed phone** — telling it would mean raising an interrupt, and the reason it is happening is that raising one is refused. No exemption was written, deliberately: the boundary is stated instead. **FINISHED is not completion** — it names LIMIT_REACHED / EXPIRED / REVOKED, and "the order ran the count it was given" is not "the work is done". **ST-N1 stays open.** **Nothing here has been run at a raised dial on the live tier yet** — SD-4 is where that happens, and until it does this section describes tested behaviour rather than observed behaviour.                                                                                                                  |
+
+**The one sentence a caption may use:** _a loop can now run several cycles between check-ins, because
+it can tell you when it stops — and if it ever cannot tell you, it stops instead._ **Not:** _the loop
+is autonomous_ (it carries a count or a clock, and every stop is named). **Not:** _it knows when the
+work is finished_ (it knows when the count ran out).
+
+---
+
 ## S-PUSH — THE HAND THAT REACHES (a notification, observed on a phone)
 
 SL2-N4 was the loop's last honest limit: a raised hand rendered in the room and reached nobody whose

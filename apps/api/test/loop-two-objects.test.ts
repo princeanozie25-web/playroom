@@ -110,7 +110,9 @@ async function runOneCycle(roomId: string): Promise<void> {
       triggerMember: 'sol',
       actionMember: 'claude-main',
       task: 'review the draft and say what you would cut',
-      maxCycles: null,
+      // A CYCLE CAP: S-DIAL refuses a dial above 1 with no end. Generous enough that this
+      // fixture behaves exactly as it did.
+      maxCycles: 50,
       maxUnattendedCycles: 3,
       expiresAt: null,
     },

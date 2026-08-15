@@ -1003,6 +1003,21 @@ export const ERROR_ORDER_BAD_STATE = 'order_bad_state';
 export const ERROR_ORDER_INVALID_CONFIG = 'order_invalid_config';
 
 /**
+ * A DIAL ABOVE 1 WITH NOTHING TO STOP IT (S-DIAL).
+ *
+ * The attendance dial was the bound that made an unbounded loop safe: at 1, a person saw every cycle
+ * before the next one ran. SP-4's observation lifted that gate — a raised hand now reaches a phone —
+ * so the dial may exceed 1, and the loop can run further between check-ins.
+ *
+ * What it may NOT do is run with no end at all. The remaining bounds are a COUNT (max_cycles), a
+ * CLOCK (expires_at) and a BUDGET (the daily ceiling) — and the ceiling is the wrong shape for this:
+ * it PAUSES at its limit and RESUMES after the UTC midnight reset, which makes an unbounded loop one
+ * that never finishes rather than one that stops. So an order that checks in rarely must carry a
+ * count or a deadline, and the refusal says which to add.
+ */
+export const ERROR_ORDER_UNBOUNDED_DIAL = 'order_unbounded_dial';
+
+/**
  * THE TASK REFUSALS (S-TASK), and they fire AT CREATION rather than at fire time on purpose.
  *
  * An order with no objective is the bug SL2-N5 named: the loop runs, and spends a paid turn asking

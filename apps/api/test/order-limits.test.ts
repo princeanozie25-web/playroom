@@ -107,7 +107,10 @@ async function makeOrder(
       triggerMember: 'sol', // sol's completion fires the order
       actionMember: 'claude-main', // and it summons claude-main
       task: 'draft, then hand back for review',
-      maxCycles: limits.maxCycles ?? null,
+      // A CYCLE CAP BY DEFAULT: S-DIAL refuses a dial above 1 with no end, and this file's default
+      // dial is 3. 50 is far above anything any case here fires, so every existing assertion about
+      // the ceiling, the expiry and the attendance dial is unchanged — those bounds fire first.
+      maxCycles: limits.maxCycles ?? 50,
       maxUnattendedCycles: limits.maxUnattended ?? 3,
       expiresAt: limits.expiresAt ?? null,
     },
