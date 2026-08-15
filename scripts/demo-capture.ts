@@ -593,6 +593,97 @@ async function clipBriefing(
   return { take, room: roomId, beats };
 }
 
+// Clip PUSH — S-PUSH SP-4. The IN-PRODUCT half of a notification reaching a person: the control that
+// says it is on, and the claim itself sitting in the room the notification pointed at.
+//
+// WHAT THIS CANNOT FILM, AND WHY THAT IS NOT A GAP IN THE HARNESS. The notification arrives on an
+// operating system's lock screen. Playwright drives a browser; there is no browser API that can
+// observe an OS notification, and a browser screenshot of one would be a mock-up. The artifact for
+// that half is Prince's own device screenshot (15 Aug 2026, 11:23 BST) — a photograph of the thing
+// happening, which is the only honest evidence available for it. This clip films everything on the
+// Playroom side of that boundary and claims nothing about the other side.
+/**
+ * A fresh browser must meet the OFFER or an honest "cannot" — never an already-granted state, and
+ * never a dead toggle.
+ *
+ * Headless Chromium reports Notification.permission as "denied" by default, so what this clip
+ * actually films is the BLOCKED copy: "notifications are blocked for this site — turn them back on
+ * in your browser settings". That is the right thing to film. It is a control telling the truth
+ * about a permission it does not own, in the one state where a lesser implementation would show a
+ * switch that silently does nothing.
+ */
+function offersTheChoiceHonestly(text: string): boolean {
+  return /notify me when something needs me|blocked for this site|cannot receive notifications|not configured/i.test(
+    text,
+  );
+}
+
+async function clipPush(
+  browser: any,
+  take: number,
+  out: string,
+  target: LiveTarget,
+  roomId: string,
+): Promise<unknown> {
+  const dir = resolve(out, `push-take${take}`);
+  mkdirSync(dir, { recursive: true });
+  const PHONE = { width: 390, height: 844 };
+  const ctx = await browser.newContext({
+    viewport: PHONE,
+    recordVideo: { dir: resolve(dir, 'stream'), size: PHONE },
+  });
+  const page = await ctx.newPage();
+  const video = page.video();
+  const beats: Record<string, unknown> = {};
+
+  try {
+    await page.goto(`${target.web}/r/${encodeURIComponent(roomId)}`, {
+      waitUntil: 'domcontentloaded',
+    });
+    must(page.url().startsWith(target.web), `the page left the live origin: ${page.url()}`);
+
+    // 1. THE CONTROL, OFFERING THE CHOICE. This browser is NOT the subscribed device — it is a fresh
+    //    context with no service worker and no permission — so what it correctly shows is the OFFER:
+    //    "notify me when something needs me". That is the state worth filming anyway, because it is
+    //    the state every new viewer meets, and it is the proof that the prompt is asked for rather
+    //    than sprung: nothing has been requested at this point, and nothing will be until a tap.
+    //    The subscribed state ("on · 1 device") is on Prince's phone, which no browser can film.
+    await page.waitForSelector('[data-pr="push-control"]', { timeout: 30_000 });
+    const control = (await page.locator('[data-pr="push-control"]').first().innerText()).trim();
+    must(control.length > 0, 'the notification control rendered empty');
+    must(
+      offersTheChoiceHonestly(control),
+      `the control is in an unexpected state for a fresh browser: "${control}"`,
+    );
+    beats.control = control;
+    log(`  notification control (fresh browser): ${control}`);
+    await sleep(HOLD);
+
+    // 2. THE CLAIM IN THE ROOM. The interrupt the notification was about — the thing a person opens
+    //    the room to find. LIVENESS: the chip on screen must be an interrupt the live api knows.
+    await page.waitForSelector('[data-pr="interrupt"]', { timeout: 30_000 });
+    const chip = page.locator('[data-pr="interrupt"]').last();
+    const summary = (await chip.innerText()).trim();
+    must(summary.length > 0, 'the interrupt chip rendered empty');
+    const fromApi = await page.evaluate(async (rid: string) => {
+      const res = await fetch(`/api/history?room=${encodeURIComponent(rid)}&limit=200`);
+      const body = (await res.json()) as {
+        events?: Array<{ event_type: string; payload?: { urgency?: string } }>;
+      };
+      return (body.events ?? []).filter((e) => e.event_type === 'interrupt.raised').length;
+    }, roomId);
+    must(fromApi > 0, 'the live api reports no raised interrupt for this room');
+    beats.interrupts_live = fromApi;
+    beats.chip = summary.replace(/\s+/g, ' ').slice(0, 160);
+    log(`  interrupt chip on screen, and the live api reports ${fromApi} raised`);
+    await sleep(HOLD);
+  } finally {
+    await ctx.close();
+    await video?.saveAs(resolve(dir, `push-take${take}-stream.webm`)).catch(() => {});
+  }
+  return { take, room: roomId, beats };
+}
+
 async function main(): Promise<void> {
   const which = process.argv[2] ?? 'all';
   const takeArg = process.argv[3];
@@ -642,6 +733,33 @@ async function main(): Promise<void> {
 
   // ── THE LIVE BRIEFING CAPTURE (S-LIVE) — same discipline as `mandate`: explicit live target, no
   // default, and it films a room that already HAS an owner and a briefing (S17-N3 means most cannot).
+  if (which === 'push') {
+    const target = resolveLiveTarget(process.env);
+    log(`LIVE TARGET — api ${target.api} · web ${target.web}`);
+    const roomId = process.env.PLAYROOM_CAPTURE_ROOM?.trim();
+    if (!roomId) {
+      throw new LiveCaptureRefused(
+        'PLAYROOM_CAPTURE_ROOM is not set — this clip films the room a notification pointed at',
+      );
+    }
+    const warmed = await warmTier(target);
+    log(`tier warm in ${warmed}ms`);
+    const browser = await loadChromium(home).launch();
+    const take = Number(takeArg ?? 1);
+    let report: unknown;
+    try {
+      report = await clipPush(browser, take, out, target, roomId);
+    } finally {
+      await browser.close();
+    }
+    writeFileSync(
+      resolve(out, `push-run-report-take${take}.json`),
+      JSON.stringify({ target, ...(report as object) }, null, 2),
+    );
+    log(`done — push capture at 390px against ${target.web}`);
+    process.exit(0);
+  }
+
   if (which === 'briefing') {
     const target = resolveLiveTarget(process.env);
     log(`LIVE TARGET — api ${target.api} · web ${target.web}`);
