@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { sendNotification, setVapidDetails, WebPushError } from 'web-push';
+import webpush from 'web-push';
 import { deleteByEndpoint, markDelivered, subscriptionsFor } from './push.js';
 
 /**
@@ -135,7 +135,7 @@ function vapidConfigured(): boolean {
     vapidReady = false;
     return false;
   }
-  setVapidDetails(subject, publicKey, privateKey);
+  webpush.setVapidDetails(subject, publicKey, privateKey);
   vapidReady = true;
   return true;
 }
@@ -218,7 +218,7 @@ export async function notifyPrincipal(
       }
 
       try {
-        await sendNotification(
+        await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
           payload,
           { TTL: 3600, urgency: input.urgency === 'BLOCKER' ? 'high' : 'normal' },
@@ -234,7 +234,12 @@ export async function notifyPrincipal(
         });
         await markDelivered(pool, sub.id);
       } catch (err) {
-        const status = err instanceof WebPushError ? err.statusCode : 0;
+        // Read the status off the error SHAPE rather than an instanceof: the class travels through
+        // the default export too, and a duck-typed read cannot break the way the named import did.
+        const status =
+          typeof (err as { statusCode?: unknown })?.statusCode === 'number'
+            ? (err as { statusCode: number }).statusCode
+            : 0;
         // 404/410 is the vendor saying this subscription no longer exists (RFC 8030) — the ONLY
         // reliable signal, so it is the only moment the row is honestly removable.
         const gone = status === 404 || status === 410;

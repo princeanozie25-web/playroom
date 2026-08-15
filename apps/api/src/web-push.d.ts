@@ -13,19 +13,28 @@
  * is not delegated to a dependency; the dependency only encrypts and signs.
  */
 declare module 'web-push' {
-  /** Identify this application server to the vendor, and sign with the VAPID keypair. Called once. */
-  export function setVapidDetails(subject: string, publicKey: string, privateKey: string): void;
-
-  /** Encrypt and POST one payload to one endpoint. Rejects with a WebPushError on a vendor refusal. */
-  export function sendNotification(
-    subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
-    payload: string,
-    options?: { TTL?: number; urgency?: string },
-  ): Promise<{ statusCode: number }>;
-
-  /** A vendor refusal, carrying the status code the send path branches on (404/410 = gone). */
-  export class WebPushError extends Error {
-    statusCode: number;
-    body: string;
+  /**
+   * A DEFAULT EXPORT, and that is not a style choice — it is what the package actually is.
+   *
+   * `web-push` is CommonJS. Under Node's ESM loader a CJS module has exactly one export, the
+   * default; named imports are synthesised only when Node's static analysis can see the assignments,
+   * and it cannot see this package's. Vitest's transform DOES synthesise them, so
+   * `import { sendNotification } from 'web-push'` passed the entire test suite and then crash-looped
+   * the deployed api at boot: "The requested module 'web-push' does not provide an export named
+   * 'sendNotification'". The fix is to import what is there.
+   */
+  interface WebPush {
+    /** Identify this application server to the vendor, and sign with the VAPID keypair. Once. */
+    setVapidDetails(subject: string, publicKey: string, privateKey: string): void;
+    /** Encrypt and POST one payload to one endpoint. Rejects with a WebPushError on a refusal. */
+    sendNotification(
+      subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
+      payload: string,
+      options?: { TTL?: number; urgency?: string },
+    ): Promise<{ statusCode: number }>;
+    /** A vendor refusal, carrying the status code the send path branches on (404/410 = gone). */
+    WebPushError: new (...args: never[]) => Error & { statusCode: number };
   }
+  const webpush: WebPush;
+  export default webpush;
 }
