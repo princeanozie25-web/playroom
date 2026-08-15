@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
-import { testPool, uniqueRoomId } from './support.js';
+import { dropRoomQuiesced, testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { appendAgentEvent, appendMessage, createRoom } from '../src/events.js';
+import { appendAgentEvent, appendMessage, appendSummon, createRoom } from '../src/events.js';
 import { ensureTask } from '../src/tasks.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 import {
@@ -136,13 +136,9 @@ beforeEach(() => {
   };
 });
 afterEach(async () => {
-  for (const room of rooms) {
-    await pool.query('DELETE FROM standing_orders WHERE room_id = $1', [room]);
-    await pool.query('DELETE FROM events WHERE room_id = $1', [room]);
-    await pool.query('DELETE FROM tasks WHERE room_id = $1', [room]);
-    await pool.query('DELETE FROM room_members WHERE room_id = $1', [room]);
-    await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
-  }
+  // Quiesce THEN delete (support.ts): the refusing adapter's turn is still landing rows when this
+  // returns, and a room deleted mid-turn leaves debris §19 counts as unrooted — in another file.
+  for (const room of rooms) await dropRoomQuiesced(pool, room);
   rooms.length = 0;
 });
 afterAll(async () => {
@@ -183,6 +179,22 @@ describe('a refusal pauses the loop OUT LOUD, wearing its own name', () => {
       createdBy: 'prince',
       causeSeq: kick.seq,
     });
+    // The summon comes first, because §19's drift query is GLOBAL: a turn whose summon_id matches no
+    // summon row is unrooted wherever it lives, and a teardown that loses a race would leak one.
+    await appendSummon(
+      pool,
+      roomId,
+      { task_id: task.id },
+      {
+        summon_id: `trig-${roomId}`,
+        member: 'sol',
+        requested_by: 'prince',
+        root_actor: 'prince',
+        root_is_human: true,
+        depth: 0,
+        cause_seq: kick.seq,
+      },
+    );
     const trigger = await appendAgentEvent(
       pool,
       roomId,

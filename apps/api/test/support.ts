@@ -476,3 +476,56 @@ export function expectEvent<T extends ServerEventT['event_type']>(
   }
   return row;
 }
+
+/**
+ * DROP A ROOM WITHOUT LEAVING DEBRIS THE §19 DRIFT QUERY WILL COUNT (SL2-4).
+ *
+ * A test that fires a real cycle leaves fire-and-forget work behind: the turn is dispatched, the file
+ * moves on, and rows keep landing. Delete the room's events while one of those turns is mid-flight and
+ * the LATE rows arrive after their summon is gone — a turn row citing a summon that no longer exists,
+ * which is precisely what §19 calls unrooted. That query is GLOBAL, so the debris fails
+ * `summon-provenance.test.ts` in a different file, and it does it intermittently, because whether it
+ * fails depends on which file vitest happened to be running at that moment.
+ *
+ * So: QUIESCE FIRST — wait for every started turn in the room to have a completed row — and only then
+ * delete. The retry loop stays as the backstop for a write that lands anyway; it is the belt, and the
+ * wait is the braces. `order-limits.test.ts` has the retry without the wait, which is the version that
+ * flakes; it should adopt this once something forces the issue.
+ */
+export async function dropRoomQuiesced(pool: Pool, room: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const { rows } = await pool.query<{ started: string; completed: string }>(
+      `SELECT count(*) FILTER (WHERE event_type = 'agent.turn.started') AS started,
+              count(*) FILTER (WHERE event_type = 'agent.turn.completed') AS completed
+         FROM events WHERE room_id = $1`,
+      [room],
+    );
+    if (Number(rows[0].started) <= Number(rows[0].completed) || Date.now() > deadline) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // EVERY delete inside the retry, in dependency order. Deleting the children once and then only
+  // retrying the parents is the version that silently gives up: a self-stopping order raises its
+  // owner's interrupt asynchronously, so an `interrupts` row can land AFTER that table was cleared
+  // and then hold the room row against six attempts and a shrug. Rooms left behind that way are how
+  // this database accumulated debris from three slices ago.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      await pool.query('DELETE FROM interrupts WHERE room_id = $1', [room]);
+      await pool.query('DELETE FROM standing_orders WHERE room_id = $1', [room]);
+      await pool.query('DELETE FROM room_briefings WHERE room_id = $1', [room]);
+      await pool.query('DELETE FROM room_members WHERE room_id = $1', [room]);
+      await pool.query('DELETE FROM events WHERE room_id = $1', [room]);
+      await pool.query('DELETE FROM tasks WHERE room_id = $1', [room]);
+      await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
+      return;
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  // LOUD, not silent. A room that survives teardown is debris a later run will trip over, and the
+  // last failure is the only thing that says why.
+  throw new Error(`could not drop room ${room}: ${String(lastErr)}`);
+}

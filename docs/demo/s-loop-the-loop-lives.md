@@ -30,7 +30,10 @@ document is the durable record of what S-LOOP built, and what it built did not w
 **Fixed in `SL2-1`**, not hidden: the parts of a window are now declared once, and the permitted set,
 the order, the shared/private rule and the telemetry all derive from that declaration — see
 `apps/api/src/assembly.ts` and `assembly-parts.test.ts`. The first cycle to actually run is asserted
-end to end in `loop-briefed-cycle.test.ts` (SL2-2).
+end to end in `loop-briefed-cycle.test.ts` (SL2-2), and **ran against real providers on 15 Aug 2026**
+(`scripts/run-briefed-loop.ts`, local tier — the numbers are in the S-LOOP2 section of
+[p0-claims.md](p0-claims.md)). The shot list below is still a shot list: there is no capture of any
+of it (S17-N4).
 
 ## What a standing order is, and is not
 

@@ -1,8 +1,14 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, AgentMessage, AgentTurnChunk } from '@playroom/shared';
-import { testPool, uniqueRoomId } from './support.js';
+import { dropRoomQuiesced, testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { appendAgentEvent, appendMessage, appendRoomSummary, createRoom } from '../src/events.js';
+import {
+  appendAgentEvent,
+  appendMessage,
+  appendRoomSummary,
+  appendSummon,
+  createRoom,
+} from '../src/events.js';
 import { ensureTask } from '../src/tasks.js';
 import { setBriefing } from '../src/briefings.js';
 import { RECENT_WINDOW_MESSAGES, SUMMARY_TRIGGER_BATCH } from '../src/summary.js';
@@ -57,33 +63,10 @@ beforeEach(() => {
   };
 });
 
-/**
- * Tear a room down, resilient to a turn still writing — the shape order-limits.test.ts arrived at. A
- * fired cycle's turn can commit an event AFTER its room's events were deleted but BEFORE the room row
- * is; that stray row fails the `rooms` FK and leaves a summon-less turn the GLOBAL §19 drift query
- * counts as unrooted, breaking a test in another file.
- */
-async function dropRoom(room: string): Promise<void> {
-  await pool.query('DELETE FROM interrupts WHERE room_id = $1', [room]);
-  await pool.query('DELETE FROM standing_orders WHERE room_id = $1', [room]);
-  await pool.query('DELETE FROM room_briefings WHERE room_id = $1', [room]);
-  await pool.query('DELETE FROM room_members WHERE room_id = $1', [room]);
-  // ALL THREE DELETES INSIDE THE RETRY: a late event references its task, so the FK can refuse the
-  // tasks delete as readily as the rooms one — catching only the last of them retries the wrong race.
-  for (let attempt = 0; attempt < 6; attempt++) {
-    try {
-      await pool.query('DELETE FROM events WHERE room_id = $1', [room]);
-      await pool.query('DELETE FROM tasks WHERE room_id = $1', [room]);
-      await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 250)); // a turn is mid-write; let it land, then re-delete
-    }
-  }
-}
-
 afterEach(async () => {
-  for (const room of rooms) await dropRoom(room);
+  // Quiesce THEN delete (support.ts): a fired cycle keeps writing after this file has moved on, and
+  // deleting a room mid-turn leaves rows §19 counts as unrooted — in a test in another file.
+  for (const room of rooms) await dropRoomQuiesced(pool, room);
   rooms.length = 0;
   // Interrupt budgets are global by member; a self-stop's DECISION would otherwise starve the next test.
   await pool.query(
@@ -106,6 +89,11 @@ async function newRoom(prefix: string): Promise<string> {
  * success — which is exactly what `recentCompletedTurns` reads into the next cycle's window. The
  * suite's existing order tests synthesise `runOrders` without one, which is why this defect survived
  * a green suite.
+ *
+ * IT WRITES THE SUMMON TOO, and that is not decoration. §19's drift query is GLOBAL: a turn row whose
+ * summon_id matches no summon row is UNROOTED wherever it lives, so a fixture that skipped the summon
+ * would fail a test in another file the moment a teardown lost its race with a late write. Rooting the
+ * fixture makes a leaked row harmless instead of relying on cleanup being perfect.
  */
 async function priorCompletedTurn(roomId: string, member: string, text: string): Promise<number> {
   const kick = await appendMessage(pool, roomId, 'prince', `kick-${roomId}`, `@${member} start`);
@@ -118,6 +106,20 @@ async function priorCompletedTurn(roomId: string, member: string, text: string):
     createdBy: 'prince',
     causeSeq: kick.seq,
   });
+  await appendSummon(
+    pool,
+    roomId,
+    { task_id: task.id },
+    {
+      summon_id: `prior-${roomId}`,
+      member,
+      requested_by: 'prince',
+      root_actor: 'prince',
+      root_is_human: true,
+      depth: 0,
+      cause_seq: kick.seq,
+    },
+  );
   const completed = await appendAgentEvent(
     pool,
     roomId,
@@ -570,11 +572,13 @@ describe('the bounds still bind a briefed cycle, and each names the rule that fi
     );
     await new Promise((r) => setTimeout(r, 300));
     expect(await systemSays(roomId, 'may not start another summon')).toBe(true);
-    // Refused BEFORE the summon is written, so there is no summon of sol at all — sol's only row in
-    // this room is the completed turn that triggered the cycle, which it wrote before any of this.
+    // Refused BEFORE the summon is written, so THIS attempt left no summon row. Keyed on its own
+    // cause_seq (1), because the room already holds the rooted summon behind the trigger turn —
+    // counting every summon of sol would count that one and pass for the wrong reason.
     const { rows: solSummons } = await pool.query<{ n: string }>(
       `SELECT count(*) AS n FROM events
-        WHERE room_id = $1 AND event_type = 'summon' AND payload ->> 'member' = 'sol'`,
+        WHERE room_id = $1 AND event_type = 'summon' AND payload ->> 'member' = 'sol'
+          AND payload ->> 'cause_seq' = '1'`,
       [roomId],
     );
     expect(Number(solSummons[0].n), 'the over-depth summon was written anyway').toBe(0);

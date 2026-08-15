@@ -230,11 +230,18 @@ describe('summon provenance (Bible §19)', () => {
       multi_turn_summons: 0,
     });
 
-    // The split resolves: this suite's turns are all directly human-rooted (it raises no orders), so
-    // order-rooted is zero and directly-human accounts for the resolving turns. Both report unprompted
-    // (unrooted) as zero — the split partitions the RESOLVING population, it is not a new failure mode.
-    expect(orderRooted).toBe(0);
+    // The split resolves. This used to assert `orderRooted === 0`, and that assertion was true for a
+    // reason nobody intended: the DRIFT QUERY IS GLOBAL, this suite raises no orders — and until
+    // SL2-1 no order-rooted turn could complete ANYWHERE, because an order-rooted assembly threw §7.1
+    // on its own `room-turns` part (S17-N1). So "no order-rooted turns exist" was the bug wearing the
+    // costume of an invariant, and the first real briefed cycle (SL2-4) failed this line.
+    //
+    // What §19 actually requires is that every turn RESOLVE. Both halves resolve — an order-rooted
+    // summon's root_actor is the order's human creator — so the assertion is on the partition, not on
+    // one half being empty: unrooted is zero above, and this suite's own turns are directly human
+    // rooted. An order-rooted count is a measurement (the automation ratio), never a failure.
     expect(directHuman).toBeGreaterThan(0);
+    expect(orderRooted, 'an order-rooted turn count cannot be negative').toBeGreaterThanOrEqual(0);
   });
 
   it('an agent turn cannot be appended without a summon — the type is the gate', () => {

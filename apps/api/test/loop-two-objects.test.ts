@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { ERROR_BRIEFING_NOT_HUMAN } from '@playroom/shared';
 import {
+  dropRoomQuiesced,
   httpCreateRoom,
   issueTestCredential,
   startTestServer,
@@ -10,7 +11,7 @@ import {
   type TestServer,
 } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { appendAgentEvent, appendMessage, createRoom } from '../src/events.js';
+import { appendAgentEvent, appendMessage, appendSummon, createRoom } from '../src/events.js';
 import { ensureTask } from '../src/tasks.js';
 import { setBriefing } from '../src/briefings.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
@@ -55,29 +56,13 @@ beforeEach(() => {
   };
 });
 
-async function dropRoom(room: string): Promise<void> {
-  await pool.query('DELETE FROM interrupts WHERE room_id = $1', [room]);
-  await pool.query('DELETE FROM standing_orders WHERE room_id = $1', [room]);
-  await pool.query('DELETE FROM room_briefings WHERE room_id = $1', [room]);
-  await pool.query('DELETE FROM room_members WHERE room_id = $1', [room]);
-  for (let attempt = 0; attempt < 6; attempt++) {
-    try {
-      await pool.query('DELETE FROM events WHERE room_id = $1', [room]);
-      await pool.query('DELETE FROM tasks WHERE room_id = $1', [room]);
-      await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 250));
-    }
-  }
-}
-
 afterEach(async () => {
   if (server) {
     await server.close();
     server = undefined;
   }
-  for (const room of rooms) await dropRoom(room);
+  // Quiesce THEN delete (support.ts) — a fired cycle is still writing after this file moves on.
+  for (const room of rooms) await dropRoomQuiesced(pool, room);
   rooms.length = 0;
   await pool.query("DELETE FROM member_credentials WHERE label = 'sl2-puller'");
   await pool.query(
@@ -142,6 +127,22 @@ async function runOneCycle(roomId: string): Promise<void> {
     createdBy: 'prince',
     causeSeq: kick.seq,
   });
+  // THE SUMMON FIRST. §19's drift query is global, so a turn row citing no summon row is unrooted
+  // wherever it lives — a fixture that skipped this would fail a test in another file.
+  await appendSummon(
+    pool,
+    roomId,
+    { task_id: task.id },
+    {
+      summon_id: `prior-${roomId}`,
+      member: 'sol',
+      requested_by: 'prince',
+      root_actor: 'prince',
+      root_is_human: true,
+      depth: 0,
+      cause_seq: kick.seq,
+    },
+  );
   const trigger = await appendAgentEvent(
     pool,
     roomId,
