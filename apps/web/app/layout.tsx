@@ -4,6 +4,10 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Playroom',
+  // S-PUSH: a web app must declare a manifest before a browser will install it or, on some
+  // platforms, before it will deliver a push at all. It carries no icons yet — an icon set is
+  // design work this slice has no business inventing, and an empty array is honest about that.
+  manifest: '/manifest.webmanifest',
 };
 
 /**

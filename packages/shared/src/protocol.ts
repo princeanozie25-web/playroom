@@ -1063,6 +1063,20 @@ export const ERROR_BRIEFING_TOO_LARGE = 'briefing_too_large';
 export const ERROR_BRIEFING_ABSENT = 'briefing_absent';
 
 /**
+ * THE PUSH REFUSALS (S-PUSH).
+ *
+ * A notification is a claim on a PERSON's attention delivered outside the room, so the first rule is
+ * the one every other self-authorisation rule in this file shares: an agent has no path. It is not
+ * that an agent's subscription would be refused at send time — there is no route by which one can
+ * exist, and this code is what a member of the wrong kind meets if it tries.
+ */
+export const ERROR_PUSH_NOT_HUMAN = 'push_not_human';
+/** The subscription body was not a Web Push subscription — no endpoint, or no keys. */
+export const ERROR_PUSH_MALFORMED = 'push_malformed';
+/** The endpoint's origin is not on the allowlist (S-PUSH). Recorded as a refusal, never dropped. */
+export const ERROR_PUSH_ENDPOINT_NOT_ALLOWED = 'push_endpoint_not_allowed';
+
+/**
  * Valid JSON, and not a frame this server accepts.
  *
  * Kept apart from `frame_malformed` for the usual reason: a client sending mangled bytes and a

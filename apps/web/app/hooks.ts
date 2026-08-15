@@ -118,6 +118,12 @@ export const HOOK = {
   briefingHead: 'briefing-head',
   /** The briefing content itself, inset. Absent on a cleared briefing. */
   briefingBody: 'briefing-body',
+  /** The notification control (S-PUSH) — asked for, never sprung. */
+  pushControl: 'push-control',
+  /** Its on/off button. */
+  pushToggle: 'push-toggle',
+  /** The visible state: on, and how many devices. */
+  pushState: 'push-state',
   /** The composer form. */
   composer: 'composer',
   /** The room refusal banner (RT-001). */

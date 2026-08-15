@@ -34,6 +34,7 @@ import { BriefingRow, type BriefingItemView } from '../../BriefingRow';
 import { Welcome } from '../../Welcome';
 import { PanelPresence } from '../../Panel';
 import { HOOK, pr } from '../../hooks';
+import { PushControl } from '../../PushControl';
 import type { Principal, RosterMember } from '../../roster';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -771,6 +772,12 @@ export function Room({
             }}
           />
         </PanelPresence>
+
+        {/* S-PUSH: the notification control lives in the room's header because the room is the thing
+            being notified ABOUT, and because a control for "tell me when something needs me" belongs
+            next to the place that would otherwise have to stay open. It asks; it never springs a
+            prompt on load. */}
+        <PushControl />
       </header>
 
       {refusal && (

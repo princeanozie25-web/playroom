@@ -20,6 +20,8 @@ import {
   ERROR_TICKET_INVALID,
   ERROR_DOWNGRADE_REFUSED,
   ERROR_ORDER_UNKNOWN,
+  ERROR_PUSH_MALFORMED,
+  ERROR_PUSH_NOT_HUMAN,
   ERROR_ORDER_NOT_HUMAN,
   ERROR_ORDER_NOT_CREATOR,
   WS_CLOSE_ROOM_NOT_FOUND,
@@ -28,6 +30,7 @@ import {
   type ServerEvent,
 } from '@playroom/shared';
 import { createAdapter } from '@playroom/adapters';
+import { countFor, deleteSubscription, upsertSubscription } from './push.js';
 import type { Pool } from 'pg';
 import { makePool } from './db.js';
 import { RoomBus } from './bus.js';
@@ -524,6 +527,118 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       }
       reply.code(201);
       return { order_id: result.orderId };
+    });
+
+    // ── PUSH SUBSCRIPTIONS (S-PUSH) ─────────────────────────────────────────────────────
+    //
+    // NOT ROOM-SCOPED, on purpose: a subscription is a person's address, not a seat at a table, so
+    // it is registered once per browser and reaches its owner wherever a claim on them is made.
+    //
+    // THE PRINCIPAL IS NEVER IN THE BODY. It comes from the authenticated credential, so "register
+    // someone else's phone" and "read someone else's addresses" are not refused requests — they are
+    // requests with nowhere to put the argument. An AGENT is refused by KIND before anything else,
+    // the same rule that keeps one from minting an order or setting a briefing.
+    async function pushMember(
+      req: FastifyRequest,
+      reply: FastifyReply,
+    ): Promise<{ member_id: string; principal_id: string } | null> {
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        // No room id: a subscription is not room-scoped, so the refusal names no room.
+        reply.code(401).send(credentialRefusal(auth.failure, undefined));
+        return null;
+      }
+      const me = await memberRecord(db(), auth.auth.member_id);
+      if (!me || me.kind !== 'human') {
+        app.log.warn(
+          { member: auth.auth.member_id, code: ERROR_PUSH_NOT_HUMAN },
+          'push refused: only a human may hold a notification address',
+        );
+        reply.code(403).send({
+          type: 'error',
+          code: ERROR_PUSH_NOT_HUMAN,
+          message: 'only a human may register a device for notifications',
+        });
+        return null;
+      }
+      return auth.auth;
+    }
+
+    // The PUBLIC half of the VAPID keypair, which is public by construction — it is designed to be
+    // handed to every browser that subscribes. Served rather than baked so rotating it does not
+    // require rebuilding the web image. Absent key = the feature is off, said plainly.
+    fastify.get('/push/key', async (_req, reply) => {
+      const key = process.env.PLAYROOM_VAPID_PUBLIC_KEY?.trim();
+      if (!key) {
+        reply.code(503);
+        return {
+          type: 'error',
+          code: 'push_unconfigured',
+          message: 'notifications are not configured',
+        };
+      }
+      return { key };
+    });
+
+    fastify.post('/push/subscriptions', async (req, reply) => {
+      const actor = await pushMember(req, reply);
+      if (!actor) return reply;
+      const b = (req.body ?? {}) as {
+        endpoint?: unknown;
+        keys?: { p256dh?: unknown; auth?: unknown };
+      };
+      const endpoint = typeof b.endpoint === 'string' ? b.endpoint : '';
+      const p256dh = typeof b.keys?.p256dh === 'string' ? b.keys.p256dh : '';
+      const authKey = typeof b.keys?.auth === 'string' ? b.keys.auth : '';
+      if (!endpoint || !p256dh || !authKey) {
+        reply.code(400);
+        // The refusal names the SHAPE and never echoes what arrived: a malformed body may still
+        // contain key material, and a message that quotes it puts that material in a log.
+        return {
+          type: 'error',
+          code: ERROR_PUSH_MALFORMED,
+          message: 'a subscription needs an endpoint and both keys',
+        };
+      }
+      await upsertSubscription(db(), {
+        principalId: actor.principal_id,
+        memberId: actor.member_id,
+        endpoint,
+        p256dh,
+        auth: authKey,
+      });
+      // Logged WITHOUT the endpoint: it is the address of a person's phone, and the count is what
+      // an operator actually needs.
+      app.log.info(
+        { principal: actor.principal_id, member: actor.member_id },
+        'push subscription registered',
+      );
+      reply.code(201);
+      return { subscribed: true, devices: await countFor(db(), actor.principal_id) };
+    });
+
+    fastify.delete('/push/subscriptions', async (req, reply) => {
+      const actor = await pushMember(req, reply);
+      if (!actor) return reply;
+      const b = (req.body ?? {}) as { endpoint?: unknown };
+      const endpoint = typeof b.endpoint === 'string' ? b.endpoint : '';
+      if (!endpoint) {
+        reply.code(400);
+        return { type: 'error', code: ERROR_PUSH_MALFORMED, message: 'an endpoint is required' };
+      }
+      // Scoped to the caller's principal inside the record layer, so knowing an endpoint is not
+      // enough to turn off someone else's phone.
+      const removed = await deleteSubscription(db(), actor.principal_id, endpoint);
+      app.log.info({ principal: actor.principal_id, removed }, 'push subscription removed');
+      return { subscribed: false, removed, devices: await countFor(db(), actor.principal_id) };
+    });
+
+    // "IS THIS THING ON" — a count, and only a count. No endpoints and no key material come back
+    // out of this server by any route, so there is no field to forget to strip.
+    fastify.get('/push/subscriptions', async (req, reply) => {
+      const actor = await pushMember(req, reply);
+      if (!actor) return reply;
+      return { devices: await countFor(db(), actor.principal_id) };
     });
 
     fastify.post('/rooms/:id/orders/:orderId/control', async (req, reply) => {
