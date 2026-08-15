@@ -279,8 +279,11 @@ describe('the payload discloses the minimum, and the control is named', () => {
     expect(body).toContain('room: input.roomId');
     expect(body).toContain('urgency: input.urgency');
     expect(body).toContain('at:');
-    // Three keys, and no fourth can be added without deleting this line.
-    expect((body.match(/^\s+\w+:/gm) ?? []).length).toBe(3);
+    // Keys counted by NAME, not by "name:" — S-DIAL added `tone` as a SHORTHAND property, which the
+    // colon-only regex this line used to carry silently skipped. A minimality assertion that cannot
+    // see a new field is worse than none, so it counts names and lists them.
+    const keys = (body.match(/^\s*(\w+)\s*[,:]/gm) ?? []).map((k) => k.trim().replace(/[,:]$/, ''));
+    expect(new Set(keys)).toEqual(new Set(['room', 'urgency', 'tone', 'at']));
   });
 
   it('the sender cannot reach room content, a briefing, a mandate or a message', () => {
@@ -314,7 +317,13 @@ describe('the payload discloses the minimum, and the control is named', () => {
   it('every send row names what was disclosed, including the urgency word', () => {
     // R3: the urgency string is visible to the vendor. That is deliberate, and it is recorded as a
     // named disclosure rather than left as a detail nobody noticed.
-    expect(DISCLOSED_FIELDS).toBe('room_id, urgency(BLOCKER|DECISION), sent_at');
+    // WIDENED ONCE, BY S-DIAL, which added `tone`. This assertion moving is the point rather than
+    // the inconvenience: the constant is what every future send row copies, so changing it is a
+    // deliberate act that a test makes visible. Rows written before the widening still carry the
+    // narrower string — the column is written at INSERT and never updated.
+    expect(DISCLOSED_FIELDS).toBe(
+      'room_id, urgency(BLOCKER|DECISION), tone(FINISHED|NEEDS-YOU), sent_at',
+    );
     expect(sender).toContain('disclosed');
   });
 

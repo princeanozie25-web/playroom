@@ -31,11 +31,22 @@ self.addEventListener('push', (event) => {
   const room = typeof payload.room === 'string' ? payload.room : '';
   const urgency = payload.urgency === 'BLOCKER' ? 'BLOCKER' : 'DECISION';
   const at = typeof payload.at === 'string' ? payload.at : '';
+  // FINISHED or NEEDS-YOU (S-DIAL). Anything unrecognised reads as NEEDS-YOU: an unknown tone must
+  // never be quieter than the thing it might be.
+  const finished = payload.tone === 'FINISHED';
 
-  // The words are built HERE, from the three fields, and never sent over the wire — one less thing
+  // The words are built HERE, from the four fields, and never sent over the wire — one less thing
   // travelling through a vendor's infrastructure.
-  const title = urgency === 'BLOCKER' ? 'Someone is blocked' : 'Something needs a decision';
-  const body = room ? `In ${room}. Open Playroom to see what.` : 'Open Playroom to see what.';
+  const title = finished
+    ? 'A loop finished'
+    : urgency === 'BLOCKER'
+      ? 'Someone is blocked'
+      : 'Something needs a decision';
+  const body = room
+    ? finished
+      ? `In ${room}. Nothing needs you — it ran to its limit.`
+      : `In ${room}. Open Playroom to see what.`
+    : 'Open Playroom to see what.';
 
   event.waitUntil(
     self.registration.showNotification(title, {
@@ -44,6 +55,12 @@ self.addEventListener('push', (event) => {
       // a loop that raises three hands in a minute should claim attention once.
       tag: room ? `playroom-${room}` : 'playroom',
       renotify: true,
+      // THE HALF OF "DOES NOT WAKE A PHONE AT 3AM" THAT IS OURS RATHER THAN A REQUEST. The Web Push
+      // urgency header asks a vendor to hold a FINISHED until convenient and may be ignored; this
+      // cannot be. A finished loop appears on the lock screen and makes no sound; one that needs you
+      // buzzes. The distinction is the whole point of carrying a tone at all.
+      silent: finished,
+      vibrate: finished ? [] : undefined,
       timestamp: at ? Date.parse(at) || Date.now() : Date.now(),
       data: { room },
     }),

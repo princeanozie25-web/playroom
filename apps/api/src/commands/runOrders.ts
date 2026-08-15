@@ -5,6 +5,7 @@ import {
   activeOrdersForTrigger,
   orderById,
   setOrderStatus,
+  TERMINAL_ORDER_STATUSES,
   tryOpenCycle,
   type OrderRow,
   type OrderStatus,
@@ -266,7 +267,17 @@ async function stopOrder(
   });
   await setOrderStatus(deps.pool, order.id, status, reason);
   deps.bus.publish(roomId, event);
-  const telling = await raiseOrderInterrupts(deps, roomId, order, reason);
+  // THE TONE IS DERIVED FROM THE STATUS THIS FUNCTION JUST WROTE (S-DIAL), and from nothing a member
+  // said. TERMINAL_ORDER_STATUSES is the server's own set — REVOKED, EXPIRED, LIMIT_REACHED — so a
+  // FINISHED notification can only follow an order the SERVER ended. A pause (attendance, ceiling,
+  // error, a spent voice) is NEEDS-YOU, because every one of those wants a person.
+  const telling = await raiseOrderInterrupts(
+    deps,
+    roomId,
+    order,
+    reason,
+    TERMINAL_ORDER_STATUSES.has(status) ? 'FINISHED' : 'NEEDS-YOU',
+  );
   // WHETHER ANYONE WAS TOLD IS PART OF THE RECORD OF THE STOP. The order.status event above and the
   // sentence in the room happen either way — the ROOM always knows. What this line distinguishes is
   // whether the claim on a person could be made at all, which is the difference between "stopped,
@@ -307,6 +318,7 @@ async function raiseOrderInterrupts(
   roomId: string,
   order: OrderRow,
   summary: string,
+  tone: 'FINISHED' | 'NEEDS-YOU',
 ): Promise<{ told: number; refusedForBudget: number }> {
   const principal = await principalOf(deps.pool, order.creator_member_id);
   // RETURNED, NOT SWALLOWED (S-DIAL). This used to be `Promise<void>`, so `stopOrder` could not tell
@@ -325,6 +337,8 @@ async function raiseOrderInterrupts(
       aboutKind: 'order',
       aboutId,
       summary,
+      // Only ever 'FINISHED' from a terminal status; NEEDS-YOU is the absence of the field.
+      ...(tone === 'FINISHED' ? { notifyTone: 'FINISHED' as const } : {}),
     });
     if (!raised.ok) {
       deps.log.warn(

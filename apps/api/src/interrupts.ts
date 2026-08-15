@@ -126,6 +126,19 @@ export interface RaiseInput {
   taskId?: string | null;
   /** The sentence the room shows. Never a template filled in by the reader. */
   summary: string;
+  /**
+   * HOW THE NOTIFICATION SHOULD READ — 'FINISHED' or, absent, NEEDS-YOU (S-DIAL).
+   *
+   * FINISHED NAMES THE ORDER'S TERMINAL STATUS, NOT AN AGENT'S OPINION OF ITS WORK. The only caller
+   * that sets it is `stopOrder`, from the status the SERVER just wrote (LIMIT_REACHED / EXPIRED /
+   * REVOKED). It is optional and defaults to absent precisely so that every other raiser — the door's
+   * bare hand, a co-signature, anything a member can reach — produces NEEDS-YOU without having to
+   * know this field exists. A member cannot pass it, because no command carries it.
+   *
+   * This does NOT close ST-N1. "The order ran the count it was given" is not "the work is done", and
+   * nothing here lets an agent assert the latter.
+   */
+  notifyTone?: 'FINISHED';
 }
 
 /**
@@ -263,6 +276,7 @@ export async function raiseInterrupt(
     urgency: interrupt.urgency,
     addressedTo: interrupt.addressed_to,
     interruptId: interrupt.id,
+    tone: input.notifyTone ?? 'NEEDS-YOU',
   }).catch(() => {
     /* unreachable: notifyForInterrupt resolves on every path. The catch is the second lock. */
   });
@@ -279,7 +293,13 @@ export async function raiseInterrupt(
  */
 export async function notifyForInterrupt(
   pool: Pool,
-  input: { roomId: string; urgency: string; addressedTo: string; interruptId: string },
+  input: {
+    roomId: string;
+    urgency: string;
+    addressedTo: string;
+    interruptId: string;
+    tone: 'FINISHED' | 'NEEDS-YOU';
+  },
 ): Promise<void> {
   try {
     const principal = await principalOf(pool, input.addressedTo);
@@ -289,6 +309,7 @@ export async function notifyForInterrupt(
       roomId: input.roomId,
       interruptId: input.interruptId,
       urgency: input.urgency,
+      tone: input.tone,
     });
   } catch {
     // The record is already committed; nothing here may reach it.

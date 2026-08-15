@@ -32,8 +32,18 @@ import { deleteByEndpoint, markDelivered, subscriptionsFor } from './push.js';
  * left as a detail nobody noticed.
  */
 
-/** What the payload carries, recorded verbatim on every send row so history cannot be rewritten. */
-export const DISCLOSED_FIELDS = 'room_id, urgency(BLOCKER|DECISION), sent_at';
+/**
+ * What the payload carries, recorded verbatim on every send row so history cannot be rewritten.
+ *
+ * IT WIDENS FORWARD ONLY, and that is a property of WHERE it is stored rather than of anyone's care:
+ * this string is copied into `push_sends.disclosed` at INSERT time and no statement anywhere updates
+ * that column, so rows written before a widening keep the narrower text they were actually sent
+ * under. A future payload change edits this constant and the history stays true.
+ *
+ * S-DIAL widened it by one field: `tone`. Sends before that carry the S-PUSH string and always will.
+ */
+export const DISCLOSED_FIELDS =
+  'room_id, urgency(BLOCKER|DECISION), tone(FINISHED|NEEDS-YOU), sent_at';
 
 /**
  * THE URGENCIES THAT WAKE A PHONE. BLOCKER halts a task and DECISION is waiting on a person; FYI is
@@ -150,6 +160,12 @@ export interface NotifyInput {
   roomId: string;
   interruptId: string | null;
   urgency: string;
+  /**
+   * FINISHED or NEEDS-YOU (S-DIAL). Set from the ORDER'S TERMINAL STATUS by `stopOrder` and by
+   * nothing else; every other raise is NEEDS-YOU. It is a fifth field on this interface and still
+   * carries no text — the payload cannot contain prose regardless of who calls it.
+   */
+  tone?: 'FINISHED' | 'NEEDS-YOU';
 }
 
 /**
@@ -190,9 +206,11 @@ export async function notifyPrincipal(
     }
 
     // The payload. Built here and nowhere else, so there is one place to read to know what leaves.
+    const tone = input.tone ?? 'NEEDS-YOU';
     const payload = JSON.stringify({
       room: input.roomId,
       urgency: input.urgency,
+      tone,
       at: new Date().toISOString(),
     });
 
@@ -221,7 +239,22 @@ export async function notifyPrincipal(
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
           payload,
-          { TTL: 3600, urgency: input.urgency === 'BLOCKER' ? 'high' : 'normal' },
+          {
+            TTL: 3600,
+            // ── HOW "FINISHED DOES NOT WAKE A PHONE AT 3AM" ACTUALLY WORKS ──────────────
+            //
+            // TWO MECHANISMS, because one of them is a request and the other is a decision.
+            //
+            //   THE REQUEST: the Web Push `urgency` header. 'low' tells the vendor this may be
+            //   held and delivered with the next batch rather than waking the radio; 'high' asks
+            //   for it now. It is a HINT — a vendor may ignore it — so it is not relied on alone.
+            //   THE DECISION: the service worker shows a FINISHED notification with `silent: true`
+            //   and no vibration (sw.js). That one is ours and cannot be overridden by a vendor:
+            //   the notification appears on the lock screen and makes no sound.
+            //
+            // So a finished loop is waiting for you in the morning; a loop that needs you buzzes.
+            urgency: tone === 'FINISHED' ? 'low' : input.urgency === 'BLOCKER' ? 'high' : 'normal',
+          },
         );
         await record(pool, {
           principalId: input.principalId,
