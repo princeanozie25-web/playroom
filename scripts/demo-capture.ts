@@ -483,6 +483,116 @@ async function clipMandate(
   }
 }
 
+// Clip BRIEFING — S-LIVE. The room briefing rendered, a summoned member's reply that read it, and the
+// order's task on the loops screen: at 390px, against the LIVE tier, in a room that has an owner.
+//
+// THE LIVENESS ASSERTION IS THE POINT, exactly as it is for the mandate clip. The briefing text on
+// screen must equal the one the LIVE api returns for that room at capture time — read through the web
+// app's own history route, from inside the page, so a local surface cannot masquerade as this one.
+//
+// WHAT IS NOT FILMED, AND WHY: the briefing being SET. There is no control for it anywhere in the web
+// app — S1.7 shipped the record, the delivery and the render, and set/clear are WebSocket frames with
+// no surface (grep `briefing_set` under apps/web: nothing). So a film of a person setting one would
+// have to be a film of something that does not exist. The ROW the set produces is filmed instead, and
+// the gap is reported rather than staged.
+async function clipBriefing(
+  browser: any,
+  take: number,
+  out: string,
+  target: LiveTarget,
+  roomId: string,
+): Promise<unknown> {
+  const dir = resolve(out, `briefing-take${take}`);
+  mkdirSync(dir, { recursive: true });
+  const PHONE = { width: 390, height: 844 };
+  const ctx = await browser.newContext({
+    viewport: PHONE,
+    recordVideo: { dir: resolve(dir, 'stream'), size: PHONE },
+  });
+  const page = await ctx.newPage();
+  const video = page.video();
+  const beats: Record<string, unknown> = {};
+
+  try {
+    // 1. THE ROOM, as a phone opens it.
+    await page.goto(`${target.web}/r/${encodeURIComponent(roomId)}`, {
+      waitUntil: 'domcontentloaded',
+    });
+    must(page.url().startsWith(target.web), `the page left the live origin: ${page.url()}`);
+    await page.waitForSelector('[data-pr="briefing"]', { timeout: 30_000 });
+    await sleep(SETTLE);
+
+    // 2. LIVENESS — the rendered briefing against what the LIVE api says, fetched from inside the page
+    //    through the app's own route. Mismatch aborts the run rather than recording a pretty lie.
+    const onScreen = (await page.locator('[data-pr="briefing-body"]').first().innerText()).trim();
+    const fromApi = await page.evaluate(async (rid: string) => {
+      const res = await fetch(`/api/history?room=${encodeURIComponent(rid)}`);
+      const body = (await res.json()) as { briefing?: { content?: string } | null };
+      return body.briefing?.content ?? '';
+    }, roomId);
+    must(fromApi.length > 0, 'the live api returned no briefing for this room');
+    must(
+      onScreen === fromApi.trim(),
+      `the briefing on screen is not the live one:\n  screen: ${onScreen}\n  api:    ${fromApi}`,
+    );
+    beats.briefing = { rendered: onScreen, matches_live_api: true };
+    log(`  briefing on screen matches the live api (${onScreen.length} chars)`);
+    await sleep(HOLD);
+
+    // 3. A SUMMONED MEMBER'S REPLY, on the live tier, with the briefing in its window. A real turn:
+    //    a real provider call, metered, on the deployment's own key.
+    const turnsBefore = await page.locator('[data-pr="turn"]').count();
+    await page
+      .locator('[data-pr="composer"] textarea, [data-pr="composer"] input')
+      .first()
+      .fill('@claude in one sentence, what does the room briefing ask you to do?');
+    await page.locator('[data-pr="composer"] button[type="submit"]').first().click();
+    await page.waitForFunction(
+      (n: number) => document.querySelectorAll('[data-pr="turn"]').length > n,
+      turnsBefore,
+      { timeout: 90_000 },
+    );
+    // WAIT FOR THE TURN TO FINISH, not merely to appear. The row exists at the FIRST delta, so
+    // reading it then captures the streaming caret and calls it a reply — take 1 of this clip did
+    // exactly that and recorded "▌". The caret is present only while streaming, and the spend line
+    // only once the turn completed, so both conditions together mean "this is the whole answer".
+    await page.waitForFunction(
+      () => {
+        const last = document.querySelectorAll('[data-pr="turn"]');
+        const el = last[last.length - 1];
+        if (!el) return false;
+        return !el.querySelector('[data-pr="caret"]') && !!el.querySelector('[data-pr="spend"]');
+      },
+      undefined,
+      { timeout: 120_000 },
+    );
+    const reply = (
+      await page.locator('[data-pr="turn"]').last().locator('[data-pr="body"]').innerText()
+    ).trim();
+    must(reply.length > 0, 'the summoned member produced an empty reply');
+    must(reply !== '▌', 'the caret was captured instead of the reply — the turn had not finished');
+    beats.reply = reply;
+    log(`  live reply: ${reply.slice(0, 120)}`);
+    await sleep(HOLD);
+
+    // 4. THE ORDER'S TASK, on the loops screen — what the loop is for, where a person edits loops.
+    await page.goto(`${target.web}/r/${encodeURIComponent(roomId)}/loops`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForSelector('[data-pr="loop-row"]', { timeout: 30_000 });
+    const task = (await page.locator('[data-pr="loop-task"]').first().innerText()).trim();
+    must(task.length > 0, 'the loops screen rendered no task');
+    must(!/no task/i.test(task), `the order on screen has no task: ${task}`);
+    beats.task = task;
+    log(`  order task on screen: ${task.slice(0, 120)}`);
+    await sleep(HOLD);
+  } finally {
+    await ctx.close();
+    await video?.saveAs(resolve(dir, `briefing-take${take}-stream.webm`)).catch(() => {});
+  }
+  return { take, room: roomId, beats };
+}
+
 async function main(): Promise<void> {
   const which = process.argv[2] ?? 'all';
   const takeArg = process.argv[3];
@@ -526,6 +636,45 @@ async function main(): Promise<void> {
       JSON.stringify({ target, ...(report as object) }, null, 2),
     );
     log(`done — mandate capture at 390px against ${target.web}`);
+    log(`videos: ${out}`);
+    process.exit(0);
+  }
+
+  // ── THE LIVE BRIEFING CAPTURE (S-LIVE) — same discipline as `mandate`: explicit live target, no
+  // default, and it films a room that already HAS an owner and a briefing (S17-N3 means most cannot).
+  if (which === 'briefing') {
+    const target = resolveLiveTarget(process.env);
+    log(`LIVE TARGET — api ${target.api} · web ${target.web}`);
+    const roomId = process.env.PLAYROOM_CAPTURE_ROOM?.trim();
+    if (!roomId) {
+      throw new LiveCaptureRefused(
+        'PLAYROOM_CAPTURE_ROOM is not set — this clip films a specific live room that has an owner, ' +
+          'a briefing and a tasked order; there is no sensible default',
+      );
+    }
+    const warmed = await warmTier(target);
+    log(`tier warm in ${warmed}ms`);
+    const liveHtml = await fetch(target.web).then((r) => r.text());
+    must(
+      !/__next_devtools|nextjs-portal|__nextDevClientId|\/_next\/static\/chunks\/react-refresh/.test(
+        liveHtml,
+      ),
+      'the LIVE web is serving a development overlay — refusing to film a dev badge (A4-F6)',
+    );
+    const browser = await loadChromium(home).launch();
+    log(`chromium ${browser.version()}`);
+    const take = Number(takeArg ?? 1);
+    let report: unknown;
+    try {
+      report = await clipBriefing(browser, take, out, target, roomId);
+    } finally {
+      await browser.close();
+    }
+    writeFileSync(
+      resolve(out, `briefing-run-report-take${take}.json`),
+      JSON.stringify({ target, ...(report as object) }, null, 2),
+    );
+    log(`done — briefing capture at 390px against ${target.web}`);
     log(`videos: ${out}`);
     process.exit(0);
   }
