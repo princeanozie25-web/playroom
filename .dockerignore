@@ -40,6 +40,16 @@ dist
 # The film and its assets: ~1MB of GIF and PNG that no server reads.
 docs/demo/assets
 
+# A SEPARATE PROJECT THAT LIVES INSIDE THIS WORKING TREE (S-LIVE). `packet-tracer-mcp/` is not part
+# of this repository — chore 35b0abd excluded it from git and from prettier, and missed this file.
+# `COPY . .` does not read .gitignore, so 70MB and 3,095 files (including a Python venv with its own
+# vendored dependencies) were being uploaded as build context and baked into BOTH public images.
+#
+# Nothing in it is a secret — the scan before the first S-LIVE deploy found only pydantic's own
+# docstrings — but a foreign project's virtualenv inside Playroom's shipped image is weight nobody
+# can explain and surface nobody audited. Excluded at the boundary that actually governs the image.
+packet-tracer-mcp/
+
 # Local tooling and scratch.
 .claude
 coverage
