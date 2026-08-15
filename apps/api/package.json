@@ -12,7 +12,8 @@
     "@playroom/fabric": "workspace:*",
     "@playroom/shared": "workspace:*",
     "fastify": "^5.2.0",
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "web-push": "3.6.7"
   },
   "devDependencies": {
     "@types/pg": "^8.11.10",
