@@ -455,15 +455,52 @@ ceiling explicitly does not count, and the refusal says so: it PAUSES at its lim
 the UTC midnight reset, which makes an unbounded loop one that never finishes rather than one that
 stops.
 
-|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **What it proves**   | A loop can be left running further than one cycle without going quiet. AN ORDER THAT CANNOT SPEAK DOES NOT CONTINUE: `interrupts_per_day` is 6 per raiser, it sits below the 20/hour push throttle so it bites first, and an order's stop-interrupt is charged to the SAME member whose cycles run — so a pre-open gate now pauses an order whose voice is spent, before a cycle opens and before a paid turn is spent on work nobody could be told about. The fix is NOT a bigger budget, and a test asserts all five mandates still say 6. Two words reach the phone: a FINISHED (a terminal status the server wrote) arrives silent, a NEEDS-YOU buzzes. Every other bound still binds at a raised dial and names which rule fired. |
-| **What it does NOT** | **The budget-exhaustion pause cannot reach a closed phone** — telling it would mean raising an interrupt, and the reason it is happening is that raising one is refused. No exemption was written, deliberately: the boundary is stated instead. **FINISHED is not completion** — it names LIMIT_REACHED / EXPIRED / REVOKED, and "the order ran the count it was given" is not "the work is done". **ST-N1 stays open.** **Nothing here has been run at a raised dial on the live tier yet** — SD-4 is where that happens, and until it does this section describes tested behaviour rather than observed behaviour.                                                                                                                  |
+**THE RUN, ON THE LIVE TIER.** 15 Aug 2026, 21:40:50–21:41:21 UTC, room `dial-1786830064276`, both
+tiers deployed at `58b99ba`. One order at **dial 2, cap 3, self-triggering** — its own completed turn
+was the next cycle's trigger, so nobody pressed anything between cycles. It ran two cycles unwatched
+and paused for a person; resumed, it ran its third and stopped terminal. Four short orders then spent
+the rest of `claude-main`'s voice, one telling each, and a sixth order was triggered with none left.
+
+**WHAT REACHED THE PHONE, AND WHAT DID NOT.** Six claims, six sends, **all six recorded `delivered`**
+to `https://web.push.apple.com`; claim → send took 839ms, 654ms, 118ms, 116ms, 116ms, 115ms (the
+first two pay a cold VAPID path the rest do not). On the lock screen, **app closed, through Do Not
+Disturb**: five reading _"A loop finished / In dial-1786830064276. Nothing needs you — it ran to its
+limit."_ stacked above one reading _"Something needs a decision / In dial-1786830064276. Open
+Playroom to see what."_ The two words are distinguishable at a glance, which is the whole of SD-2.
+**And there was no seventh.** The sixth order paused before its cycle opened, because the voice was
+spent — the pause SD-1 names as the last untellable event. The room holds it (`order.status`, and the
+sentence in full on the loops screen); no phone was told, and no exemption was written to tell it.
+
+**WHAT IT COST, AND THE TREND.** $0.017490 over 11 turns; the tier's whole day reached $0.019670
+against a $2 ceiling. Cost per cycle climbed as the room filled — cycle input tokens went 1038 → 1086
+→ 1273 → 1317 → 1720, and the per-turn price with them, **$0.00128 → $0.00206, +61% across six
+cycles**, while the ceiling did not move. The successor's finding holds: a loop gets more expensive
+the longer it runs, and the only thing that notices is the ceiling it is walking toward.
+
+**SD-N1, FOUND BY THIS RUN — A COUNTED CYCLE IS NOT EVEN A TURN.** Seven cycles opened; **six
+produced a turn**. `ord_5aad7b1c4b9341c4` counted its cycle, wrote `order.cycled`, wrote its summon,
+reached its cap, reported LIMIT_REACHED — _"the standing order finished the 1 cycle it was set to
+run"_ — and sent a FINISHED to the phone, having taken no turn at all. The §22b one-turn-per-room
+guard lives in `runAgentTurn`, DOWNSTREAM of `tryOpenCycle`'s increment and of the summon write, so a
+cycle that collides with a turn already in flight is counted and then quietly does nothing. Logged,
+not fixed in this slice. It is ST-N1's family and sharper than it: not merely _a count is not
+completion_, but _a count is not even work_.
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | A loop can be left running further than one cycle without going quiet. AN ORDER THAT CANNOT SPEAK DOES NOT CONTINUE: `interrupts_per_day` is 6 per raiser, it sits below the 20/hour push throttle so it bites first, and an order's stop-interrupt is charged to the SAME member whose cycles run — so a pre-open gate now pauses an order whose voice is spent, before a cycle opens and before a paid turn is spent on work nobody could be told about. The fix is NOT a bigger budget, and a test asserts all five mandates still say 6. Two words reach the phone: a FINISHED (a terminal status the server wrote) arrives silent, a NEEDS-YOU buzzes. Every other bound still binds at a raised dial and names which rule fired.                                                                                                   |
+| **What it does NOT** | **The budget-exhaustion pause cannot reach a closed phone** — telling it would mean raising an interrupt, and the reason it is happening is that raising one is refused. No exemption was written, deliberately: the boundary is stated instead, and the live run ended by demonstrating it. **FINISHED is not completion** — it names LIMIT_REACHED / EXPIRED / REVOKED, and "the order ran the count it was given" is not "the work is done". **ST-N1 stays open**, and SD-N1 above is worse than it: one of the seven cycles in the live run was counted, reported finished and notified a phone without taking a turn at all. **It is one run, one room, one device**: 6 sends, one iPhone with the PWA installed, n=1 at a raised dial. **The dial was 2, not 20** — nothing here has been left running for hours, only for cycles. |
 
 **The one sentence a caption may use:** _a loop can now run several cycles between check-ins, because
 it can tell you when it stops — and if it ever cannot tell you, it stops instead._ **Not:** _the loop
 is autonomous_ (it carries a count or a clock, and every stop is named). **Not:** _it knows when the
-work is finished_ (it knows when the count ran out).
+work is finished_ (it knows when the count ran out). **Not:** _every cycle did work_ (SD-N1: one of
+the seven did not, and said it had).
+
+**The artifacts.** The phone half is a device screenshot — no browser can film a lock screen — showing
+five silent finishes above one loud decision. The browser half is `dial-take2` at 390px against the
+live tier: six orders on screen, matched against the live log's six `order.created`, with the
+untellable pause found by its sentence rather than by its position.
 
 ---
 

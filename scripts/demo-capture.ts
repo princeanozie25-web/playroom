@@ -684,6 +684,107 @@ async function clipPush(
   return { take, room: roomId, beats };
 }
 
+// Clip DIAL — SD-4. THE LOOPS SCREEN AFTER A LOOP RAN ITSELF OUT: at 390px, against the LIVE tier,
+// in a room where six orders reached six different ends without a person in the room.
+//
+// WHY THIS SCREEN AND NOT THE PHONE. The notifications are the slice's headline and no browser can
+// film them — they arrived on an iPhone lock screen through Do Not Disturb, and that observation is a
+// screenshot in the record, not a clip. What a browser CAN film is the thing a person finds when they
+// finally look: every stop, its status, and the sentence saying why. Including the last one, which
+// nothing could tell them about.
+//
+// THE LIVENESS ASSERTION: the statuses on screen are counted against what the LIVE api returns for
+// this room, fetched from inside the page through the app's own proxy. A local surface cannot
+// masquerade as this one, and a room that has been cleaned up fails the run instead of filming an
+// empty list.
+async function clipDial(
+  browser: any,
+  take: number,
+  out: string,
+  target: LiveTarget,
+  roomId: string,
+): Promise<unknown> {
+  const dir = resolve(out, `dial-take${take}`);
+  mkdirSync(dir, { recursive: true });
+  const PHONE = { width: 390, height: 844 };
+  const ctx = await browser.newContext({
+    viewport: PHONE,
+    recordVideo: { dir: resolve(dir, 'stream'), size: PHONE },
+  });
+  const page = await ctx.newPage();
+  const video = page.video();
+  const beats: Record<string, unknown> = {};
+
+  try {
+    // 1. THE LOOPS SCREEN, as a phone opens it.
+    await page.goto(`${target.web}/r/${encodeURIComponent(roomId)}/loops`, {
+      waitUntil: 'domcontentloaded',
+    });
+    must(page.url().startsWith(target.web), `the page left the live origin: ${page.url()}`);
+    await page.waitForSelector('[data-pr="loop-row"]', { timeout: 30_000 });
+    await sleep(SETTLE);
+
+    // 2. LIVENESS — the rows on screen against the LOG the live api serves. Read through the app's
+    //    own history route (the orders proxy is write-only: POST, no GET), so the count on screen is
+    //    checked against the events that produced it rather than against a second rendering of the
+    //    same page. A cleaned-up room fails here instead of filming an empty list.
+    const onScreen = await page.locator('[data-pr="loop-row"]').count();
+    const fromApi = await page.evaluate(async (rid: string) => {
+      const res = await fetch(`/api/history?room=${encodeURIComponent(rid)}&limit=400`);
+      const body = (await res.json()) as {
+        events?: Array<{ event_type: string; payload?: { reason?: string } }>;
+      };
+      const events = body.events ?? [];
+      return {
+        created: events.filter((e) => e.event_type === 'order.created').length,
+        stops: events
+          .filter((e) => e.event_type === 'order.status')
+          .map((e) => e.payload?.reason ?? ''),
+      };
+    }, roomId);
+    must(fromApi.created > 0, 'the live api returned no order.created for this room');
+    must(
+      onScreen === fromApi.created,
+      `the screen shows ${onScreen} orders and the live log has ${fromApi.created} order.created`,
+    );
+    beats.orders = {
+      on_screen: onScreen,
+      live_created: fromApi.created,
+      live_stops: fromApi.stops,
+    };
+    log(`  ${onScreen} orders on screen, matching the live api`);
+    await sleep(HOLD);
+
+    // 3. THE ONE THAT COULD NOT SPEAK. The pause that never reached a phone is the row this clip
+    //    exists for, so it is found by its REASON rather than by position — the sentence is the
+    //    evidence, and a run that cannot find it fails rather than filming five happy endings.
+    const reasons = await page.locator('[data-pr="loop-reason"]').allInnerTexts();
+    const untellable = reasons.find((r: string) => /interrupt budget/.test(r));
+    must(
+      untellable !== undefined,
+      `no order on screen names the spent interrupt budget:\n${reasons.join('\n')}`,
+    );
+    beats.untellable = untellable?.replace(/\s+/g, ' ').trim();
+    log(`  the untellable pause is on screen: ${beats.untellable}`);
+    await page
+      .locator('[data-pr="loop-row"]')
+      .last()
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
+    await sleep(HOLD);
+
+    // 4. AND THE ONES THAT DID SPEAK — every terminal stop, read back as words rather than statuses.
+    const statuses = await page.locator('[data-pr="loop-status"]').allInnerTexts();
+    beats.statuses = statuses.map((s: string) => s.trim());
+    log(`  statuses on screen: ${beats.statuses}`);
+    await sleep(HOLD);
+  } finally {
+    await ctx.close();
+    await video?.saveAs(resolve(dir, `dial-take${take}-stream.webm`)).catch(() => {});
+  }
+  return { take, room: roomId, beats };
+}
+
 async function main(): Promise<void> {
   const which = process.argv[2] ?? 'all';
   const takeArg = process.argv[3];
@@ -757,6 +858,44 @@ async function main(): Promise<void> {
       JSON.stringify({ target, ...(report as object) }, null, 2),
     );
     log(`done — push capture at 390px against ${target.web}`);
+    process.exit(0);
+  }
+
+  // ── THE LIVE DIAL CAPTURE (S-DIAL, SD-4) — same discipline: explicit live target, no default, and
+  // it films a room where a loop has already run itself out, because there is nothing to stage.
+  if (which === 'dial') {
+    const target = resolveLiveTarget(process.env);
+    log(`LIVE TARGET — api ${target.api} · web ${target.web}`);
+    const roomId = process.env.PLAYROOM_CAPTURE_ROOM?.trim();
+    if (!roomId) {
+      throw new LiveCaptureRefused(
+        'PLAYROOM_CAPTURE_ROOM is not set — this clip films the room a dialed loop ran itself out in',
+      );
+    }
+    const warmed = await warmTier(target);
+    log(`tier warm in ${warmed}ms`);
+    const liveHtml = await fetch(target.web).then((r) => r.text());
+    must(
+      !/__next_devtools|nextjs-portal|__nextDevClientId|\/_next\/static\/chunks\/react-refresh/.test(
+        liveHtml,
+      ),
+      'the LIVE web is serving a development overlay — refusing to film a dev badge (A4-F6)',
+    );
+    const browser = await loadChromium(home).launch();
+    log(`chromium ${browser.version()}`);
+    const take = Number(takeArg ?? 1);
+    let report: unknown;
+    try {
+      report = await clipDial(browser, take, out, target, roomId);
+    } finally {
+      await browser.close();
+    }
+    writeFileSync(
+      resolve(out, `dial-run-report-take${take}.json`),
+      JSON.stringify({ target, ...(report as object) }, null, 2),
+    );
+    log(`done — dial capture at 390px against ${target.web}`);
+    log(`videos: ${out}`);
     process.exit(0);
   }
 
