@@ -106,6 +106,7 @@ async function makeOrder(
       triggerEventType: 'agent.turn.completed',
       triggerMember: 'sol', // sol's completion fires the order
       actionMember: 'claude-main', // and it summons claude-main
+      task: 'draft, then hand back for review',
       maxCycles: limits.maxCycles ?? null,
       maxUnattendedCycles: limits.maxUnattended ?? 3,
       expiresAt: limits.expiresAt ?? null,

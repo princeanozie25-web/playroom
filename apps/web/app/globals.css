@@ -1460,6 +1460,21 @@ body {
   color: var(--ink-2);
   margin: 0;
 }
+/* WHAT THE ORDER IS FOR (S-TASK). The reader's eye should land here before the terms: it is the
+   objective, not a setting. `pre-wrap` for the same reason a briefing gets it — a person's line
+   breaks are theirs (A4-F8, §13) — and no markup is parsed anywhere. */
+.loop-task {
+  font-size: var(--t-sm);
+  color: var(--ink);
+  white-space: pre-wrap;
+  margin: 0;
+}
+/* An order with no task cannot fire. It reads as the absence it is, never as an empty objective. */
+.loop-task-missing {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  font-style: italic;
+}
 .loop-controls {
   display: flex;
   flex-wrap: wrap;
@@ -1507,6 +1522,7 @@ body {
 }
 .loop-create select,
 .loop-create input,
+.loop-create textarea,
 .loop-edit-form select,
 .loop-edit-form input {
   font: inherit;
@@ -1517,6 +1533,12 @@ body {
   background: var(--paper);
   color: var(--ink);
   min-height: 2.75rem; /* comfortable on a phone */
+}
+/* The objective is written, not picked, so it gets room to be a sentence and grows downward only —
+   a horizontally resizable field in a narrow column is a phone bug waiting to happen. */
+.loop-create textarea {
+  resize: vertical;
+  line-height: 1.4;
 }
 .loop-submit {
   background: var(--indigo);

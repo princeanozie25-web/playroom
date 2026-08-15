@@ -167,6 +167,7 @@ async function makeOrder(
       triggerEventType: 'agent.turn.completed',
       triggerMember: trigger,
       actionMember: action,
+      task: 'review the draft and say what you would cut',
       maxCycles: limits.maxCycles ?? null,
       maxUnattendedCycles: limits.maxUnattended ?? 3,
       expiresAt: null,

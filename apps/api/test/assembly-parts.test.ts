@@ -160,6 +160,7 @@ describe('a refusal pauses the loop OUT LOUD, wearing its own name', () => {
         triggerEventType: 'agent.turn.completed',
         triggerMember: 'sol',
         actionMember: PRINCE_MEMBER,
+        task: 'the objective this cycle is for',
         maxCycles: null,
         maxUnattendedCycles: 3,
         expiresAt: null,

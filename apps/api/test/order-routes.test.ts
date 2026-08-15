@@ -56,6 +56,7 @@ describe('the loops screen reads and steers orders over HTTP', () => {
         trigger_event_type: 'agent.turn.completed',
         trigger_member: 'sol',
         action_member: 'claude-main',
+        task: 'review the newest draft and say what you would cut',
         max_unattended_cycles: 3,
       }),
     });
@@ -114,6 +115,7 @@ describe('the loops screen reads and steers orders over HTTP', () => {
           trigger_event_type: 'agent.turn.completed',
           trigger_member: 'sol',
           action_member: 'claude-main',
+          task: 'review the newest draft and say what you would cut',
         }),
       },
       agentToken,

@@ -79,6 +79,7 @@ async function create(
       triggerEventType: 'agent.turn.completed',
       triggerMember: opts?.trigger ?? 'sol',
       actionMember: opts?.action ?? 'claude-main',
+      task: 'draft, then hand back for review',
       maxCycles: null,
       maxUnattendedCycles: 3,
       expiresAt: null,

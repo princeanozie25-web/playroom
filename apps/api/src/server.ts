@@ -512,6 +512,9 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           maxUnattendedCycles:
             typeof b.max_unattended_cycles === 'number' ? b.max_unattended_cycles : 3,
           expiresAt: typeof b.expires_at === 'string' ? b.expires_at : null,
+          // Passed through AS SENT — including absent. The command owns the rule, so a caller that
+          // omits it gets `order_task_absent` and a sentence, not a coerced empty string.
+          task: typeof b.task === 'string' ? b.task : undefined,
         },
         deps,
       );
@@ -1423,6 +1426,8 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
                   maxCycles: msg.max_cycles ?? null,
                   maxUnattendedCycles: msg.max_unattended_cycles ?? 3,
                   expiresAt: msg.expires_at ?? null,
+                  // Absent stays absent: the command refuses it by name (S-TASK).
+                  task: msg.task,
                 },
                 deps,
               );

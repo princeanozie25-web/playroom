@@ -68,6 +68,7 @@ async function main(): Promise<void> {
           triggerEventType: 'agent.turn.completed',
           triggerMember: o.trigger,
           actionMember: o.action,
+          task: 'draft the opening, then hand it back for review',
           maxCycles,
           maxUnattendedCycles: maxUnattended,
           expiresAt: null,

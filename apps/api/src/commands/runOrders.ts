@@ -55,6 +55,26 @@ export async function fireOrderCycle(
   order: OrderRow,
   triggerSeq: number,
 ): Promise<boolean> {
+  // ── PRE-OPEN GATE 0: THE ORDER MUST SAY WHAT IT IS FOR (S-TASK, pause) ──────────────
+  //
+  // Only orders created before S-TASK can be here: creation refuses a missing task, and nothing
+  // edits one. There is no honest way to fire this — an objective cannot be inferred from a trigger
+  // and an action member, and firing with an empty one is precisely the bug S-TASK exists to fix
+  // (SL2-N5: a paid turn spent asking what the work is). So it stops, and it stops OUT LOUD, naming
+  // the rule and what a person must do. PAUSED rather than terminal because the order is not wrong,
+  // it is incomplete — and the fix is a new order, so the pause is where it stays.
+  if (order.task === null || order.task.trim() === '') {
+    await stopOrder(
+      deps,
+      roomId,
+      order,
+      'PAUSED',
+      `the standing order paused because it has no task, so nothing can say what a cycle is for — ` +
+        `a task is set once when an order is created and cannot be added later, so create a new order with one`,
+    );
+    return false;
+  }
+
   // ── PRE-OPEN GATE 1: EXPIRY (terminal) ──────────────────────────────────────────────
   // A wall-clock deadline, compared against the DATABASE clock — the same `now()` the ceiling and the
   // interrupt budget use, so one definition of "now" decides every time-bounded thing in the system.
@@ -107,7 +127,20 @@ export async function fireOrderCycle(
     rootIsHuman: true,
     depth: 0,
     causeSeq: triggerSeq,
-    intent: `standing order — ${order.creator_member_id} authorised ${order.action_member_id} to recur`,
+    // THE ORDER'S TASK IS THE SUMMON'S INTENT (S-TASK). This used to be
+    // `standing order — <creator> authorised <member> to recur`, which named the AUTHORITY and never
+    // the WORK, so a briefed cycle arrived framed and unasked (SL2-N5).
+    //
+    // WHY THE INTENT AND NOT A NEW ASSEMBLY REGION: the intent is already durable. `fireSummon`
+    // writes it to `tasks.intent`, a column, and assembly's `task` part reads that row from the
+    // RECORD on every turn — so it cannot scroll out of the recent window any more than the briefing
+    // can, which was the requirement. A fifth region would have meant a new declared part, a second
+    // read of the same fact, and threading the order id into `assembleContext`, to deliver text that
+    // the existing task region already carries and already labels.
+    //
+    // The creator is not lost by dropping the old sentence: the summon's `requested_by`/`root_actor`
+    // and the order.cycled event carry it, which is where provenance belongs.
+    intent: order.task,
     orderId: order.id,
   });
   deps.log.info(

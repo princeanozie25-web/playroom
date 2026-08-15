@@ -37,6 +37,9 @@ loadRootEnv();
 const BRIEFING =
   'REVIEW ONLY. Say what you would cut, in two sentences, and open a follow-up for anything deferred.';
 const KICK = '@sol draft one sentence about why a standing order needs an owner.';
+/** WHAT THE ORDER IS FOR (S-TASK) — the objective every cycle is handed, set once at creation. */
+const TASK =
+  'Review the draft sol just wrote. Reply with exactly two things: the one sentence you would cut, and one sentence saying why. Do not ask questions — if the draft is unclear, say what is unclear and cut anyway.';
 
 interface TurnRow {
   actor_id: string;
@@ -94,6 +97,7 @@ async function seedRoom(
       triggerEventType: 'agent.turn.completed',
       triggerMember: 'sol',
       actionMember: 'claude-main',
+      task: TASK,
       maxCycles: null,
       // THE DIAL AT 1 — SL2-N4's gate. One unattended cycle, then it stops and asks for a person.
       maxUnattendedCycles: 1,

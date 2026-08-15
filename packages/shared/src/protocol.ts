@@ -136,6 +136,13 @@ export const ClientOrderCreate = z.object({
   trigger_event_type: z.string().min(1),
   trigger_member: z.string().min(1),
   action_member: z.string().min(1),
+  /**
+   * WHAT THIS ORDER IS FOR (S-TASK). Required in practice and OPTIONAL here, deliberately: a frame
+   * that omits it must come back with `order_task_absent` — a named refusal a person can act on —
+   * rather than a schema error that says only that the frame was wrong. The command is where the
+   * rule lives, and the rule is one an old client should be told, not merely rejected by.
+   */
+  task: z.string().optional(),
   /** null / absent = no cycle cap. The attendance dial (max_unattended_cycles) always applies. */
   max_cycles: z.number().int().positive().nullable().optional(),
   /** Default 3 server-side: pause after this many cycles with no human message in the room. */
@@ -694,6 +701,17 @@ export const OrderCreatedEvent = z.object({
     max_cycles: z.number().nullable(),
     max_unattended_cycles: z.number(),
     expires_at: z.string().nullable(),
+    /**
+     * WHAT THE ORDER IS FOR (S-TASK) — on the creation event, because it is set once at creation and
+     * never after, so the event that records the authorisation is the event that records the ask.
+     *
+     * OPTIONAL FOR REPLAY, not because it is optional to supply. Orders created before S-TASK wrote
+     * this payload without the key, and `rowToServerEvent` validates every stored row against this
+     * union — a required field here would make those rows unparseable and take their rooms' history
+     * down with them. The requirement lives in the command; this field's optionality is the log
+     * being honest that older rows were written under an older rule.
+     */
+    task: z.string().optional(),
   }),
 });
 export type OrderCreatedEvent = z.infer<typeof OrderCreatedEvent>;
@@ -983,6 +1001,41 @@ export const ERROR_ORDER_MEMBER_UNKNOWN = 'order_member_unknown';
 export const ERROR_ORDER_BAD_STATE = 'order_bad_state';
 /** An edit carried an out-of-range value — the dial below 1, a non-positive cycle cap, a bad date. */
 export const ERROR_ORDER_INVALID_CONFIG = 'order_invalid_config';
+
+/**
+ * THE TASK REFUSALS (S-TASK), and they fire AT CREATION rather than at fire time on purpose.
+ *
+ * An order with no objective is the bug SL2-N5 named: the loop runs, and spends a paid turn asking
+ * what the work is. The cheap fix would be to check when a cycle fires; the honest one is to refuse
+ * where the HUMAN is, at the moment they authorise recurring work, because that is the only moment
+ * anyone can supply what is missing. Same discipline as S1.7's oversize briefing.
+ *
+ * THREE CODES, not one, because they are three different mistakes with three different fixes: a
+ * caller that never sent the field (a client that has not been updated), a human who submitted an
+ * empty box, and an objective too long to be one.
+ */
+export const ERROR_ORDER_TASK_ABSENT = 'order_task_absent';
+/** The task was present and empty, or nothing but whitespace — an absent task wearing a string. */
+export const ERROR_ORDER_TASK_BLANK = 'order_task_blank';
+/** Over `ORDER_TASK_MAX_CHARS`. Refused, never truncated: a cut-off objective is a different one. */
+export const ERROR_ORDER_TASK_TOO_LARGE = 'order_task_too_large';
+
+/**
+ * HOW LONG AN ORDER'S TASK MAY BE — 1000 characters, half the briefing's cap, and both numbers are
+ * arguments rather than round numbers.
+ *
+ * COST: the task rides in every cycle's window, like the briefing. At the ~4 chars/token estimate
+ * (which S-LOOP2 measured as reading LOW — SL2-N6) a full task is ~250-320 input tokens, ≈$0.0003 a
+ * cycle at claude-main's $0.001/1k. A loop of 288 cycles/day pays ~$0.09 against a $5 ceiling: under
+ * 2%, and knowable in advance, which is the point of having a cap at all.
+ *
+ * SHAPE: it is HALF the briefing's 2000 because it is a different kind of text. A briefing is a
+ * room's standing document and can be replaced when it stops fitting; a task is WIRING — set once,
+ * never edited, and changed only by creating a new order. A cap generous enough to hold a document
+ * would invite writing one that can never be revised. If an objective needs more than a thousand
+ * characters, what it needs is a briefing (for the framing) and a shorter task (for the ask).
+ */
+export const ORDER_TASK_MAX_CHARS = 1000;
 
 /**
  * THE BRIEFING REFUSALS (S1.7), kept apart because they are different mistakes.

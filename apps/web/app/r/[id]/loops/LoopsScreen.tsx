@@ -8,6 +8,7 @@ import type { RosterMember } from '../../../roster';
 import { MemberName } from '../../../MemberChip';
 import { Panel, PanelPresence } from '../../../Panel';
 import { HOOK, pr } from '../../../hooks';
+import { ORDER_TASK_MAX_CHARS } from '@playroom/shared';
 
 // THE LOOPS SCREEN (S-UI3) — standing orders as a form, not a bash script.
 //
@@ -129,6 +130,19 @@ export function LoopsScreen({
                     />
                   </span>
                 </div>
+                {/* WHAT IT IS FOR (S-TASK) — the objective every cycle is handed. Shown as the
+                    order's own line rather than folded into the terms, because it is the thing a
+                    person is actually authorising. An order created before S-TASK has none, and
+                    says so plainly: it will refuse to fire, and there is no editing one in. */}
+                {o.task ? (
+                  <p className="loop-task" {...pr(HOOK.loopTask)}>
+                    {o.task}
+                  </p>
+                ) : (
+                  <p className="loop-task loop-task-missing" {...pr(HOOK.loopTask)}>
+                    no task — this order predates them and will not fire; create a new one
+                  </p>
+                )}
                 <div className="loop-row-meta">
                   <span className="loop-cycles" {...pr(HOOK.loopCycles)}>
                     {o.cycle_count} cycle{o.cycle_count === 1 ? '' : 's'}
@@ -241,6 +255,7 @@ function CreateForm({
   const second = agents[1]?.id ?? first;
   const [trigger, setTrigger] = useState(first);
   const [action, setAction] = useState(second);
+  const [task, setTask] = useState('');
   const [dial, setDial] = useState(3);
   const [cap, setCap] = useState('');
   const [expiry, setExpiry] = useState('');
@@ -256,6 +271,7 @@ function CreateForm({
           trigger_event_type: TRIGGER_EVENT,
           trigger_member: trigger,
           action_member: action,
+          task,
           max_unattended_cycles: dial,
           max_cycles: cap.trim() === '' ? null : Number(cap),
           expires_at: expiry.trim() === '' ? null : new Date(expiry).toISOString(),
@@ -263,6 +279,23 @@ function CreateForm({
       }}
     >
       <h2>New standing order</h2>
+      {/* THE OBJECTIVE, FIRST AND REQUIRED (S-TASK). It is above the wiring because it is the
+          decision: the members are how the work recurs, this is what recurs. `required` and the
+          disabled button are courtesy — the server refuses a blank one by name, and the form adds
+          no enforcement it does not already have. It cannot be edited later, and the label says so
+          rather than letting someone discover it. */}
+      <label>
+        what each cycle is for — set once, and it cannot be edited later
+        <textarea
+          value={task}
+          rows={3}
+          required
+          maxLength={ORDER_TASK_MAX_CHARS}
+          placeholder="e.g. review the newest draft in this room and say, in two sentences, what you would cut"
+          onChange={(e) => setTask(e.target.value)}
+          {...pr(HOOK.loopTask)}
+        />
+      </label>
       <label>
         when this agent finishes a turn
         <select
@@ -321,7 +354,11 @@ function CreateForm({
           {...pr(HOOK.loopExpiry)}
         />
       </label>
-      <button type="submit" disabled={busy || !trigger || !action} {...pr(HOOK.loopSubmit)}>
+      <button
+        type="submit"
+        disabled={busy || !trigger || !action || task.trim() === ''}
+        {...pr(HOOK.loopSubmit)}
+      >
         create standing order
       </button>
     </Panel>

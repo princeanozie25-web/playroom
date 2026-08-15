@@ -93,6 +93,7 @@ async function main(): Promise<void> {
         triggerEventType: 'agent.turn.completed',
         triggerMember: 'sol',
         actionMember: 'claude-main',
+        task: 'measure the trigger overhead',
         maxCycles: null,
         maxUnattendedCycles: n + 10,
         expiresAt: null,

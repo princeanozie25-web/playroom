@@ -64,6 +64,7 @@ async function makeOrder(prefix: string): Promise<{ roomId: string; orderId: str
       triggerEventType: 'agent.turn.completed',
       triggerMember: 'sol',
       actionMember: 'claude-main',
+      task: 'draft, then hand back for review',
       maxCycles: null,
       maxUnattendedCycles: 3,
       expiresAt: null,

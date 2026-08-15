@@ -22,6 +22,9 @@ export interface OrderView {
   status: string;
   pause_reason: string | null;
   last_fired: string | null;
+  /** What the order is for (S-TASK). Null only for orders created before it existed — those refuse
+   *  to fire, so the surface shows the absence rather than pretending an objective. */
+  task: string | null;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';

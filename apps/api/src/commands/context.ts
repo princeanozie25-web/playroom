@@ -108,6 +108,8 @@ export type Command =
       maxCycles: number | null;
       maxUnattendedCycles: number;
       expiresAt: string | null;
+      /** What the order is for (S-TASK) — refused by name when absent, so it is optional here. */
+      task?: string;
     }
   // Pause, resume or revoke a standing order (S-LOOP). Any human pauses; only the creator resumes or
   // revokes; an agent does none. `actorId` is the authenticated member.

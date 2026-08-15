@@ -109,6 +109,7 @@ async function runOneCycle(roomId: string): Promise<void> {
       triggerEventType: 'agent.turn.completed',
       triggerMember: 'sol',
       actionMember: 'claude-main',
+      task: 'review the draft and say what you would cut',
       maxCycles: null,
       maxUnattendedCycles: 3,
       expiresAt: null,

@@ -31,6 +31,14 @@ export interface OrderRow {
   unattended_count: number;
   status: string;
   pause_reason: string | null;
+  /**
+   * WHAT THIS ORDER IS FOR (S-TASK) — set once, at creation, by the human who authorised it.
+   *
+   * NULL only for orders created before S-TASK. Nothing backfills them and nothing edits this: it is
+   * WIRING (UI3-1's line), so changing what an order is for means creating a new one. An order whose
+   * task is NULL refuses to fire and pauses, out loud — see `runOrders.ts`.
+   */
+  task: string | null;
 }
 
 interface OrderDbRow {
@@ -47,11 +55,12 @@ interface OrderDbRow {
   unattended_count: number;
   status: string;
   pause_reason: string | null;
+  task: string | null;
 }
 
 const ORDER_COLS = `id, room_id, creator_member_id, trigger_event_type, trigger_member_id,
   action_member_id, max_cycles, max_unattended_cycles, expires_at, cycle_count,
-  unattended_count, status, pause_reason`;
+  unattended_count, status, pause_reason, task`;
 
 function toOrderRow(r: OrderDbRow): OrderRow {
   return {
@@ -70,6 +79,8 @@ export interface CreateOrderInput {
   maxCycles: number | null;
   maxUnattendedCycles: number;
   expiresAt: string | null; // ISO, or null
+  /** REQUIRED. The command refuses a create without one; this type makes forgetting it a build error. */
+  task: string;
 }
 
 /** Insert the projection row. The order.created event is written by the command, before this. */
@@ -77,8 +88,8 @@ export async function createOrderRow(pool: Pool, input: CreateOrderInput): Promi
   const { rows } = await pool.query<OrderDbRow>(
     `INSERT INTO standing_orders
        (id, room_id, creator_member_id, trigger_event_type, trigger_member_id, action_member_id,
-        max_cycles, max_unattended_cycles, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        max_cycles, max_unattended_cycles, expires_at, task)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING ${ORDER_COLS}`,
     [
       input.id,
@@ -90,6 +101,7 @@ export async function createOrderRow(pool: Pool, input: CreateOrderInput): Promi
       input.maxCycles,
       input.maxUnattendedCycles,
       input.expiresAt,
+      input.task,
     ],
   );
   return toOrderRow(rows[0]);
@@ -120,7 +132,7 @@ export async function ordersInRoom(pool: Pool, roomId: string): Promise<OrderLis
   const { rows } = await pool.query<OrderDbRow & { last_fired: Date | null }>(
     `SELECT so.id, so.room_id, so.creator_member_id, so.trigger_event_type, so.trigger_member_id,
             so.action_member_id, so.max_cycles, so.max_unattended_cycles, so.expires_at,
-            so.cycle_count, so.unattended_count, so.status, so.pause_reason,
+            so.cycle_count, so.unattended_count, so.status, so.pause_reason, so.task,
             (SELECT max(e.ts) FROM events e
               WHERE e.room_id = so.room_id AND e.event_type = 'order.cycled'
                 AND e.payload ->> 'order_id' = so.id) AS last_fired

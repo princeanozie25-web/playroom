@@ -160,6 +160,7 @@ export const HOOK = {
   /** The action-member picker. */
   loopActionMember: 'loop-action-member',
   /** The attendance-dial field (default 3). */
+  loopTask: 'loop-task',
   loopDial: 'loop-dial',
   /** The cycle-cap field (optional). */
   loopCap: 'loop-cap',

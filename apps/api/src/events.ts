@@ -565,6 +565,9 @@ export interface OrderCreatedPayload {
   max_cycles: number | null;
   max_unattended_cycles: number;
   expires_at: string | null;
+  /** What the order is for (S-TASK). Required at creation; the wire type allows its absence only so
+   *  rows written before S-TASK still parse. */
+  task: string;
 }
 
 export async function appendOrderCreated(

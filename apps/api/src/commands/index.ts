@@ -120,6 +120,9 @@ export function executeCommand(
     maxCycles: number | null;
     maxUnattendedCycles: number;
     expiresAt: string | null;
+    /** What the order is for (S-TASK). Optional here so a caller that omits it reaches the named
+     *  refusal (`order_task_absent`) instead of failing to compile at a boundary the wire crosses. */
+    task?: string;
   },
   deps: CommandDeps,
 ): Promise<OrderResult>;

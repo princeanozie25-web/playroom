@@ -5,7 +5,11 @@ import {
   ERROR_ORDER_MEMBER_UNKNOWN,
   ERROR_ORDER_NOT_CREATOR,
   ERROR_ORDER_NOT_HUMAN,
+  ERROR_ORDER_TASK_ABSENT,
+  ERROR_ORDER_TASK_BLANK,
+  ERROR_ORDER_TASK_TOO_LARGE,
   ERROR_ORDER_UNKNOWN,
+  ORDER_TASK_MAX_CHARS,
 } from '@playroom/shared';
 import { appendOrderCreated, appendOrderStatus, appendOrderUpdated } from '../events.js';
 import { listRoomMembers, matchRoomAgent, memberRecord } from '../members.js';
@@ -56,6 +60,9 @@ export async function createOrderCommand(
     maxCycles: number | null;
     maxUnattendedCycles: number;
     expiresAt: string | null;
+    /** What the order is for (S-TASK). Optional in the TYPE so an old caller reaches the named
+     *  refusal below rather than a type error at a call site nobody will see at runtime. */
+    task?: string;
   },
 ): Promise<OrderResult> {
   const base = { room_id: input.roomId, member: ctx.actorId };
@@ -92,6 +99,43 @@ export async function createOrderCommand(
     );
   }
 
+  // 3. THE ORDER MUST SAY WHAT IT IS FOR (S-TASK). Refused HERE, at creation, and not at fire time:
+  //    the person authorising recurring work is the only party who can supply the objective, and the
+  //    moment they are present is the moment to ask. An order that reached the runner without one
+  //    would burn a paid turn discovering it (SL2-N5) — and there is no editing a task in, because a
+  //    task is wiring: changing it means creating a new order.
+  //
+  //    Three refusals, three fixes: nothing sent (an old client), an empty box (a person), too long
+  //    (an objective that is really a document — put the framing in the room's briefing instead).
+  if (input.task === undefined) {
+    deps.log.warn(
+      { ...base, code: ERROR_ORDER_TASK_ABSENT },
+      'order create refused: no task — an order must say what it is for',
+    );
+    return refuse(
+      ERROR_ORDER_TASK_ABSENT,
+      'a standing order must say what it is for — give it a task, which is set once and cannot be edited later',
+    );
+  }
+  const task = input.task.trim();
+  if (task === '') {
+    deps.log.warn({ ...base, code: ERROR_ORDER_TASK_BLANK }, 'order create refused: blank task');
+    return refuse(
+      ERROR_ORDER_TASK_BLANK,
+      "a standing order's task cannot be blank — say what each cycle is for",
+    );
+  }
+  if (task.length > ORDER_TASK_MAX_CHARS) {
+    deps.log.warn(
+      { ...base, code: ERROR_ORDER_TASK_TOO_LARGE, length: task.length },
+      'order create refused: task over the cap',
+    );
+    return refuse(
+      ERROR_ORDER_TASK_TOO_LARGE,
+      `a standing order's task must be ${ORDER_TASK_MAX_CHARS} characters or fewer (this one is ${task.length}) — the standing framing belongs in the room's briefing`,
+    );
+  }
+
   const orderId = `ord_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const created = await appendOrderCreated(deps.pool, input.roomId, ctx.actorId, {
     order_id: orderId,
@@ -102,6 +146,7 @@ export async function createOrderCommand(
     max_cycles: input.maxCycles,
     max_unattended_cycles: input.maxUnattendedCycles,
     expires_at: input.expiresAt,
+    task,
   });
   await createOrderRow(deps.pool, {
     id: orderId,
@@ -113,6 +158,7 @@ export async function createOrderCommand(
     maxCycles: input.maxCycles,
     maxUnattendedCycles: input.maxUnattendedCycles,
     expiresAt: input.expiresAt,
+    task,
   });
   deps.bus.publish(input.roomId, created);
   deps.log.info(
