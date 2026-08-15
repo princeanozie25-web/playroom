@@ -633,6 +633,24 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       return { subscribed: false, removed, devices: await countFor(db(), actor.principal_id) };
     });
 
+    // A FAILED NOTIFICATION IS VISIBLE SOMEWHERE A HUMAN CAN FIND IT (S-PUSH, SP-3). A channel that
+    // fails quietly is worse than none, because it is trusted: a person who believes their phone
+    // will buzz stops opening the room. This is the log of what was actually attempted on their
+    // behalf, with outcomes — including the refusals. Their OWN sends only, and no endpoint and no
+    // key material appear in it, because neither is stored on a send row in the first place.
+    fastify.get('/push/sends', async (req, reply) => {
+      const actor = await pushMember(req, reply);
+      if (!actor) return reply;
+      const { rows } = await db().query(
+        `SELECT id, room_id, interrupt_id, urgency, endpoint_origin, disclosed, outcome, detail,
+                created_at
+           FROM push_sends WHERE principal_id = $1
+          ORDER BY created_at DESC LIMIT 50`,
+        [actor.principal_id],
+      );
+      return { sends: rows };
+    });
+
     // "IS THIS THING ON" — a count, and only a count. No endpoints and no key material come back
     // out of this server by any route, so there is no field to forget to strip.
     fastify.get('/push/subscriptions', async (req, reply) => {

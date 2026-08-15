@@ -4,6 +4,8 @@ import type { ServerEvent } from '@playroom/shared';
 import { appendInterruptEvent } from './events.js';
 import { mandateFor } from './mandates.js';
 import { getTask, transitionTask } from './tasks.js';
+import { principalOf } from './members.js';
+import { notifyPrincipal } from './push-send.js';
 
 /**
  * INTERRUPTS — claiming a human's attention becomes a record with a price (Bible §21.3, §18).
@@ -241,7 +243,56 @@ export async function raiseInterrupt(
     }
   }
 
+  // ── AND ONLY NOW, THE TELLING (S-PUSH) ──────────────────────────────────────────────
+  //
+  // EVERYTHING ABOVE IS ALREADY COMMITTED: the row exists, the event is written, the halt has
+  // happened. A notification is a TELLING, never a doing, so it is dispatched from HERE — after the
+  // record, outside the return value, and fire-and-forget.
+  //
+  // FIRE-AND-FORGET IS THE WHOLE DESIGN, not a shortcut. Awaited, a slow vendor would become latency
+  // on raising a hand and an unreachable one would become an interrupt that failed to record — the
+  // exact inversion SCC-3's rule forbids ("a refused notification must not undo the interrupt"). So
+  // the send cannot be awaited, cannot throw into this function, and cannot return anything this
+  // function reads. `notifyPrincipal` is built to match: it never rejects.
+  //
+  // The interrupt this produces is byte-identical whether the push succeeds, fails, is throttled,
+  // is refused by the allowlist, or is never attempted at all. The only difference any of that
+  // makes is a row in `push_sends`.
+  void notifyForInterrupt(pool, {
+    roomId: input.roomId,
+    urgency: interrupt.urgency,
+    addressedTo: interrupt.addressed_to,
+    interruptId: interrupt.id,
+  }).catch(() => {
+    /* unreachable: notifyForInterrupt resolves on every path. The catch is the second lock. */
+  });
+
   return { ok: true, interrupt, event, halt };
+}
+
+/**
+ * Resolve the person behind the member whose attention was claimed, and tell them.
+ *
+ * A subscription belongs to a PRINCIPAL and an interrupt is addressed to a MEMBER, so this is the
+ * one hop between them. Exported for the tests that assert what is and is not sent; nothing else
+ * calls it, because `raiseInterrupt` is the only place an interrupt comes into existence.
+ */
+export async function notifyForInterrupt(
+  pool: Pool,
+  input: { roomId: string; urgency: string; addressedTo: string; interruptId: string },
+): Promise<void> {
+  try {
+    const principal = await principalOf(pool, input.addressedTo);
+    if (!principal) return;
+    await notifyPrincipal(pool, {
+      principalId: principal,
+      roomId: input.roomId,
+      interruptId: input.interruptId,
+      urgency: input.urgency,
+    });
+  } catch {
+    // The record is already committed; nothing here may reach it.
+  }
 }
 
 /** The next urgency down. Null at the bottom — an FYI cannot be lowered further. */
