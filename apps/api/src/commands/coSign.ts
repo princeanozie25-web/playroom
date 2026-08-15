@@ -83,7 +83,14 @@ export async function raiseDecisionInterrupts(
     decisionId: string;
     action: string;
   },
-): Promise<void> {
+): Promise<{ told: number; refusedForBudget: number }> {
+  // RETURNED, NOT SWALLOWED (S-DIAL). This was `Promise<void>`, and that was the silent site Phase 0
+  // went looking for: a decision was written, a summon was held, the budget refused the claim, the
+  // warn went to a log nobody was reading, and the turn ended normally — so the completion fired the
+  // NEXT cycle of a loop whose signature request nobody had been told about. The counts go back to
+  // the caller now; the caller decides what a failure to tell means.
+  let told = 0;
+  let refusedForBudget = 0;
   for (const human of await humanMembersOfPrincipal(
     deps.pool,
     input.roomId,
@@ -110,9 +117,12 @@ export async function raiseDecisionInterrupts(
         },
         'interrupt refused: no budget left today',
       );
+      refusedForBudget += 1;
       continue;
     }
+    told += 1;
     if (raised.event) deps.bus.publish(input.roomId, raised.event);
     if (raised.halt) deps.bus.publish(input.roomId, raised.halt);
   }
+  return { told, refusedForBudget };
 }

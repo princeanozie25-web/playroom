@@ -12,8 +12,9 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "format": "prettier --check .",
-    "verify": "pnpm format && pnpm typecheck && pnpm test",
-    "migrate": "tsx scripts/migrate.ts --with-test"
+    "verify": "pnpm format && pnpm typecheck && pnpm boot-check && pnpm test",
+    "migrate": "tsx scripts/migrate.ts --with-test",
+    "boot-check": "tsx scripts/esm-boot-check.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

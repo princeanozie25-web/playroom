@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { evaluate, type Verdict } from '@playroom/fabric';
-import { ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
+import { ERROR_INTERRUPT_BUDGET, ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
 // The process-wide mandate cache, shared with the handoff and the turn stamp (S1.3). It used to
 // live here as a module-local `let`, which meant every new reader grew its own.
 import { mandateFor } from '../mandates.js';
@@ -169,13 +169,29 @@ export async function requestActionCommand(
   // for the next raise. Rolling the decision back because a notification was too expensive would
   // be the tail wagging the dog.
   if (verdict.decision === 'CO_SIGN' && verdict.required_signer) {
-    await raiseDecisionInterrupts(deps, {
+    const telling = await raiseDecisionInterrupts(deps, {
       roomId: input.roomId,
       subject: input.subject,
       requiredSigner: verdict.required_signer,
       decisionId: event.event_type === 'decision' ? event.payload.decision_id : input.clientMsgId,
       action: input.action,
     });
+    // THE DECISION STANDS EITHER WAY (above). What changed in S-DIAL is that a failure to TELL is no
+    // longer invisible here: it is logged at the site where it happened, with the counts. A loop
+    // whose subject spent its budget stops at the runner's voice gate on the next trigger — this
+    // does not pause anything itself, because a co-signature is not always inside a loop and
+    // pausing an unrelated order from here would be acting outside what this command knows.
+    if (telling.told === 0 && telling.refusedForBudget > 0) {
+      deps.log.warn(
+        {
+          room_id: input.roomId,
+          subject: input.subject,
+          decision_id: decisionId,
+          code: ERROR_INTERRUPT_BUDGET,
+        },
+        'a signature is needed and NOBODY COULD BE TOLD: the subject has spent its interrupt budget',
+      );
+    }
   }
 
   return { ok: true, verdict, decisionId };

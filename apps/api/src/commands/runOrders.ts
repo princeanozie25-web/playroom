@@ -10,7 +10,7 @@ import {
   type OrderStatus,
 } from '../orders.js';
 import { spendToday, type SpendState } from '../spend.js';
-import { raiseInterrupt } from '../interrupts.js';
+import { budgetFor, raiseInterrupt } from '../interrupts.js';
 import { humanMembersOfPrincipal, principalOf } from '../members.js';
 import { fireSummon } from './summon.js';
 import type { CommandContext, CommandDeps } from './context.js';
@@ -71,6 +71,47 @@ export async function fireOrderCycle(
       'PAUSED',
       `the standing order paused because it has no task, so nothing can say what a cycle is for — ` +
         `a task is set once when an order is created and cannot be added later, so create a new order with one`,
+    );
+    return false;
+  }
+
+  // ── PRE-OPEN GATE 0b: THE ORDER MUST STILL HAVE A VOICE (S-DIAL, pause) ─────────────
+  //
+  // AN ORDER THAT CANNOT SPEAK MUST NOT CONTINUE. `interrupts_per_day` is spent per RAISER per day,
+  // and an order's own stop-interrupt is charged to its ACTION MEMBER — the same member whose cycles
+  // run and whose co-signatures are charged. So a loop at a raised dial can spend its whole voice on
+  // ordinary claims and then keep running with no way to tell anyone anything: the exact failure
+  // S-PUSH exists to prevent, arriving through a door S-PUSH does not watch.
+  //
+  // THE FIX IS NOT A BIGGER BUDGET. Raising the number only moves where the silence starts, and the
+  // budget exists because an agent that can interrupt without limit can exhaust a person. So this
+  // fails closed instead, in ADR-001's shape: when the thing that governs is unavailable, the action
+  // does not proceed. Checked BEFORE a cycle opens, next to expiry and the ceiling, because a cycle
+  // that runs and then cannot report is worse than one that never ran.
+  //
+  // ── THE LAST UNTELLABLE EVENT, NAMED ────────────────────────────────────────────────
+  //
+  // THIS PAUSE IS THE ONE THING THAT CANNOT REACH A CLOSED PHONE. Telling it would mean raising an
+  // interrupt, and the reason it is happening is that raising one is refused. There is no exemption
+  // here on purpose — an exemption is a widening, and a widening written under pressure becomes
+  // permanent. So the boundary is stated rather than engineered around:
+  //
+  //   the last event that CAN reach a phone is the raise that spends the final unit of budget;
+  //   the pause that follows is visible in the ROOM (an order.status event and a sentence) and in
+  //   the log, and it is found the next time a person opens the room.
+  //
+  // The loop still STOPS, which is the property that matters: a person who does not look finds a
+  // paused order rather than a loop that ran all night unable to say so.
+  const voice = await budgetFor(deps.pool, order.action_member_id);
+  if (voice.remaining !== null && voice.remaining <= 0) {
+    await stopOrder(
+      deps,
+      roomId,
+      order,
+      'PAUSED',
+      `the standing order paused because ${order.action_member_id} has spent its interrupt budget ` +
+        `for today (${voice.spent}/${voice.limit}), so it could no longer tell you anything — ` +
+        `a loop that cannot speak does not keep running. It can resume tomorrow, or you can resume it now`,
     );
     return false;
   }
@@ -225,8 +266,23 @@ async function stopOrder(
   });
   await setOrderStatus(deps.pool, order.id, status, reason);
   deps.bus.publish(roomId, event);
-  await raiseOrderInterrupts(deps, roomId, order, reason);
-  deps.log.warn({ room_id: roomId, order_id: order.id, status }, 'standing order stopped itself');
+  const telling = await raiseOrderInterrupts(deps, roomId, order, reason);
+  // WHETHER ANYONE WAS TOLD IS PART OF THE RECORD OF THE STOP. The order.status event above and the
+  // sentence in the room happen either way — the ROOM always knows. What this line distinguishes is
+  // whether the claim on a person could be made at all, which is the difference between "stopped,
+  // and they will hear" and "stopped, and they will find out when they next look".
+  deps.log.warn(
+    {
+      room_id: roomId,
+      order_id: order.id,
+      status,
+      told: telling.told,
+      untellable: telling.refusedForBudget,
+    },
+    telling.told === 0 && telling.refusedForBudget > 0
+      ? 'standing order stopped itself and could NOT tell anyone: the interrupt budget is spent'
+      : 'standing order stopped itself',
+  );
   return true;
 }
 
@@ -251,9 +307,14 @@ async function raiseOrderInterrupts(
   roomId: string,
   order: OrderRow,
   summary: string,
-): Promise<void> {
+): Promise<{ told: number; refusedForBudget: number }> {
   const principal = await principalOf(deps.pool, order.creator_member_id);
-  if (!principal) return;
+  // RETURNED, NOT SWALLOWED (S-DIAL). This used to be `Promise<void>`, so `stopOrder` could not tell
+  // a stop that reached its owner from one that reached nobody — an order could stop itself in
+  // silence and the log would read exactly the same. The counts go back to the caller now.
+  if (!principal) return { told: 0, refusedForBudget: 0 };
+  let told = 0;
+  let refusedForBudget = 0;
   const aboutId = `${order.id}:${randomUUID().replace(/-/g, '').slice(0, 8)}`;
   for (const human of await humanMembersOfPrincipal(deps.pool, roomId, principal)) {
     const raised = await raiseInterrupt(deps.pool, {
@@ -278,11 +339,14 @@ async function raiseOrderInterrupts(
         },
         'order interrupt refused: no budget left today',
       );
+      refusedForBudget += 1;
       continue;
     }
+    told += 1;
     if (raised.event) deps.bus.publish(roomId, raised.event);
     // No halt branch: a DECISION never halts a task (interrupts.ts). Only a BLOCKER does.
   }
+  return { told, refusedForBudget };
 }
 
 /**
