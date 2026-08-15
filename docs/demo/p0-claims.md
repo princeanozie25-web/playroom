@@ -482,9 +482,9 @@ produced a turn**. `ord_5aad7b1c4b9341c4` counted its cycle, wrote `order.cycled
 reached its cap, reported LIMIT_REACHED — _"the standing order finished the 1 cycle it was set to
 run"_ — and sent a FINISHED to the phone, having taken no turn at all. The §22b one-turn-per-room
 guard lives in `runAgentTurn`, DOWNSTREAM of `tryOpenCycle`'s increment and of the summon write, so a
-cycle that collides with a turn already in flight is counted and then quietly does nothing. Logged,
-not fixed in this slice. It is ST-N1's family and sharper than it: not merely _a count is not
-completion_, but _a count is not even work_.
+cycle that collides with a turn already in flight is counted and then quietly does nothing. It is
+ST-N1's family and sharper than it: not merely _a count is not completion_, but _a count is not even
+work_. **Closed by S-CYCLE below — fixed, not hidden.**
 
 |                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -501,6 +501,48 @@ the seven did not, and said it had).
 five silent finishes above one loud decision. The browser half is `dial-take2` at 390px against the
 live tier: six orders on screen, matched against the live log's six `order.created`, with the
 untellable pause found by its sentence rather than by its position.
+
+---
+
+## S-CYCLE — A COUNT MUST MEAN WORK (SD-N1, closed by fixing it)
+
+S-DIAL's safety is built entirely on counts: `max_cycles`, the attendance dial, every bound the runner
+has. SD-N1 showed a counter that could count nothing — so every bound above it was softer than it
+read, and the notification channel, which took four slices to earn, spent its credibility on its
+first unattended run by telling Prince a loop had finished work it never started.
+
+**THE AUDIT, WITH DENOMINATORS, AND NOTHING ADJUSTED.** Across both databases at the time of the fix:
+
+| where          | orders that cycled | cycles counted | cycles that produced a turn | orders diverging |
+| -------------- | -----------------: | -------------: | --------------------------: | ---------------: |
+| **production** |                  5 |              7 |                       **6** |           1 of 5 |
+| test           |                  7 |              7 |                           7 |           0 of 7 |
+
+One historical cycle counted nothing: `ord_5aad7b1c4b9341c4` in `dial-1786830064276`. It reached
+LIMIT_REACHED and **one notification was sent about it — 1 of the 8 push sends in production's whole
+history was wrong.** That is the size of the defect in the record, and it stays there: no migration
+adjusts a past counter, because making the ledger agree with the code by editing the evidence is
+worse than the divergence. The test-database figure is over surviving rooms only — test rooms are
+dropped by the suites that create them, so its denominator is what remained, not what ever ran.
+
+**THE FIX, AND THE ONE REJECTED.** A cycle is counted when its turn STARTS, not when its trigger is
+consumed. `tryOpenCycle` split by meaning: `claimTrigger` consumes the completion (idempotency and
+one-cycle-in-flight, unchanged), and `countCycleStarted` runs at the seam that just wrote
+`agent.turn.started` — a durable row that migration 006's unique index makes at-most-once per summon.
+The rejected alternative was a guard before the increment: the fact it would have to read ("is a turn
+running") lives in a per-process Set, so it cannot be decided in the same statement as the write, and
+a check a concurrent turn can slip between is not a fix but a smaller window. Counting on
+_completion_ was rejected too, for a different reason: a turn that costs money and then fails would
+not count, so `max_cycles` would stop bounding spend.
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | For any order, cycles counted equals cycles that produced a completed turn — asserted over a RUN with deliberate contention, not over one call. Six ways a summoned turn can die between an order's trigger and its first token (no route, a co-signature hold, a summon conflict, the ceiling, §22b, a lost race for the started row) are handled AS A CLASS rather than one at a time: the counter has exactly one writer, reachable only from downstream of the row that proves a turn exists. No terminal status is reachable by cycles that did no work, which is what makes a FINISHED honest. A cycle that cannot take its turn is DEFERRED — nothing counted, nothing evented, no summon written, the trigger left unconsumed so the next completion still fires it, and the room told which rule stopped it. |
+| **What it does NOT** | **It does not make the in-flight guard durable.** S05a-N1 stands: §22b reads a per-process Set, so two machines can still both start a turn for one member. The count no longer depends on that answer, which is the point — but the deferral gate is a fast path, not a guarantee. **It does not repair the past**: production still holds one cycle that counted nothing and one notification that was wrong, on purpose. **A cycle that starts and FAILS still counts** — that is the ruling, not an oversight: it cost tokens, and counting only successes would let an erroring loop run past its cap. **It does not make a count mean COMPLETION** — ST-N1 is untouched; a count now means a turn happened, nothing more.                                                                                       |
+
+**The one sentence a caption may use:** _a cycle counts when a turn actually starts, so the numbers the
+loop bounds itself with mean what they say._ **Not:** _the loop knows what it did_ (it knows a turn
+ran). **Not:** _concurrent turns are now impossible_ (S05a-N1 is open).
 
 ---
 
