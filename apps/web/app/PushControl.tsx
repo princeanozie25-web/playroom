@@ -24,6 +24,8 @@ import { HOOK, pr } from './hooks';
 type State =
   | { kind: 'checking' }
   | { kind: 'unsupported' }
+  /** iOS, and not installed to the Home Screen — subscribing here would never wake the phone. */
+  | { kind: 'needs-install' }
   | { kind: 'unconfigured' }
   | { kind: 'off' }
   | { kind: 'on'; devices: number }
@@ -41,6 +43,31 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+/**
+ * IS THIS AN iOS BROWSER THAT IS NOT AN INSTALLED WEB APP? (SPUSH-N2.)
+ *
+ * On iOS, Web Push is delivered ONLY to a web app added to the Home Screen. In a Safari tab a person
+ * can subscribe and then never be woken — SP-4's observation was made on an installed PWA and would
+ * not have arrived in a tab. That constraint was on the record and nowhere in the product, so the
+ * first tester who is not Prince would have met a control reading "on · 1 device" and heard nothing.
+ *
+ * BOTH HALVES ARE READ, and neither is a user-agent guess about a vendor:
+ *   `standalone`  — the display mode. `navigator.standalone` is the iOS-specific flag; the media
+ *                   query is the standard one, and either being true means installed.
+ *   `iOS`         — narrowed to Apple's touch platforms. Desktop Safari delivers push to a tab, so
+ *                   warning there would be a lie in the other direction.
+ */
+function iosNeedsInstalling(): boolean {
+  if (typeof window === 'undefined') return false;
+  const standalone =
+    window.matchMedia?.('(display-mode: standalone)').matches === true ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  if (standalone) return false;
+  const ua = navigator.userAgent;
+  const iOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  return iOS;
+}
+
 export function PushControl() {
   const [state, setState] = useState<State>({ kind: 'checking' });
   const [busy, setBusy] = useState(false);
@@ -55,6 +82,10 @@ export function PushControl() {
   // because they can disagree — a row can outlive a browser's subscription and vice versa, and a
   // control that reads only one of them will eventually claim something untrue.
   const refresh = useCallback(async () => {
+    // CHECKED FIRST, and ahead of `supported`: in a tab iOS may report the APIs as present, so a
+    // person could pass every other check and still be unreachable. The honest state is the one that
+    // says what to do about it.
+    if (iosNeedsInstalling()) return setState({ kind: 'needs-install' });
     if (!supported) return setState({ kind: 'unsupported' });
     if (Notification.permission === 'denied') return setState({ kind: 'blocked' });
     try {
@@ -143,6 +174,12 @@ export function PushControl() {
     <div className="push-control" {...pr(HOOK.pushControl)}>
       {state.kind === 'unsupported' && (
         <span className="push-state">this browser cannot receive notifications</span>
+      )}
+      {state.kind === 'needs-install' && (
+        <span className="push-state">
+          on iPhone, notifications only reach an installed app — tap Share, then “Add to Home
+          Screen”, and turn them on from there
+        </span>
       )}
       {state.kind === 'unconfigured' && (
         <span className="push-state">notifications are not configured on this deployment</span>

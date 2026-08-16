@@ -758,3 +758,27 @@ has to happen. _Trigger: closed._
 in a row and got read instead of retried; fixed. `apps/api/test/budget-meter.test.ts` has failed once
 and is unexplained. _Trigger: its second sighting — read it rather than retry it, which is the lesson
 the first one taught at the cost of four retries._
+
+### AUDIT-CLOSE — the two owed fixes
+
+**SPUSH-N1 was already closed and did not need doing.** `esm-boot-check.ts` joined `pnpm verify` in
+SD-1, months of commits ago in this session's terms — `verify` is
+`pnpm format && pnpm typecheck && pnpm boot-check && pnpm test`. Reported rather than re-done, because
+a slice that "fixes" something already fixed leaves a commit claiming work that did not happen.
+
+**SPUSH-N2 is closed here.** On iOS, Web Push reaches only an installed web app; in a Safari tab a
+person could turn the control on, read "on · 1 device", and never be woken. That was on the record
+from SP-4 and nowhere in the product. The control now reads, on an iOS browser that is not running
+standalone: _"on iPhone, notifications only reach an installed app — tap Share, then 'Add to Home
+Screen', and turn them on from there."_
+
+The condition is read, not guessed: `(display-mode: standalone)` and `navigator.standalone` for the
+install state, Apple touch platforms for the device, and it is checked BEFORE the capability check —
+because in a tab iOS may report the push APIs as present, so a person could pass every other check and
+still be unreachable. Desktop Safari is deliberately not warned: it delivers push to a tab, and
+warning there would be a lie in the other direction.
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | The one platform constraint that made SP-4's observation non-general is now stated in the product, at the moment it matters, with the two words a person has to find on their own phone. It is asserted by a test that names the condition — the state exists, is decided from display-mode and platform, is checked before the capability check, and carries the instruction — rather than by a snapshot of the sentence. |
+| **What it does NOT** | **It has not been observed on a device.** The logic is asserted from the source; nobody has yet opened the site in an iOS tab and read the line. **It is a warning, not a capability** — the tab still cannot receive a notification, and nothing here changes that. **Android and desktop are untouched**, deliberately.                                                                                                  |
