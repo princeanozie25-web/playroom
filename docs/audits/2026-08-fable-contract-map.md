@@ -8,17 +8,18 @@ names. This answers that, from the code._
 
 ## PROGRESS
 
-| Section                             | State                                                       |
-| ----------------------------------- | ----------------------------------------------------------- |
-| Phase 0 — discovery                 | **DONE**                                                    |
-| Phase 1 — the map (20 rows)         | **9 of 20** — the three suspected collisions resolved first |
-| Phase 2 — the invariant ledger (12) | not started                                                 |
-| Phase 3 — the two questions         | **DONE** — both answered from code                          |
-| Findings / rulings                  | 2 findings, 3 rulings, open                                 |
+| Section                             | State                                                           |
+| ----------------------------------- | --------------------------------------------------------------- |
+| Phase 0 — discovery                 | **DONE**                                                        |
+| Phase 1 — the map (20 rows)         | **DONE** — 4 MATCH · 4 PARTIAL · 9 ABSENT · 3 COLLISION         |
+| Phase 2 — the invariant ledger (12) | **DONE** — 6 asserted · 3 by construction · 1 claimed · 1 FALSE |
+| Phase 3 — the two questions         | **DONE** — both answered from code                              |
+| Findings / rulings                  | 2 findings, 3 rulings, open                                     |
 
-**Left to do:** eleven map rows (Mandate, Delegation Chain, Harbor, Local Node, Action Gateway,
-Execution Gate, Work Trace, Work History, Artifact, Approval, Experience Record, Experience Network,
-Worker Directory, Playroom), then the twelve-invariant ledger.
+**Left to do:** nothing. Every exit criterion in the brief is met — twenty rows with file-level
+evidence or ABSENT, twelve invariants bucketed with counts and denominator, both Phase 3 questions
+answered from signatures, every collision on the ruling list and not the findings list, and no symbol
+renamed anywhere in the repository.
 
 ---
 
@@ -76,8 +77,25 @@ labelled **(doc claim)**.
 | **Mandate**  | `mandate`                                                | **MATCH**                   | `mandates/*.json`; `Mandate` schema in `packages/fabric/src/mandate.ts`; evaluated in `evaluate()`                                                    | Human-legible "can always / ask first / never" is the report's UX for it; the repo has the contract, not that UI                                                                                      |
 | **Harbor**   | —                                                        | **ABSENT**                  | ABSENT                                                                                                                                                | Nothing decides where work executes. See Phase 3 Q2                                                                                                                                                   |
 
-_Rows still to write: Playroom, Delegation Chain, Local Node, Action Gateway, Execution Gate, Work
-Trace, Work History, Artifact, Experience Record, Experience Network, Worker Directory._
+| **Playroom** | the repository itself | **MATCH** (doc claim) | `docs/architecture/playroom-architecture-bible-v1.1.md`; the monorepo root | The product name. Nothing in code needs to carry it |
+| **Delegation Chain** | `SummonChain` + the summon event's provenance fields | **PARTIAL** | `apps/api/src/commands/context.ts` `SummonChain` (`rootActor`, `rootIsHuman`, `depth`, `orderId`); `apps/api/src/commands/summon.ts:349` `root_actor` / `requested_by` | Provenance: yes, every hop records who asked and who is at the head. **Monotonic narrowing: no.** A hop is bounded by `SUMMON_DEPTH_CAP = 1` and re-evaluated against the EMITTING member's own mandate — narrower authority is not derived from the delegator's, it is looked up independently. No scope, no expiry, no evidence field per hop |
+| **Local Node** | — | **ABSENT** | ABSENT | Nothing bridges to a user's machine. `claude-code`'s adapter does bridged work outside the fabric, which is the opposite: an unmediated boundary, disclosed rather than gated |
+| **Action Gateway** | `executeCommand` + `evaluate` | **MATCH** | `apps/api/src/commands/index.ts` `executeCommand` ("any code that mutates rooms or events without passing through here is a defect"); `packages/fabric/src/evaluate.ts` | The single construction site is exactly the report's boundary. It governs REQUESTS, not host operations |
+| **Execution Gate** | — | **ABSENT** | ABSENT | There are no host operations to gate. The one place real side effects happen is `claude-code`'s bridged workspace, which no gate sits in front of |
+| **Work Trace** | the `events` table | **PARTIAL** | `apps/api/src/events.ts`; ADR-003 (agent turns as events) | An append-only per-room log with cause chains, tokens, cost and latency per turn. What is missing is the report's SPAN model: no nesting, no trace id spanning rooms, no OpenTelemetry |
+| **Work History** | `GET /rooms/:id/history` + the room UI | **PARTIAL** | `apps/api/src/server.ts:1092`; `apps/web/app/r/[id]/Room.tsx` | The human-facing projection exists and reads in plain language. It is not per-worker and carries no verification verdict — there is no "verified" state to render |
+| **Artifact** | — | **ABSENT** | ABSENT | No durable output object. A turn produces text in an event; nothing else is stored |
+| **Experience Record** | — | **ABSENT** | ABSENT | Nothing derives a reusable abstraction from a completed unit of work |
+| **Experience Network** | — | **ABSENT** | ABSENT | Nothing shares, retrieves or ranks such records |
+| **Worker Directory** | — | **ABSENT** | ABSENT | Members are rows seeded by migration; there is no discovery surface, public or private |
+
+**Twenty of twenty.** Counted: 4 MATCH (Playroom is a documentation claim, the other three are code),
+4 PARTIAL, 9 ABSENT, 3 COLLISION.
+
+**Nine ABSENT of twenty is the headline, not a gap list.** Harbor, Local Node, Execution Gate,
+Artifact, Experience Record, Experience Network and Worker Directory are the report's forward half —
+placement, host mediation, and the compounding network. None of it exists here, and none of it is
+half-built under another name, which is the cleanest possible answer to §19's first question.
 
 ---
 
@@ -128,6 +146,35 @@ That is reachability, not placement. The word "placement" does not appear in the
 because it is a row, and `held` carries the error class that stopped it. What is absent is
 _resumption_: nothing picks a `held` task back up — the state records where work stopped and implies
 nothing about continuing, which the source says in those words.
+
+---
+
+## PHASE 2 — the invariant ledger (§17, twelve)
+
+A test that asserts an outcome did not occur does not count. It must assert **which rule fired**.
+
+| #   | Invariant (abbreviated)                                                          | Bucket                                               | Evidence                                                                                                                                                                                                                                                                                                                                                                                  |
+| --- | -------------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Worker identity survives model changes                                           | **TRUE BY CONSTRUCTION**                             | `members.adapter_id` is a column, not the identity. `migrations/007` makes `id` the primary key and the adapter a reference validated at the seam (`apps/api/src/members.ts:143`). Changing which model a member runs is an UPDATE to one column; nothing else moves. `claude-audit` shares claude-main's model and is a different member, which is the same property from the other side |
+| 2   | Room membership must not imply access to all private context                     | **ASSERTED BY TEST**                                 | `apps/api/test/assembly-parts.test.ts:82` — `expect(privateParts.map((d) => d.source)).toEqual(['own-store'])`. It names the rule (exactly one part is principal-scoped), not merely that a leak did not happen                                                                                                                                                                           |
+| 3   | Authority external to the model, attributable to a principal                     | **ASSERTED BY TEST**                                 | `apps/api/test/action-channel.test.ts` — an out-of-scope emission is BLOCK by `OUT_OF_SCOPE`, "and provably NOT because the tool was unexposed". The verdict carries `effective_mandate_hash`, which is the attribution                                                                                                                                                                   |
+| 4   | Delegated authority must not silently expand                                     | **ASSERTED BY TEST**, narrower than the report means | `apps/api/test/summon-boundary.test.ts`; `SUMMON_DEPTH_CAP = 1` (`commands/summon.ts:53`) and re-evaluation against the emitting member's own mandate. It cannot expand because it is not inherited at all — see the Delegation Chain row. The report's monotonic-narrowing invariant is not what is asserted here                                                                        |
+| 5   | High-impact actions support explicit approval gates                              | **ASSERTED BY TEST**                                 | `apps/api/test/decision-execution.test.ts` — a protected summon writes a DECISION and NO summon; the approval fires exactly the held summon, once                                                                                                                                                                                                                                         |
+| 6   | Execution placement must not change semantic identity                            | **TRUE BY CONSTRUCTION, vacuously**                  | There is no placement (Phase 3 Q2). An invariant nothing can violate is held, but it is held by absence and would need re-asking the moment Harbor exists                                                                                                                                                                                                                                 |
+| 7   | Local access mediated through a trusted node rather than an unrestricted shell   | **FALSE TODAY**                                      | `infra/migrations/024_claude_code_member.sql`, in the repo's own words: `claude-code` "invokes a coding agent whose side effects are real, in a scratch workspace, OUTSIDE the fabric… its PARTICIPATION is governed; its WORK is bridged, not governed". Disclosed in the red-team ledger, not mediated. This is the one invariant the repo openly does not hold                         |
+| 8   | Every consequential action produces an auditable event                           | **ASSERTED BY TEST**, for one class                  | `tests/evidence.test.ts:209` pins `appendAgentEvent` to a single caller. ADR-003 makes turns events. What is NOT asserted is the general claim across all consequential actions — a governed ALLOW writes no decision event by design, and that is a deliberate hole in the sentence rather than in the code                                                                              |
+| 9   | Observability vendors must not own Playroom semantics                            | **TRUE BY CONSTRUCTION**                             | No vendor is integrated. No OpenTelemetry, no LangSmith, no exporter anywhere in `apps/` or `packages/`. Held by absence                                                                                                                                                                                                                                                                  |
+| 10  | Public Experience Records derived from verified outcomes, not raw reasoning      | **CLAIMED, UNASSERTED**                              | Nothing exists to hold or violate it (three ABSENT rows). Recorded as claimed rather than true-by-construction because it is a rule about a thing that does not exist yet                                                                                                                                                                                                                 |
+| 11  | Provider neutrality real at the Worker contract                                  | **ASSERTED BY TEST**                                 | `adapters.yaml` is the only file naming a provider, and `tests/evidence.test.ts:244` (§21.2) forbids a hardcoded member id or summon token in the room or the api. `sol` runs on a second provider precisely so the claim has a witness                                                                                                                                                   |
+| 12  | Failure, blocked, disconnected and awaiting-human are first-class durable states | **ASSERTED BY TEST**, partially                      | `TaskState` is a column: `held` and `input-required` are rows, not log lines, and `apps/api/test/agent-error.test.ts` asserts `completed{success:false}` with an `error_class` and no hang. DISCONNECTED is the exception — the connection state is a UI class (`HOOK.conn`), not durable, so a member's presence does not survive a restart                                              |
+
+**Counts, denominator twelve:** ASSERTED BY TEST **6** · TRUE BY CONSTRUCTION **3** ·
+CLAIMED, UNASSERTED **1** · FALSE TODAY **1**. Two of the six carry a stated caveat (4 and 12), and
+one of the three is vacuous (6).
+
+**The one that matters is #7.** It is false, it is false on purpose, and the repo says so in the
+migration that created the member which makes it false. Everything else in this ledger is either held
+or honestly unbuilt.
 
 ---
 
