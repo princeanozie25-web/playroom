@@ -735,7 +735,7 @@ roster — no log, no projection, no pool. A temporal condition is not unwritten
 without a new parameter. History-aware refusal does exist here, in the loop runner's pre-open gates,
 and the two have never been joined.
 
-**All three collisions are PENDING rulings**, not findings, and none was resolved by the audit.
+**All three collisions were ruled on 16 Aug 2026**, and all three resolve to the repository keeping its vocabulary — recorded as ADR-009 (`Door`), ADR-010 (`Fabric`) and ADR-011 (`Worker`), each with its own reconsideration trigger. No symbol was renamed. The Fable report is an input document whose vocabulary this repository does not adopt.
 
 |                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

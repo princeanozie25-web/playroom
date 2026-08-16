@@ -210,6 +210,29 @@ describe('claims a closeout asserted by grep', () => {
     expect(callers).toEqual(['apps/api/src/agent.ts']);
   });
 
+  it('ADR-011 — `worker` is not an identifier in app or package source', () => {
+    // THE ONE RULING OF THE THREE THAT CAN BE ENFORCED RATHER THAN REMEMBERED. `Worker` is a
+    // product-surface word mapping to `member` in code; the five concepts it would collapse —
+    // member, principal, adapter, route, mandate — stay five. This fires in CI, in front of
+    // whoever wrote it, before the collapse has a second occurrence to argue from.
+    //
+    // SCOPED TO APP AND PACKAGE SOURCE, and to the word as an IDENTIFIER. Docs, ADRs, briefs and
+    // the audit map all discuss `Worker` by name and must keep being able to — a grep that forbade
+    // the word everywhere would forbid the record of why it is forbidden.
+    const scope = source.filter(
+      (f) => /^(apps|packages)\//.test(f) && /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f),
+    );
+    // The browser's ServiceWorker API is excepted BY NAME rather than by a loose pattern: it is a
+    // web platform noun this repo does not choose, and `serviceWorker`/`ServiceWorker` are the only
+    // forms of it that appear.
+    const hits = matches(scope, /(?<!service)(?<!Service)worker/i).filter(
+      (h) => !/service\s*worker|serviceworker/i.test(h),
+    );
+    expect(hits, `"worker" is a product word, not a code word — ADR-011`).toEqual([]);
+    // Non-vacuous: the scope has to actually contain files, or this passes by searching nothing.
+    expect(scope.length).toBeGreaterThan(50);
+  });
+
   it('ADR-006 — `permit` appears nowhere in code, schema, prompt or config', () => {
     // BROKEN WHEN RE-RUN, 27 Jul 2026. Four hits, all English usage — which ADR-006 explicitly
     // refused to except: "A sentence using 'permit' as a verb is REWORDED rather than left,

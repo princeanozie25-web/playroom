@@ -8,13 +8,13 @@ names. This answers that, from the code._
 
 ## PROGRESS
 
-| Section                             | State                                                           |
-| ----------------------------------- | --------------------------------------------------------------- |
-| Phase 0 — discovery                 | **DONE**                                                        |
-| Phase 1 — the map (20 rows)         | **DONE** — 4 MATCH · 4 PARTIAL · 9 ABSENT · 3 COLLISION         |
-| Phase 2 — the invariant ledger (12) | **DONE** — 6 asserted · 3 by construction · 1 claimed · 1 FALSE |
-| Phase 3 — the two questions         | **DONE** — both answered from code                              |
-| Findings / rulings                  | 2 findings carried forward · 3 rulings **PENDING**              |
+| Section                             | State                                                              |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| Phase 0 — discovery                 | **DONE**                                                           |
+| Phase 1 — the map (20 rows)         | **DONE** — 4 MATCH · 4 PARTIAL · 9 ABSENT · 3 COLLISION            |
+| Phase 2 — the invariant ledger (12) | **DONE** — 6 asserted · 3 by construction · 1 claimed · 1 FALSE    |
+| Phase 3 — the two questions         | **DONE** — both answered from code                                 |
+| Findings / rulings                  | 2 findings carried forward · 3 rulings **RULED** (ADR-009/010/011) |
 
 **Left to do:** nothing. Every exit criterion in the brief is met — twenty rows with file-level
 evidence or ABSENT, twelve invariants bucketed with counts and denominator, both Phase 3 questions
@@ -272,18 +272,35 @@ found rather than remembered.
 
 ---
 
-## THE RULINGS — ALL THREE PENDING
+## THE RULINGS — ALL THREE RULED, 16 AUGUST 2026
 
-**None of the three collisions has been ruled.** AUDIT-CLOSE required them recorded in Prince's
-words; no words were given, so nothing is resolved here. The audit's job was to establish what is
-true. What to do about it is not the auditor's authority, and the evidence being strong is not the
-same as the ruling being obvious.
+**All three are decided, and all three resolve to the repository keeping its vocabulary.** Each is
+recorded as an ADR, because a ruling that lives only in an audit document gets re-litigated by
+whoever reads the report next without this map beside them. Nothing in the map above changed: a
+ruling about what to call things does not revise what the audit found.
 
-| Ruling           | State       | What it blocks until ruled                                                                                                                                                                                                                  |
-| ---------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1 — `Door`**   | **PENDING** | Nothing in code. It blocks the terminology freeze itself: any document using "Door" is ambiguous between the API ingress and a room admission boundary, and every future brief that says "door" inherits the ambiguity                      |
-| **2 — `Fabric`** | **PENDING** | The report's architecture diagram cannot be adopted as written. `@playroom/fabric` is an import path in 20+ files, so this ruling decides whether a package gets renamed — and ADR-006 already ruled a rename of that size prohibitive once |
-| **3 — `Worker`** | **PENDING** | Any product-surface vocabulary work. Until it is ruled, "Worker" cannot appear in a spec without silently collapsing member, principal, adapter, route and mandate — the separation that let `claude-audit` exist at all                    |
+| Ruling           | Decision                                                                                                                                                                                                       | ADR                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **1 — `Door`**   | **Keep both, distinguished by adjective.** "The API door" admits an external caller to the API; "a room door" would admit a member to a Room and does not exist yet. Same kind of boundary at different scopes | [ADR-009](../decisions/ADR-009-door-is-two-boundaries-at-two-scopes.md)     |
+| **2 — `Fabric`** | **The repo's meaning stands; the report adopts it.** `@playroom/fabric` is the authority engine and is a package name in 20+ imports, against a report implemented nowhere                                     | [ADR-010](../decisions/ADR-010-fabric-is-the-authority-engine.md)           |
+| **3 — `Worker`** | **A product-surface word only, mapping to `member` in code.** The mandate precedent inverted — and asserted mechanically, so it is enforced rather than remembered                                             | [ADR-011](../decisions/ADR-011-worker-is-a-product-word-not-a-code-word.md) |
+
+Each ADR carries its own reconsideration trigger: room admission being built, the report being
+implemented under its own vocabulary, and `worker` appearing in source — the last of which is a test.
+
+**THE FABLE REPORT IS AN INPUT DOCUMENT WHOSE VOCABULARY THIS REPOSITORY DOES NOT ADOPT.** It was
+read, mapped and answered; it does not govern. `docs/reports/2026-08-13-fable-consolidated-report.md`
+is committed unedited for exactly that reason — so the reading stays checkable — and a reader who
+meets `Door`, `Fabric` or `Worker` there should read the three ADRs before using any of them in a
+brief, a comment or a schema.
+
+The original statement of the collisions, with the options and their costs, is kept below unchanged.
+
+| Ruling           | State               | What it blocks until ruled                                                                                                        |
+| ---------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **1 — `Door`**   | **RULED** → ADR-009 | It blocked the terminology freeze: any document saying "door" was ambiguous between the API ingress and a room admission boundary |
+| **2 — `Fabric`** | **RULED** → ADR-010 | It blocked adopting the report's diagram as written, since `@playroom/fabric` is an import path in 20+ files                      |
+| **3 — `Worker`** | **RULED** → ADR-011 | It blocked product-surface vocabulary work: "Worker" in a spec silently collapsed member, principal, adapter, route and mandate   |
 
 **No ADR is written by this slice**, and that is the correct outcome rather than an omission: an ADR
 records a decision, and no decision has been made. When a ruling fixes a term's meaning permanently,
