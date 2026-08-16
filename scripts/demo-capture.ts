@@ -785,6 +785,94 @@ async function clipDial(
   return { take, room: roomId, beats };
 }
 
+// Clip CYCLE — SC-3. THE REFUSAL THAT KEEPS A COUNT HONEST: at 390px, against the LIVE tier, in the
+// room where two orders raced one completion for one member.
+//
+// WHY A SECOND CLIP AT ALL. `dial-take2` films the loops screen, and after this fix that screen looks
+// exactly as it did — same orders, same statuses, same sentences. The thing S-CYCLE changed is
+// visible in ONE place: the room transcript, where a cycle that could not take its turn says so
+// instead of being counted in silence. That sentence is the whole artifact.
+//
+// THE LIVENESS ASSERTION: the notice on screen must be a system message the LIVE api returns for
+// this room, read from inside the page through the app's own history route.
+async function clipCycle(
+  browser: any,
+  take: number,
+  out: string,
+  target: LiveTarget,
+  roomId: string,
+): Promise<unknown> {
+  const dir = resolve(out, `cycle-take${take}`);
+  mkdirSync(dir, { recursive: true });
+  const PHONE = { width: 390, height: 844 };
+  const ctx = await browser.newContext({
+    viewport: PHONE,
+    recordVideo: { dir: resolve(dir, 'stream'), size: PHONE },
+  });
+  const page = await ctx.newPage();
+  const video = page.video();
+  const beats: Record<string, unknown> = {};
+
+  try {
+    await page.goto(`${target.web}/r/${encodeURIComponent(roomId)}`, {
+      waitUntil: 'domcontentloaded',
+    });
+    must(page.url().startsWith(target.web), `the page left the live origin: ${page.url()}`);
+    await page.waitForSelector('[data-pr="transcript"]', { timeout: 30_000 });
+    await sleep(SETTLE);
+
+    // 1. THE DEFERRAL, ON SCREEN. Found by its words, not its position — a run where it did not
+    //    happen must fail this clip rather than record a room that merely looks fine.
+    const rendered = (await page.locator('[data-pr="transcript"]').first().innerText()).replace(
+      /\s+/g,
+      ' ',
+    );
+    must(
+      /did not open a cycle/.test(rendered),
+      `no deferral notice in the room:\n${rendered.slice(0, 500)}`,
+    );
+    must(/already replying/.test(rendered), 'the notice does not name the rule that fired');
+    beats.deferral = /did not open a cycle[^.]*\./.exec(rendered)?.[0] ?? null;
+    log(`  the deferral is on screen: ${beats.deferral}`);
+
+    // 2. LIVENESS — the same sentence, from the live api, through the app's own route.
+    const fromApi = await page.evaluate(async (rid: string) => {
+      const res = await fetch(`/api/history?room=${encodeURIComponent(rid)}&limit=400`);
+      const body = (await res.json()) as {
+        events?: Array<{ event_type: string; actor_id?: string; payload?: { body?: string } }>;
+      };
+      return (body.events ?? [])
+        .filter((e) => e.event_type === 'message' && e.actor_id === 'system')
+        .map((e) => e.payload?.body ?? '');
+    }, roomId);
+    must(
+      fromApi.some((b: string) => /did not open a cycle/.test(b)),
+      'the live api has no deferral notice for this room — the screen is not the live one',
+    );
+    beats.live_notices = fromApi.length;
+    log(`  the live api reports ${fromApi.length} system notice(s) here`);
+    await sleep(HOLD);
+
+    // 3. AND THE ORDERS IT PROTECTED: both finished ONE cycle, which is the count they each did.
+    await page.goto(`${target.web}/r/${encodeURIComponent(roomId)}/loops`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForSelector('[data-pr="loop-row"]', { timeout: 30_000 });
+    const reasons = await page.locator('[data-pr="loop-reason"]').allInnerTexts();
+    must(reasons.length === 2, `expected two orders, saw ${reasons.length}`);
+    for (const r of reasons) {
+      must(/finished the 1 cycle/.test(r), `an order did not finish exactly one cycle: ${r}`);
+    }
+    beats.reasons = reasons.map((r: string) => r.replace(/\s+/g, ' ').trim());
+    log(`  both orders: ${beats.reasons}`);
+    await sleep(HOLD);
+  } finally {
+    await ctx.close();
+    await video?.saveAs(resolve(dir, `cycle-take${take}-stream.webm`)).catch(() => {});
+  }
+  return { take, room: roomId, beats };
+}
+
 async function main(): Promise<void> {
   const which = process.argv[2] ?? 'all';
   const takeArg = process.argv[3];
@@ -858,6 +946,43 @@ async function main(): Promise<void> {
       JSON.stringify({ target, ...(report as object) }, null, 2),
     );
     log(`done — push capture at 390px against ${target.web}`);
+    process.exit(0);
+  }
+
+  // ── THE LIVE CYCLE CAPTURE (S-CYCLE, SC-3) — the refusal that keeps a count honest.
+  if (which === 'cycle') {
+    const target = resolveLiveTarget(process.env);
+    log(`LIVE TARGET — api ${target.api} · web ${target.web}`);
+    const roomId = process.env.PLAYROOM_CAPTURE_ROOM?.trim();
+    if (!roomId) {
+      throw new LiveCaptureRefused(
+        'PLAYROOM_CAPTURE_ROOM is not set — this clip films the room where two orders raced one turn',
+      );
+    }
+    const warmed = await warmTier(target);
+    log(`tier warm in ${warmed}ms`);
+    const liveHtml = await fetch(target.web).then((r) => r.text());
+    must(
+      !/__next_devtools|nextjs-portal|__nextDevClientId|\/_next\/static\/chunks\/react-refresh/.test(
+        liveHtml,
+      ),
+      'the LIVE web is serving a development overlay — refusing to film a dev badge (A4-F6)',
+    );
+    const browser = await loadChromium(home).launch();
+    log(`chromium ${browser.version()}`);
+    const take = Number(takeArg ?? 1);
+    let report: unknown;
+    try {
+      report = await clipCycle(browser, take, out, target, roomId);
+    } finally {
+      await browser.close();
+    }
+    writeFileSync(
+      resolve(out, `cycle-run-report-take${take}.json`),
+      JSON.stringify({ target, ...(report as object) }, null, 2),
+    );
+    log(`done — cycle capture at 390px against ${target.web}`);
+    log(`videos: ${out}`);
     process.exit(0);
   }
 

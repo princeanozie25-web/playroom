@@ -148,6 +148,34 @@ async function sends(ctx: Ctx): Promise<SendRow[]> {
   return rows;
 }
 
+/**
+ * Cycles this order COUNTED and cycles that produced a completed turn (S-CYCLE). The two must be
+ * equal; they were not, once, and that is the whole reason this pair is printed rather than assumed.
+ * A turn is attributed to an order through the SUMMON that authorised it, joined on the shared task.
+ */
+async function countedAndWorked(
+  ctx: Ctx,
+  orderId: string,
+): Promise<{ counted: number; worked: number }> {
+  const { rows } = await ctx.pool.query<{ counted: string; worked: string }>(
+    `SELECT
+       (SELECT count(*) FROM events
+         WHERE room_id = $1 AND event_type = 'order.cycled' AND payload ->> 'order_id' = $2) AS counted,
+       (SELECT count(DISTINCT t.seq) FROM events AS s
+          JOIN events AS t ON t.room_id = s.room_id AND t.task_id = s.task_id
+                          AND t.event_type = 'agent.turn.completed'
+         WHERE s.room_id = $1 AND s.event_type = 'summon'
+           AND s.payload ->> 'order_id' = $2) AS worked`,
+    [ctx.roomId, orderId],
+  );
+  return { counted: Number(rows[0].counted), worked: Number(rows[0].worked) };
+}
+
+/** Just the worked half, for a one-line print. */
+async function worked(ctx: Ctx, orderId: string): Promise<number> {
+  return (await countedAndWorked(ctx, orderId)).worked;
+}
+
 /** Every claim this room made on a person's attention, whether or not a phone heard it. */
 async function claims(ctx: Ctx): Promise<Array<{ ts: Date; urgency: string; summary: string }>> {
   const { rows } = await ctx.pool.query<{ ts: Date; urgency: string; summary: string }>(
@@ -303,6 +331,48 @@ async function main(): Promise<void> {
 
   await post(ctx, '/rooms', { id: roomId, title: roomId });
 
+  // ── 0b. A COLLISION, ON PURPOSE (S-CYCLE, SC-3) ────────────────────────────────────
+  //
+  // SD-N1 was found by accident: one cycle in seven collided with a turn already in flight, counted
+  // itself anyway, reached its cap and told a phone it had finished. This forces the same collision
+  // rather than waiting to be unlucky — two orders in their OWN room, wired identically, so a single
+  // completion fires both and the member can only answer one of them.
+  //
+  // ITS OWN ROOM, because the loser stays ACTIVE (a deferral leaves the trigger unconsumed), and an
+  // order left waiting in the main room would fire on one of the kicks below and muddle the count
+  // this run exists to report.
+  const collideRoom = `${roomId}-collide`;
+  await post(ctx, '/rooms', { id: collideRoom, title: collideRoom });
+  const cc: Ctx = { ...ctx, roomId: collideRoom };
+  const first = await createOrder(cc, { task: FILLER_TASK, dial: 1, cap: 1 });
+  const second = await createOrder(cc, { task: FILLER_TASK, dial: 1, cap: 1 });
+  console.log(`\n[0b] two orders racing one completion in ${collideRoom}`);
+  await say(cc, `@${MEMBER} both of you.`);
+  await until(
+    () => Promise.all([orderState(cc, first), orderState(cc, second)]),
+    ([a, b]) => settled(a.status) || settled(b.status),
+  );
+  await new Promise((r) => setTimeout(r, 2500)); // let the loser's refusal land in the log
+  for (const [label, id] of [
+    ['first', first],
+    ['second', second],
+  ] as const) {
+    const s = await orderState(cc, id);
+    console.log(
+      `    ${label} ${id}: ${s.status}, ${s.cycle_count} counted, ${await worked(cc, id)} worked`,
+    );
+  }
+  const { rows: refusal } = await pool.query<{ body: string }>(
+    `SELECT payload ->> 'body' AS body FROM events
+      WHERE room_id = $1 AND event_type = 'message' AND actor_id = 'system' ORDER BY seq`,
+    [collideRoom],
+  );
+  console.log(
+    refusal.length === 0
+      ? `    (no system notice — the loser was stopped by the summon's own uniqueness, not the runner)`
+      : `    the room says: "${refusal.map((r) => r.body).join(' | ')}"`,
+  );
+
   // ── 1. AN UNATTENDED LOOP, RUN OUT ─────────────────────────────────────────────────
   const dial = 2;
   const loopOrder = await createOrder(ctx, { task: TASK, dial, cap: 3 });
@@ -342,6 +412,35 @@ async function main(): Promise<void> {
   console.log(
     `    → pushes before this order: ${sendsBefore}; after: ${sendsAfter.length} — ` +
       `${sendsAfter.length === sendsBefore ? 'NOTHING reached the phone, as SD-1 says' : 'SOMETHING WAS SENT (unexpected)'}`,
+  );
+
+  // ── DID EVERY COUNT MEAN A TURN? (S-CYCLE) ─────────────────────────────────────────
+  //
+  // The number SD-4 produced was seven and six. This prints the same pair, per order and per room,
+  // so the claim is a thing you read rather than a thing you are told — and so a regression shows up
+  // as a mismatch in the run's own output instead of as a wrong notification on a phone.
+  console.log(`\n═══ CYCLES COUNTED vs CYCLES THAT WORKED ═══`);
+  let counted = 0;
+  let workedTotal = 0;
+  for (const [label, c] of [
+    ['collision', cc],
+    ['main', ctx],
+  ] as const) {
+    const { rows: ids } = await pool.query<{ id: string }>(
+      `SELECT id FROM standing_orders WHERE room_id = $1 ORDER BY created_at`,
+      [c.roomId],
+    );
+    for (const { id } of ids) {
+      const cw = await countedAndWorked(c, id);
+      counted += cw.counted;
+      workedTotal += cw.worked;
+      const flag = cw.counted === cw.worked ? '' : '   ← MISMATCH';
+      console.log(`  ${label.padEnd(9)} ${id}  counted=${cw.counted} worked=${cw.worked}${flag}`);
+    }
+  }
+  console.log(
+    `\n  TOTAL: ${counted} counted, ${workedTotal} worked — ` +
+      `${counted === workedTotal ? 'equal, which is the invariant' : 'NOT EQUAL: the defect is back'}`,
   );
 
   // ── WHAT WAS TOLD, AND WHAT IT COST ────────────────────────────────────────────────

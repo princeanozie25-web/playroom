@@ -540,6 +540,36 @@ not count, so `max_cycles` would stop bounding spend.
 | **What it proves**   | For any order, cycles counted equals cycles that produced a completed turn — asserted over a RUN with deliberate contention, not over one call. Six ways a summoned turn can die between an order's trigger and its first token (no route, a co-signature hold, a summon conflict, the ceiling, §22b, a lost race for the started row) are handled AS A CLASS rather than one at a time: the counter has exactly one writer, reachable only from downstream of the row that proves a turn exists. No terminal status is reachable by cycles that did no work, which is what makes a FINISHED honest. A cycle that cannot take its turn is DEFERRED — nothing counted, nothing evented, no summon written, the trigger left unconsumed so the next completion still fires it, and the room told which rule stopped it. |
 | **What it does NOT** | **It does not make the in-flight guard durable.** S05a-N1 stands: §22b reads a per-process Set, so two machines can still both start a turn for one member. The count no longer depends on that answer, which is the point — but the deferral gate is a fast path, not a guarantee. **It does not repair the past**: production still holds one cycle that counted nothing and one notification that was wrong, on purpose. **A cycle that starts and FAILS still counts** — that is the ruling, not an oversight: it cost tokens, and counting only successes would let an erroring loop run past its cap. **It does not make a count mean COMPLETION** — ST-N1 is untouched; a count now means a turn happened, nothing more.                                                                                       |
 
+**THE RE-RUN, ON THE LIVE TIER, WITH THE COLLISION FORCED.** 16 Aug 2026, 00:01:12–00:01:34 UTC, API
+deployed at the fix. Same shape as SD-4, plus a room where two identically-wired orders race a single
+completion for a single member — the collision SD-4 met by accident, made deliberate.
+
+| the run                           |   SD-4 |       SC-3 |
+| --------------------------------- | -----: | ---------: |
+| cycles counted                    |      7 |          7 |
+| cycles that produced a turn       |  **6** |      **7** |
+| orders in the run                 |      6 |          6 |
+| notifications sent                |      6 |          6 |
+| tellings about work that happened | 5 of 6 | **6 of 6** |
+
+**The forced collision, and what the record says.** Both orders finished with `counted=1 worked=1`.
+The loser did not open a cycle at all — the room holds the sentence _"the standing order did not open
+a cycle: claude-main is already replying in this room. It will run on the next completed turn."_ — and
+then it ran on the next completion, which is the difference between a deferral and a lost cycle. Two
+further notices in the main room say only _"claude-main is already replying in this room."_: those are
+§22b refusing the run's own human kicks, the unchanged path, and they are how the two look different
+now.
+
+**Cost.** $0.01568 over 11 turns across both rooms ($0.01175 main, $0.00393 collision). Six sends, all
+`delivered` to Apple, claim → send 133–772ms. Every one of the six was about an order whose counted
+cycles all worked.
+
+**The artifact.** `dial-take2` still stands for the loop itself: after this fix the loops screen looks
+exactly as it did, which is the point. What is new is in the room transcript, so `cycle-take1` films
+that at 390px against the live tier — the deferral sentence, matched against the live log through the
+app's own history route, and both racing orders showing they each finished the one cycle they each
+did.
+
 **The one sentence a caption may use:** _a cycle counts when a turn actually starts, so the numbers the
 loop bounds itself with mean what they say._ **Not:** _the loop knows what it did_ (it knows a turn
 ran). **Not:** _concurrent turns are now impossible_ (S05a-N1 is open).
