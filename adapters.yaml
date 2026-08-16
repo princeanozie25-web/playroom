@@ -62,6 +62,24 @@ adapters:
     max_output_tokens: 512
     cost_per_1k_in: 0.001
     cost_per_1k_out: 0.005
+  # ── THE BRIEF-WRITER (AUDIT-FABLE) ───────────────────────────────────────────────────
+  #
+  # Same provider and model as claude-main, and that is the point: this is not a better
+  # writer, it is a SEPARATE ONE. A standing order's stop-interrupts are charged to its
+  # action member, so a loop that shares a member with everything else in the room spends
+  # a budget it did not raise (S-DIAL). claude-audit exists to hold its own six.
+  #
+  # Its mandate is the narrowest in the directory: an empty scope, no protected actions,
+  # nothing to co-sign. A member that writes briefs needs to read the room and post — and
+  # neither of those is a governed action — so the honest scope is the empty one, and an
+  # empty scope means every governed emission it could ever make is BLOCK by default.
+  - id: claude-audit
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    enabled: true
+    max_output_tokens: 1024
+    cost_per_1k_in: 0.001
+    cost_per_1k_out: 0.005
   # ── THE BRIDGED MEMBER (S-CC) ────────────────────────────────────────────────────────
   #
   # claude-code invokes a coding agent through the headless CLI (provider: claude-code), and its cost

@@ -35,6 +35,32 @@ describe('listMembers', () => {
     // agents-only. The agents' fields are what the roster strip draws and must not move.
     const members = (await listMembers(pool)).filter((m) => m.kind === 'agent');
     expect(members).toEqual([
+      // ── THE BRIEF-WRITER (AUDIT-FABLE, migration 030) ──────────────────────────────
+      //
+      // First within principal:prince because the tiebreak is the member id and 'claude-audit' sorts
+      // before 'claude-code'. It exists to hold ITS OWN interrupt budget: a standing order's stop
+      // interrupts are charged to its action member, so a long loop sharing a member with the rest of
+      // the room goes silent on a budget it did not spend.
+      //
+      // ITS AUTHORITY IS PINNED EMPTY HERE, deliberately, for the same reason claude-code's was
+      // pinned before SCC-2 widened it: a member that writes briefs needs no governed action, and a
+      // later widening should have to delete this expectation rather than slip past it.
+      {
+        id: 'claude-audit',
+        kind: 'agent',
+        display_name: 'Claude Audit',
+        principal_id: 'principal:prince',
+        principal_name: 'Prince',
+        principal_ordinal: 0,
+        adapter_id: 'claude-audit',
+        scope: [],
+        protected_actions: [],
+        co_sign: { actions: [], by: 'principal' },
+        limits: { interrupts_per_day: 6 },
+        policy_version: 'playroom-policy/1.0',
+        expires: '2026-11-30T00:00:00Z',
+        mandate_hash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      },
       // ── THE CONNECTED MEMBER (SCC-2) ───────────────────────────────────────────────
       //
       // Ordinal 0 (principal:prince) like claude-main, and ordered before it because the tiebreak
@@ -227,6 +253,7 @@ describe('a room roster, scoped', () => {
     // every other agent — it is summonable in any room, and always operates in its confined scratch
     // workspace regardless of which room summons it (see the RT-005 retirement).
     expect(body.members.map((m) => m.id).sort()).toEqual([
+      'claude-audit',
       'claude-code',
       'claude-main',
       'jerry',
@@ -255,6 +282,7 @@ describe('a room roster, scoped', () => {
 
     const inRoom = await listRoomMembers(pool, room);
     expect(inRoom.map((m) => m.id).sort()).toEqual([
+      'claude-audit',
       'claude-code',
       'claude-main',
       'jerry',
@@ -511,6 +539,7 @@ describe('a guest is not enrolled by creating a room', () => {
     // half, a bug that enrolled NOBODY would pass the assertion above.
     const all = await listRoomMembers(pool, room);
     expect(all.map((m) => m.id).sort()).toEqual([
+      'claude-audit',
       'claude-code',
       'claude-main',
       'jerry',
