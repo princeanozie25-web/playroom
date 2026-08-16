@@ -1,0 +1,60 @@
+-- 031 — AN INDEX FOR THE READS THAT FILTER BY EVENT TYPE (S-NAMES, SN-2).
+--
+-- ── CLASSIFICATION: ADDITIVE ─────────────────────────────────────────────────────────
+--
+-- One CREATE INDEX. No column is added, dropped or altered; no constraint changes; no row is written
+-- or moved; no existing index is replaced. Every query that works before this works after it, and the
+-- planner may or may not choose it. Rolling back is a DROP INDEX with no data implication.
+--
+-- The same classification S-LIVE reported before touching production, and for the same reason: a
+-- migration's blast radius is a fact to state before running it, not after.
+--
+-- ── WHY, AND IT IS NOT WHAT IT WAS ORIGINALLY FOR ────────────────────────────────────
+--
+-- This index was proposed for S-WHEN, to serve `EXISTS (… room_id = $1 AND event_type = $2)` in front
+-- of an authority decision. S-WHEN is shelved, and the index lands anyway on its own merits — which
+-- turn out to be better ones.
+--
+-- SEVENTEEN reads across five files filter `events` by `event_type`. Two are on the ASSEMBLY path,
+-- which every single agent turn walks — and only ONE of them was unserved. EXPLAIN against
+-- production said so; the first draft of this header assumed both and was wrong:
+--
+--   messagesAfterSeq   `event_type = 'message' AND seq > $2`   → SEQ SCAN, then Sort
+--   activeSummary      `event_type = 'room.summary'`           → already indexed, by
+--                      `events_one_summary_per_cover`, a PARTIAL index carrying
+--                      `WHERE event_type = 'room.summary'` for a uniqueness constraint
+--
+-- That second one is the useful accident worth naming: several partial indexes in this schema exist
+-- to enforce uniqueness (one summary per cover, one cycle per trigger, one turn per summon, one
+-- resolution per decision) and each incidentally serves reads of its own event type. The types with
+-- no uniqueness rule — `message` above all — have nothing.
+--
+--   room + seq                     → Index Scan   (events_room_seq_idx serves it)
+--   room + type + seq              → Seq Scan, then Sort   (nothing serves it)
+--
+-- `events_room_seq_idx` is `(room_id, seq)`. It cannot serve a predicate on `event_type` at all —
+-- the column is not in it — so adding a type filter to a room read drops the plan to a full scan.
+--
+-- ── WHAT THIS INDEX DOES NOT FIX, STATED SO NOBODY ASSUMES IT DID ────────────────────
+--
+-- The two HOTTEST type-filtering reads are `spendToday` and `budgetFor`, and both are GLOBAL — by day
+-- and by member, with no room in the predicate. This index cannot serve either of them, and they run
+-- before every turn and before every cycle. They are still Seq Scans after this migration. That is a
+-- separate index and a separate decision, and pretending otherwise would make this file a lie.
+--
+-- ── AND IT IS PRUDENCE, NOT A FIX ────────────────────────────────────────────────────
+--
+-- `events` holds 589 rows in production today. At that size a Seq Scan is faster than an index
+-- lookup and the planner is right to choose it; this index will sit unused until the table grows.
+--
+-- The measured wall clock says nothing either way, and is reported rather than dressed up: every
+-- query above ran 11–12ms p50 from a laptop against Neon, before and after, because at this row
+-- count the number is pure round-trip. THE PLAN IS THE ONLY SIGNAL — `messagesAfterSeq` moves from
+-- Seq Scan to `events_room_type_idx`, and `spendToday` stays a Seq Scan on both sides. A real
+-- latency number has to be measured from the machine that pays it, which is the Fly machine, and
+-- that measurement is not in this commit.
+-- It lands now because `events` is the append-only spine — it only ever grows, it is never pruned,
+-- and the read it accelerates is on the path of every turn. The cost of adding it later is a
+-- migration against a large table; the cost of adding it now is nothing.
+
+CREATE INDEX IF NOT EXISTS events_room_type_idx ON events (room_id, event_type, seq);
