@@ -710,3 +710,51 @@ it at creation and no path can change it). **Not:** _this ran live_ (local tier,
 | SLIVE-N2    | **A CREDENTIAL THAT SHIPPED IN A PUBLIC IMAGE WAS STILL LIVE FOR 15 DAYS.** WEB-2 fixed the `.dockerignore` hole that baked `apps/web/.env.local` into the web image, but the credential itself was never rotated: the token still on disk hashed to `cred_e7c1fc6b26c70c69` (prince / "browser (dev)"), unrevoked, valid against the live api. Found by hashing the on-disk value against `member_credentials` during S-LIVE's pre-deploy check. Rotated on Prince's explicit authorisation — new credential issued and set as the web tier's secret, old one REVOKED                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | closed by rotation. The standing lesson: a leak fixed in the build is not a leak fixed in the database, and nothing in the repo checks for the second half                                                                                                     |
 | SLIVE-N3    | **THE IMAGES WERE CARRYING A FOREIGN PROJECT.** `packet-tracer-mcp/` (70MB, 3,095 files including a Python venv) was gitignored and prettierignored but never dockerignored, so `COPY . .` uploaded and baked it into BOTH public images. No secret in it — the scan found only pydantic's docstrings — but unaudited surface in a shipped artifact. Build context after the fix: 539 files                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | closed in the chore commit; the general form is that .gitignore and .dockerignore drift, and only one of them governs the image                                                                                                                                |
 | ~~S17-N4~~  | **CLOSED in S-LIVE, live and at 390px** (`briefing-take2`, 15 Aug 2026, `playroom-capture/videos/briefing-take2-stream.webm`, 585KB). Filmed against `https://playroom-web.fly.dev` with a liveness assertion that aborts the run unless the briefing ON SCREEN is byte-equal to the one the LIVE api returns for that room at capture time. Three beats: the briefing rendered in the room; a summoned member's REAL turn on the live tier answering _"The room briefing asks me to review only, be concrete, and open a follow-up for anything deferred"_ (a reply that demonstrably read it); and the order's task on the loops screen. Take 1 is kept and is NOT the artifact — it captured the streaming caret instead of the finished reply, which is why the clip now waits for the caret to go and the spend line to appear. **Take 13 is untouched.**                                                                                                                                                                                                                    | closed. What is still unfilmable is the briefing being SET — see SLIVE-N1                                                                                                                                                                                      |
+
+---
+
+## AUDIT-FABLE — THE CONTRACT MAP (what the report proposed, against what exists)
+
+A consolidated architecture report dated 13 Aug 2026 proposed a terminology freeze over twenty terms.
+It was written without access to this codebase, and its own §19 asked first which of those contracts
+already exist here under other names. `docs/audits/2026-08-fable-contract-map.md` answers that from
+the code; this is the claim it supports.
+
+**The map: 4 MATCH · 4 PARTIAL · 9 ABSENT · 3 COLLISION**, twenty of twenty, each with a file path
+and symbol or the word ABSENT. **The ledger: 6 asserted by test · 3 true by construction · 1 claimed
+but unasserted · 1 FALSE TODAY**, denominator twelve.
+
+**The one that is false is #7** — "local access must be mediated through a trusted node rather than an
+unrestricted shell" — and the repo says so itself, in the migration that created the member which
+makes it false: `claude-code` "invokes a coding agent whose side effects are real… OUTSIDE the
+fabric… its PARTICIPATION is governed; its WORK is bridged, not governed". Disclosed in the red-team
+ledger, not mediated.
+
+**The evaluator cannot see history.** `evaluate()` takes a request, a member, a mandate, a clock and a
+roster — no log, no projection, no pool. A temporal condition is not unwritten, it is unexpressible
+without a new parameter. History-aware refusal does exist here, in the loop runner's pre-open gates,
+and the two have never been joined.
+
+**All three collisions are PENDING rulings**, not findings, and none was resolved by the audit.
+
+|                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it proves**   | A vocabulary proposed from outside can be checked against a codebase before it is frozen, row by row, with evidence rather than recognition. Nine of twenty terms are ABSENT and none is half-built under another name, which is a cleaner answer than a partial match would have been. The audit ran as a governed loop: a member with its own mandate and its own interrupt budget wrote each brief, a connected member did the repo work, and the closeouts steered the next cycle. |
+| **What it does NOT** | **It rules nothing.** Three collisions are recorded PENDING with options and costs; the auditor established what is true and stopped there. **It is one reader's map** — every row is checkable, which is the point, but none of it has been reviewed by a second pair of eyes. **The order stopped because a person said so**, not because it knew it was done — ST-N1 is untouched.                                                                                                  |
+
+**The one sentence a caption may use:** _the report's vocabulary was checked against the code before
+anyone froze it._ **Not:** _the terms are now agreed_ (three are pending a ruling). **Not:** _the
+architecture is validated_ (nine of twenty terms describe things that do not exist here).
+
+### Findings carried forward
+
+**AF-N1 — resume does not restart a self-triggering loop.** `controlOrder`'s resume writes
+`status = 'ACTIVE'` and fires nothing, so after an attendance pause the order waits for a trigger
+that has already happened. Fixed by AC-2 below in the honest direction: resume now says what still
+has to happen. _Trigger: closed._
+
+**AF-N2 — the suite fails at random, and one of the two was not random.**
+`apps/api/test/order-firing.test.ts` was a real S-CYCLE regression, found only because it failed twice
+in a row and got read instead of retried; fixed. `apps/api/test/budget-meter.test.ts` has failed once
+and is unexplained. _Trigger: its second sighting — read it rather than retry it, which is the lesson
+the first one taught at the cost of four retries._

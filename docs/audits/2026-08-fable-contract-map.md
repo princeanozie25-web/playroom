@@ -14,7 +14,7 @@ names. This answers that, from the code._
 | Phase 1 — the map (20 rows)         | **DONE** — 4 MATCH · 4 PARTIAL · 9 ABSENT · 3 COLLISION         |
 | Phase 2 — the invariant ledger (12) | **DONE** — 6 asserted · 3 by construction · 1 claimed · 1 FALSE |
 | Phase 3 — the two questions         | **DONE** — both answered from code                              |
-| Findings / rulings                  | 2 findings, 3 rulings, open                                     |
+| Findings / rulings                  | 2 findings carried forward · 3 rulings **PENDING**              |
 
 **Left to do:** nothing. Every exit criterion in the brief is met — twenty rows with file-level
 evidence or ABSENT, twelve invariants bucketed with counts and denominator, both Phase 3 questions
@@ -241,3 +241,51 @@ cannot express.
 - Freeze `Worker` as a product-surface word only, mapping to `member` in code.
 - Freeze it as a contract, and accept that five repo concepts now need a stated relationship to it.
 - Do not freeze it; keep `member` everywhere.
+
+---
+
+## AUDIT CLOSED — 16 August 2026
+
+**The order was stopped because the work was complete.** `ord_2c2c227801a242c9`, revoked at 3 of its
+6 cycles with three left unrun, because closeout 2 reported every exit criterion met and a human read
+this document.
+
+**That is the first order in this system to stop because it was done**, and the distinction is worth
+writing down precisely because the order could not know it. Every terminal an order can reach on its
+own — LIMIT_REACHED, EXPIRED — counts something; none of them means finished. **ST-N1 stays open.**
+The only thing that ended this one is a person deciding it had.
+
+Final numbers for the room, denominators included:
+
+|            |                                                                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Orders     | 3 created, 3 revoked — the first for an impossible task, the second for a task its member could not perform, the third because the work was done |
+| Cycles     | **9 counted, 9 worked** across the room's life — the S-CYCLE invariant held on live traffic                                                      |
+| This order | 3 of 6 cycles                                                                                                                                    |
+| Voice      | 3 of `claude-audit`'s 6 interrupts spent; 3 notifications, all delivered                                                                         |
+| Cost       | $0.047560 over 12 turns                                                                                                                          |
+
+**Access retired.** `cred_354a26e4289771d8` revoked and read back from the database, not from a
+success message. Live credentials on production: **5 of 9 issued before, 4 of 9 after.** The same
+token now gets HTTP 401 at the door. Its label carried its own exit condition, which is why it was
+found rather than remembered.
+
+---
+
+## THE RULINGS — ALL THREE PENDING
+
+**None of the three collisions has been ruled.** AUDIT-CLOSE required them recorded in Prince's
+words; no words were given, so nothing is resolved here. The audit's job was to establish what is
+true. What to do about it is not the auditor's authority, and the evidence being strong is not the
+same as the ruling being obvious.
+
+| Ruling           | State       | What it blocks until ruled                                                                                                                                                                                                                  |
+| ---------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1 — `Door`**   | **PENDING** | Nothing in code. It blocks the terminology freeze itself: any document using "Door" is ambiguous between the API ingress and a room admission boundary, and every future brief that says "door" inherits the ambiguity                      |
+| **2 — `Fabric`** | **PENDING** | The report's architecture diagram cannot be adopted as written. `@playroom/fabric` is an import path in 20+ files, so this ruling decides whether a package gets renamed — and ADR-006 already ruled a rename of that size prohibitive once |
+| **3 — `Worker`** | **PENDING** | Any product-surface vocabulary work. Until it is ruled, "Worker" cannot appear in a spec without silently collapsing member, principal, adapter, route and mandate — the separation that let `claude-audit` exist at all                    |
+
+**No ADR is written by this slice**, and that is the correct outcome rather than an omission: an ADR
+records a decision, and no decision has been made. When a ruling fixes a term's meaning permanently,
+it needs one — a ruling that lives only here will be re-litigated by whoever reads the report next
+without this map beside it. The options and their costs are stated above, unchanged and unacted-on.
