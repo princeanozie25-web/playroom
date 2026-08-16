@@ -166,10 +166,15 @@ describe('idempotent per event, one cycle in flight (database)', () => {
   it('the same completion fires once; an older one never fires; a newer one advances', async () => {
     const { roomId, orderId } = await makeOrder('fire-once');
     await fireTrigger(roomId, 'sol', 1000);
+    // WAIT FOR THE TURN, NOT THE COUNT (S-CYCLE). The cycle is counted when its turn STARTS, so
+    // `cycleCount >= 1` is true while claude-main is still answering — and a trigger that arrives
+    // then is DEFERRED rather than counted. Waiting for the completed turn is also what the last
+    // beat of this test is really about: a completion is what a trigger IS.
     await until(
-      () => cycleCount(roomId, orderId),
+      () => turnsOf(roomId, 'claude-main'),
       (n) => n >= 1,
     );
+    expect(await cycleCount(roomId, orderId)).toBe(1);
 
     // Replay of the same triggering completion — no second cycle.
     await fireTrigger(roomId, 'sol', 1000);
@@ -184,7 +189,7 @@ describe('idempotent per event, one cycle in flight (database)', () => {
     // A NEWER completion advances the loop.
     await fireTrigger(roomId, 'sol', 2000);
     await until(
-      () => cycleCount(roomId, orderId),
+      () => turnsOf(roomId, 'claude-main'),
       (n) => n >= 2,
     );
     expect(await cycleCount(roomId, orderId)).toBe(2);
