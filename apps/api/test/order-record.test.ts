@@ -188,6 +188,33 @@ describe('control — any human pauses, only the creator resumes or revokes, an 
       'order.status:PAUSED',
       'order.status:ACTIVE',
     ]);
+
+    // ── A RESUME MUST NOT LEAVE A PERSON BELIEVING SOMETHING IS RUNNING (AF-N1) ──────
+    //
+    // Resuming fires no cycle: an order fires on a completed turn by its trigger member, and this is
+    // not one. The OUTCOME asserted here is that the room says so — not the wording, which may be
+    // reworded, but that a person who just resumed is told a completion is still required, and by
+    // whom. Under AF-N1 they were told nothing and the chip simply went green.
+    const { rows: notices } = await pool.query<{ body: string }>(
+      `SELECT payload ->> 'body' AS body FROM events
+        WHERE room_id = $1 AND event_type = 'message' AND actor_id = 'system' ORDER BY seq`,
+      [roomId],
+    );
+    const said = notices.map((n) => n.body).join('\n');
+    expect(notices.length, `no system notice followed the resume:\n${said}`).toBe(1);
+    // It names the member whose next completed turn is the trigger — the actionable half.
+    expect(said).toContain('claude-main');
+    // And it says a completion is still owed, rather than implying the loop is moving.
+    expect(said).toMatch(/next completed turn/);
+
+    // AND IT REMAINS TRUE THAT NOTHING RAN: a resume is not a trigger, and this is the property the
+    // sentence exists to describe. A notice that were merely decorative would pass the greps above
+    // and fail here the moment resume started firing cycles without a ruling.
+    const { rows: cycled } = await pool.query<{ n: string }>(
+      `SELECT count(*) AS n FROM events WHERE room_id = $1 AND event_type = 'order.cycled'`,
+      [roomId],
+    );
+    expect(Number(cycled[0].n), 'resuming fired a cycle — that is a ruling, not a fix').toBe(0);
   });
 
   it('a non-creator human cannot resume or revoke — but could have paused', async () => {

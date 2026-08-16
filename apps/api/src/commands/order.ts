@@ -12,7 +12,12 @@ import {
   ERROR_ORDER_UNKNOWN,
   ORDER_TASK_MAX_CHARS,
 } from '@playroom/shared';
-import { appendOrderCreated, appendOrderStatus, appendOrderUpdated } from '../events.js';
+import {
+  appendMessage,
+  appendOrderCreated,
+  appendOrderStatus,
+  appendOrderUpdated,
+} from '../events.js';
 import { listRoomMembers, matchRoomAgent, memberRecord } from '../members.js';
 import {
   createOrderRow,
@@ -296,6 +301,34 @@ export async function controlOrderCommand(
   await setOrderStatus(deps.pool, input.orderId, next.status, next.pauseReason);
   deps.bus.publish(input.roomId, event);
   deps.log.info({ ...base, status: next.status }, 'standing order transitioned');
+
+  // ── A RESUME SAYS WHAT STILL HAS TO HAPPEN (AUDIT-CLOSE, AF-N1) ────────────────────
+  //
+  // Resuming writes ACTIVE and fires NOTHING — an order fires on a completed turn by its trigger
+  // member, and resuming is not one. For a self-triggering loop that is a trap: the completion the
+  // order would fire on has already happened, so it sits ACTIVE waiting for a trigger that will
+  // never arrive. The chip goes green, the phone said "resume it to keep the loop going", and
+  // nothing runs. It looks like it worked.
+  //
+  // WHAT THIS DOES NOT DO: fire a cycle. Making resume CAUSE the next cycle would change what a
+  // governed record means — S-LOOP ruled that resume is the creator's act and that orders fire on
+  // completions — and changing what a record causes is a ruling, not a fix. That option is stated in
+  // the audit and left for Prince.
+  //
+  // So the honest fix is the other one: say the remaining step out loud, in the room, where the
+  // person who just resumed is looking. The sentence names the member whose next completed turn is
+  // the trigger, which is also the thing they can do about it.
+  if (input.op === 'resume') {
+    const notice = await appendMessage(
+      deps.pool,
+      input.roomId,
+      'system',
+      `sys-resumed-${input.orderId}-${event.seq}`,
+      `the standing order is active again. It runs on ${order.action_member_id}'s next completed ` +
+        `turn — resuming does not start one, so tag them in this room if you want it to go now.`,
+    );
+    deps.bus.publish(input.roomId, notice);
+  }
   return { ok: true, orderId: input.orderId };
 }
 
