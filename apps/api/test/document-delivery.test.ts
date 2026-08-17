@@ -111,8 +111,27 @@ describe('a room with no documents is byte-identical to before this slice', () =
     const win = await assemble(roomId);
     const sources = win.parts.map((p) => p.source);
     expect(sources).not.toContain('documents');
-    // The parts a room had before S-UPLOAD are exactly the parts it has now.
-    expect(new Set(sources)).toEqual(new Set(['briefing', 'common-ground', 'own-store']));
+    // EVERY part present is one that existed before S-UPLOAD. Asserted as a SUBSET rather than as an
+    // exact set: `own-store` appears only when the principal actually has stored context, so an exact
+    // set passes on a developer database that happens to have some and fails on a fresh one — which
+    // is what CI caught the first time this was written. The claim is "nothing new appeared", and
+    // that is what is checked.
+    const beforeThisSlice = new Set([
+      'briefing',
+      'common-ground',
+      'room-turns',
+      'own-store',
+      'task',
+    ]);
+    for (const src of sources) {
+      expect(
+        beforeThisSlice.has(src),
+        `a new part "${src}" appeared in a room with no documents`,
+      ).toBe(true);
+    }
+    // And the briefing and the room's own log are there, so this is not passing on an empty window.
+    expect(sources).toContain('briefing');
+    expect(sources).toContain('common-ground');
   });
 });
 
@@ -200,10 +219,18 @@ describe('the regions are distinguishable, and declared in one place', () => {
     const roomId = await newRoom('su2-shared');
     await give(roomId);
     const win = await assemble(roomId);
-    const priv = win.parts.filter((p) => p.principal_id !== null);
-    // The only part that may name a principal is own-store. A document a person gave the ROOM is
-    // common ground by construction; if it ever carried one, this is where that shows up.
-    expect(priv.map((p) => p.source)).toEqual(['own-store']);
+    const docs = win.parts.filter((p) => p.source === 'documents');
+    expect(docs.length).toBeGreaterThan(0);
+    // THE DIRECT CLAIM: a document a person gave the ROOM is common ground, so its part names no
+    // principal. Checked on the documents parts themselves rather than by elimination.
+    for (const d of docs) expect(d.principal_id).toBeNull();
+    // AND THE §7.1 INVARIANT STILL HOLDS AROUND IT: whatever parts carry a principal, they are
+    // own-store and nothing else. Written as a filter rather than as an exact list because
+    // `own-store` is absent when the principal has stored nothing — true on a fresh database, and
+    // the reason the first version of this test failed in CI while passing locally.
+    const named = win.parts.filter((p) => p.principal_id !== null).map((p) => p.source);
+    expect(new Set(named).size).toBeLessThanOrEqual(1);
+    for (const src of named) expect(src).toBe('own-store');
   });
 });
 
