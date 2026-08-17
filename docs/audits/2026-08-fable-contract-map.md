@@ -205,6 +205,26 @@ two different things:
 story each time. A suite that fails at random teaches people to re-run rather than to read, and one
 of these two was a genuine defect the whole time.
 
+**AF-N4 — an assertion whose truth depends on database state a fresh CI run would not have.**
+Two instances, both mine, both in SU-2, both green locally and red in CI on the pushed head:
+
+- `document-delivery.test.ts` asserted the assembled part set EQUALS
+  `{briefing, common-ground, own-store}`. `own-store` appears only when the principal has stored
+  context. My development database has rows; a fresh one does not.
+- the same file asserted "the parts naming a principal EQUAL `['own-store']`", proving a claim about
+  documents BY ELIMINATION. With an empty store that list is `[]`, so the assertion was false in CI
+  and, worse, was passing locally for a reason unrelated to what it claimed.
+
+**The class is the finding, not the two instances.** An exact-set assertion over query results is
+only as true as the rows that happen to exist, and the machine that writes the test is the machine
+least likely to notice. Both are rewritten to assert the claim directly — subset containment plus a
+positive control that the window is not empty, and the documents parts checked for a null principal
+on their own rather than by elimination.
+
+_Trigger: the next test asserting an exact set over query results._ Also: run a suite against a fresh
+database before calling it green, because CI catching this after a push is a slower loop than
+catching it before — and the push that carried it turned main red.
+
 ---
 
 ## RULINGS (Prince only — stated, not resolved, and not acted on)
