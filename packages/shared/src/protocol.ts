@@ -819,7 +819,64 @@ export const BriefingClearedEvent = z.object({
 });
 export type BriefingClearedEvent = z.infer<typeof BriefingClearedEvent>;
 
+/**
+ * A DOCUMENT WAS GIVEN TO THE ROOM (S-UPLOAD).
+ *
+ * An upload is a promotion (S1.5): this event is DERIVED from the `room_documents` row, so the log
+ * cannot describe a document the record does not have.
+ *
+ * THE BODY IS DELIBERATELY ABSENT. Every reader replays the whole log, and a document is up to 8,000
+ * characters — carrying it in the payload would make every replay, forever, pay for every document
+ * the room has ever held. The HASH is here instead, which is what a reader needs to check that what a
+ * member read is what was given, and the content lives in the record it was written to.
+ *
+ * In the union for the same reason the briefing is: `rowToServerEvent` parses every replayed row
+ * through the strict union, so a room holding one would not open at all if the type were unknown.
+ */
+export const DocumentAddedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('document.added'),
+  payload: z.object({
+    document_id: z.string(),
+    /** What a reader sees it called. */
+    title: z.string(),
+    /** Why it was given, in the uploader's words — what lets a member judge its relevance. */
+    purpose: z.string(),
+    /** The filename or origin as given. PROVENANCE, never a claim about the content. */
+    provenance: z.string(),
+    /** SHA-256 of the text stored, so what was read can be checked against what was given. */
+    content_hash: z.string(),
+    size_chars: z.number(),
+    /** What the uploader SAID it is; the screen that checked it is mechanical, not a classifier. */
+    declared_type: z.string(),
+    /** The human who gave it. A document an agent uploaded does not exist — the command refuses it. */
+    uploaded_by: z.string(),
+  }),
+});
+export type DocumentAddedEvent = z.infer<typeof DocumentAddedEvent>;
+
+/**
+ * A DOCUMENT WAS TAKEN BACK (S-UPLOAD) — explicitly, by a human.
+ *
+ * Absent and removed are different states, and this event is that difference. Same reasoning as the
+ * briefing's clear: a room that never held a document and a room whose document was withdrawn have
+ * different histories, and a reader must be able to tell which one they are in.
+ */
+export const DocumentRemovedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('document.removed'),
+  payload: z.object({
+    document_id: z.string(),
+    title: z.string(),
+    content_hash: z.string(),
+    removed_by: z.string(),
+  }),
+});
+export type DocumentRemovedEvent = z.infer<typeof DocumentRemovedEvent>;
+
 export const ServerEvent = z.discriminatedUnion('event_type', [
+  DocumentAddedEvent,
+  DocumentRemovedEvent,
   SummonEvent,
   RouteSelectedEvent,
   MessageEvent,
@@ -1032,6 +1089,19 @@ export const ERROR_ORDER_UNBOUNDED_DIAL = 'order_unbounded_dial';
 export const ERROR_ORDER_TASK_ABSENT = 'order_task_absent';
 /** The task was present and empty, or nothing but whitespace — an absent task wearing a string. */
 export const ERROR_ORDER_TASK_BLANK = 'order_task_blank';
+/** Only a human may give a room a document (S-UPLOAD) — the briefing's line, for the same reason. */
+export const ERROR_DOCUMENT_NOT_HUMAN = 'document_not_human';
+/** The mechanical screen refused it: not text by declared type, extension, or its first bytes. */
+export const ERROR_DOCUMENT_NOT_TEXT = 'document_not_text';
+/** Over `DOCUMENT_MAX_CHARS`. Refused at upload, never truncated at assembly. */
+export const ERROR_DOCUMENT_TOO_LARGE = 'document_too_large';
+/** The room's total would exceed `ROOM_DOCUMENTS_MAX_CHARS` — a per-document cap alone allows ten. */
+export const ERROR_DOCUMENT_ROOM_FULL = 'document_room_full';
+/** A required field was missing or blank — a document with no purpose is unplaceable reference material. */
+export const ERROR_DOCUMENT_MALFORMED = 'document_malformed';
+/** No such document in this room, or it was already removed. */
+export const ERROR_DOCUMENT_UNKNOWN = 'document_unknown';
+
 /** Over `ORDER_TASK_MAX_CHARS`. Refused, never truncated: a cut-off objective is a different one. */
 export const ERROR_ORDER_TASK_TOO_LARGE = 'order_task_too_large';
 

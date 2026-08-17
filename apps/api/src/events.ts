@@ -852,6 +852,56 @@ export async function appendPromotionEvent(
  * reason `appendPromotionEvent` does: the record and the copy are one transaction (briefings.ts), so
  * the event's content is derived from the row that recorded it, inside the same transaction.
  */
+/**
+ * The room-visible half of an upload (S-UPLOAD). The record is written first and this is DERIVED from
+ * it — the same order `appendBriefingSet` and promotions.ts hold, so the event cannot describe a
+ * document the table does not have.
+ *
+ * THE CONTENT IS NOT IN THE PAYLOAD. A document is up to 8,000 characters and the event log is
+ * replayed in full by every reader; putting the body here would make every replay carry every
+ * document forever. The hash is here instead, which is what a reader needs to check that what a
+ * member read is what was given.
+ */
+export async function appendDocumentAdded(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: {
+    document_id: string;
+    title: string;
+    purpose: string;
+    provenance: string;
+    content_hash: string;
+    size_chars: number;
+    declared_type: string;
+    uploaded_by: string;
+  },
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'document.added', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+/** A person took a document back. Absent and removed are different states, so removal is its own event. */
+export async function appendDocumentRemoved(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: { document_id: string; title: string; content_hash: string; removed_by: string },
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'document.removed', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
 export async function appendBriefingSet(
   client: PoolClient,
   roomId: string,

@@ -151,6 +151,20 @@ export type Command =
       content: string;
       purpose: string;
     }
+  // Give a room a document (S-UPLOAD). Human-only, text-only, capped per document and per room —
+  // an upload is a promotion, so the record precedes the copy and the content is inert.
+  | {
+      kind: 'uploadDocument';
+      roomId: string;
+      clientMsgId: string;
+      title: string;
+      purpose: string;
+      provenance: string;
+      declaredType: string;
+      content: string;
+    }
+  // Take one back. Explicit and evented: absent and removed are different states.
+  | { kind: 'removeDocument'; roomId: string; clientMsgId: string; documentId: string }
   // Clear the room's briefing (S1.7). Explicit — a room with no active briefing has nothing to clear.
   | { kind: 'clearBriefing'; roomId: string; clientMsgId: string }
   // The loop runner (S-LOOP): a completed turn drives the next cycle. Dispatched fire-and-forget from
