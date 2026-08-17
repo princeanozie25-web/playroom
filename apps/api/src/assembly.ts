@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { AgentMessage } from '@playroom/shared';
 import { latestRoomSummary, messagesAfterSeq, recentCompletedTurns } from './events.js';
 import { activeBriefing } from './briefings.js';
+import { activeDocuments } from './documents.js';
 import { ROOM_SUMMARY_AUTHOR, SUMMARY_TRIGGER_BATCH } from './summary.js';
 import { withPrincipalStore } from './principal-store.js';
 import type { TaskRow } from './tasks.js';
@@ -85,6 +86,17 @@ export const ASSEMBLY_PARTS = [
       "the room's owner-authored framing (S1.7), FIRST so it frames everything after it. Pinned — read " +
       'from the active record, not the message tail, so window pressure cannot evict it. Inherited by ' +
       'every member, and NOT a `message` event, so a briefing that reads like a tag summons nobody.',
+  },
+  {
+    source: 'documents',
+    ownership: 'shared',
+    label: 'docs',
+    why:
+      'the documents a person GAVE this room (S-UPLOAD), SECOND — after the framing that says how ' +
+      'work is done here and before the conversation, because reference material is neither. Pinned ' +
+      'like the briefing: read from the record, so window pressure cannot evict what someone chose ' +
+      'to hand over. Shared, capped per document and per room, and INERT — the largest piece of ' +
+      'untrusted text this system assembles, and it can no more act than a promoted span can.',
   },
   {
     source: 'common-ground',
@@ -182,6 +194,13 @@ const OWN_STORE_AUTHOR = 'context/your-own-notes';
 const TASK_AUTHOR = 'context/task-state';
 /** The room's briefing (S1.7). A context author, not a member — so it frames, and cannot be addressed. */
 const ROOM_BRIEFING_AUTHOR = 'context/room-briefing';
+/**
+ * The author a document's span carries. Namespaced like the briefing's and for the same reason: it
+ * is NOT a member id, so nothing downstream can mistake reference material for something a member
+ * said — and a document that reads like a tag summons nobody, because it is not a `message` event.
+ * The title rides in the label so a member can tell two documents apart and cite the one it used.
+ */
+const documentAuthor = (title: string): string => `context/document:${title}`;
 
 /**
  * THE ASSERTION. Every private part belongs to the principal being summoned, and there is exactly
@@ -340,6 +359,36 @@ export async function assembleContext(pool: Pool, input: AssembleInput): Promise
       source: 'briefing',
       principal_id: null,
       messages: [{ author: ROOM_BRIEFING_AUTHOR, body: briefing.content }],
+    });
+  }
+
+  // 0b. THE DOCUMENTS SOMEONE GAVE THIS ROOM (S-UPLOAD). After the briefing and before the
+  //     conversation: the briefing says how work is done here, a document is what the work is ABOUT,
+  //     and the window is what has been said. A member that cannot tell those three apart cannot
+  //     weigh them, so they are three regions and not one.
+  //
+  //     PINNED, like the briefing — read from `room_documents`, never from the message tail, so a
+  //     busy room cannot evict what a person deliberately handed over. Capped at upload (8,000 per
+  //     document, 24,000 per room) rather than truncated here: a member must never be given a
+  //     document that silently stops mid-sentence.
+  //
+  //     A ROOM WITH NO DOCUMENTS PUSHES NO PART, so every room that has never had one assembles
+  //     exactly as it did before this slice — the same shape the briefing takes, and asserted.
+  const documents = await activeDocuments(pool, input.roomId);
+  for (const doc of documents) {
+    parts.push({
+      source: 'documents',
+      principal_id: null,
+      messages: [
+        {
+          author: documentAuthor(doc.title),
+          // THE PURPOSE TRAVELS WITH THE TEXT. A document with no stated purpose is material a
+          // reader cannot judge the relevance of, and the uploader is the only one who can say.
+          body: `${doc.purpose}
+
+${doc.content}`,
+        },
+      ],
     });
   }
 

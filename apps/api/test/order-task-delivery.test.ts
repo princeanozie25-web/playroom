@@ -379,11 +379,18 @@ describe('a human’s tag is untouched by any of this', () => {
 });
 
 describe('S-TASK added no assembly region', () => {
-  it('the declaration is unchanged — five parts, and `task` is the one that carries an objective', () => {
-    // The delivery decision, asserted: had a new region been added, this would be six. The parts of
-    // a window are declared in ONE place (SL2-1), so this is the whole of the check.
+  it('`task` is the last part, and S-TASK contributed none of the others', () => {
+    // THE DELIVERY DECISION, STILL ASSERTED. S-TASK carried its objective in the EXISTING task
+    // region rather than adding one, and that is what this checks: the sources S-TASK could have
+    // added are absent, and the objective rides in the part the declaration says work belongs in.
+    //
+    // The literal count moved from five to six when S-UPLOAD declared `documents`, and it was right
+    // that this test failed on that — the parts of a window are declared in ONE place (SL2-1), so a
+    // new region cannot be added without meeting an assertion that names the old set. What would be
+    // wrong is loosening it to `>= 5` and calling that a fix, so it names the set instead.
     expect(ASSEMBLY_PARTS.map((p) => p.source)).toEqual([
       'briefing',
+      'documents',
       'common-ground',
       'room-turns',
       'own-store',

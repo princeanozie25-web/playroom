@@ -52,6 +52,7 @@ import { makeScrubStream } from './scrub.js';
 import { authenticate, diagnoseCredential, type AuthFailure } from './credentials.js';
 import { downgradeInterrupt } from './interrupts.js';
 import { activeBriefing } from './briefings.js';
+import { activeDocuments } from './documents.js';
 import { DECISION_POLL_HINT_MS, decisionExpiryMs, isExpired } from './decisions.js';
 import { consumeTicket, issueTicket, type TicketFailure, type TicketHolder } from './tickets.js';
 import { RedeemRefused, redeemRoomCode } from './room-codes.js';
@@ -1141,7 +1142,26 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
             set_at: active.created_at,
           }
         : null;
-      return { events, has_older, briefing };
+      // THE DOCUMENTS (S-UPLOAD), as their own top-level field, for the same reasons the briefing is
+      // one: they are PINNED rather than paginated, and a PULLER must inherit what a summoned member
+      // gets. Without this a document would reach `claude-audit` and not `claude-code`, which is the
+      // asymmetry S1.7 built the briefing's second delivery point to avoid.
+      //
+      // THE BODY IS INCLUDED HERE, unlike in the event payload: a puller reading history is doing what
+      // a summoned member's assembly does — collecting the context it is about to work from — and a
+      // manifest it cannot read would just force a second round trip for the thing it came for.
+      const documents = (await activeDocuments(db(), id)).map((d) => ({
+        document_id: d.id,
+        title: d.title,
+        purpose: d.purpose,
+        provenance: d.provenance,
+        content: d.content,
+        content_hash: d.content_hash,
+        size_chars: d.size_chars,
+        uploaded_by: d.uploaded_by,
+        uploaded_at: d.created_at,
+      }));
+      return { events, has_older, briefing, documents };
     });
 
     // POST /rooms/:id/messages { body, client_msg_id? } — the SPEAK half of a connected member's minimum
