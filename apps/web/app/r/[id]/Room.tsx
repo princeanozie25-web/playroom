@@ -35,6 +35,8 @@ import { Welcome } from '../../Welcome';
 import { PanelPresence } from '../../Panel';
 import { HOOK, pr } from '../../hooks';
 import { PushControl } from '../../PushControl';
+import { RoomTools } from '../../RoomTools';
+import { isCommandRefusal } from '../../refusals';
 import type { Principal, RosterMember } from '../../roster';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -410,6 +412,9 @@ export function Room({
   const [status, setStatus] = useState<Status>('connecting');
   const [body, setBody] = useState<string>('');
   const [refusal, setRefusal] = useState<ServerErrorFrame | null>(null);
+  // A NON-FATAL command refusal (an over-cap document, a not-owner briefing). Distinct from `refusal`,
+  // which is the dead-socket banner: a command refusal leaves the room open — only the action failed.
+  const [commandRefusal, setCommandRefusal] = useState<ServerErrorFrame | null>(null);
   // WHICH MEMBER THIS SOCKET IS, from `hello`. Used only to decide whether to draw a control the
   // server would accept — the authorisation itself is the socket's, never this value.
   const [viewer, setViewer] = useState<string | null>(null);
@@ -608,6 +613,13 @@ export function Room({
         // An explicit refusal. Surface it and stop: the server has already closed the
         // socket, and retrying a room that does not exist would just loop.
         if (msg.type === 'error') {
+          // A COMMAND refusal (an over-cap document, a not-owner briefing) leaves the socket OPEN —
+          // the room is alive, only the action failed. Surface it in the tool and carry on; it is not
+          // the dead-socket path below. Killing a live room over one is A4-F1 in reverse.
+          if (isCommandRefusal(msg.code)) {
+            setCommandRefusal(msg);
+            return;
+          }
           stoppedRef.current = true;
           setRefusal(msg);
           setStatus('closed');
@@ -714,6 +726,19 @@ export function Room({
     ws.send(JSON.stringify(payload));
     setBody('');
   };
+
+  // Send any client frame over the room socket — used by the room tools (briefing_set, document_upload).
+  // Takes a plain object so a control need not import the wire union; a closed socket drops silently,
+  // exactly as onSubmit does. The frame is validated server-side and refusals return as error frames.
+  const sendFrame = (frame: Record<string, unknown>): void => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(frame));
+  };
+
+  // Draw the owner tools only for a human viewer — convenience, not the gate: the server refuses a
+  // non-human by kind and a non-owner briefing by identity regardless of what is drawn.
+  const viewerIsHuman = roster.find((m) => m.id === viewer)?.kind === 'human';
 
   return (
     <main className="room" {...pr(HOOK.room)}>
@@ -910,6 +935,13 @@ export function Room({
         <div ref={tailRef} />
       </ul>
 
+      {viewerIsHuman && (
+        <RoomTools
+          send={sendFrame}
+          refusal={commandRefusal}
+          onClear={() => setCommandRefusal(null)}
+        />
+      )}
       <form className="composer" onSubmit={onSubmit} {...pr(HOOK.composer)}>
         {/* THE `you` INPUT IS GONE. It let a sender type their own name, which the server
             wrote down — the claim S1.2 exists to delete. Identity now comes from the

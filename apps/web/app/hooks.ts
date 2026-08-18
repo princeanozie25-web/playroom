@@ -126,6 +126,15 @@ export const HOOK = {
   pushState: 'push-state',
   /** The composer form. */
   composer: 'composer',
+  // ── ROOM TOOLS (S-UPLOAD / S1.7) — the surface for giving a document and setting a briefing ──
+  /** The owner tools disclosure — set a briefing, give a document. */
+  roomTools: 'room-tools',
+  /** A non-fatal command refusal shown in place (an over-cap document, a not-owner briefing). */
+  roomToolsError: 'room-tools-error',
+  /** Set-briefing submit. */
+  briefingSetSubmit: 'briefing-set-submit',
+  /** Give-document submit. */
+  docUploadSubmit: 'doc-upload-submit',
   /** The room refusal banner (RT-001). */
   refusal: 'refusal',
   // ── THE LOOPS SCREEN (S-UI3) — orders as a form, not a bash script ─────────────────
