@@ -47,6 +47,7 @@ import {
   HISTORY_PAGE_MAX,
 } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
+import { handleMcpRequest } from './mcp.js';
 import { warmUp } from './warmup.js';
 import { makeScrubStream } from './scrub.js';
 import { authenticate, diagnoseCredential, type AuthFailure } from './credentials.js';
@@ -1294,6 +1295,56 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           budget_remaining: r.budget_remaining,
         })),
       };
+    });
+
+    // POST /mcp — the remote MCP server (B1). "Make the infrastructure disappear": a Claude subscription
+    // drives a room through the SAME command layer as every other surface, reached now as MCP tools instead
+    // of REST. Auth is identical to the SCC door — a Bearer credential resolves to a member — and the tools
+    // carry no authority of their own (@playroom/hosts wraps executeCommand, adding no business logic). One
+    // real difference from the door: a member/subject is NEVER a tool argument; identity is the credential's.
+    //
+    // Stateless Streamable-HTTP: authenticate here, then hijack the reply so Fastify does not also answer,
+    // and hand the raw socket to a per-request transport bound to this identity. GET/DELETE (SSE sessions)
+    // are not offered — a room's state lives in Postgres, so there is no session to stream or to end.
+    fastify.post('/mcp', async (req, reply) => {
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        app.log.warn({ code: auth.failure }, 'mcp: credential refused');
+        reply.code(401);
+        return credentialRefusal(auth.failure);
+      }
+      // THE SAME per-credential bound the SCC door applies (S2.1b). B1 introduces exactly the caller that
+      // control exists for — a looping autonomous subscription on an internet-facing surface — so the MCP
+      // door must not grant a governed-request rate the action door refuses. Applied per request, it bounds
+      // the WHOLE write surface (post_message and request_action alike), not just one tool. Before hijack.
+      if (actionThrottled(auth.auth.credential_id)) {
+        app.log.warn({ credential: auth.auth.credential_id }, 'mcp: throttled');
+        reply.code(429);
+        return { type: 'error', code: 'mcp_throttled', message: 'too many requests — slow down' };
+      }
+      reply.hijack();
+      // After hijack Fastify neither answers nor reaps the reply, so a rejection out of the handler would
+      // dangle the socket. handleRequest itself always writes a response, but the guard covers the setup
+      // before it (and any future edit) — an internet-facing door must not be able to leak a connection.
+      try {
+        await handleMcpRequest(
+          req.raw,
+          reply.raw,
+          req.body,
+          { memberId: auth.auth.member_id, principalId: auth.auth.principal_id },
+          deps,
+        );
+      } catch (err) {
+        app.log.error({ err }, 'mcp: handler failed');
+        if (!reply.raw.headersSent) {
+          try {
+            reply.raw.writeHead(500);
+          } catch {
+            /* headers already flushed by the transport */
+          }
+        }
+        reply.raw.destroy();
+      }
     });
 
     // GET /rooms/:id/ws?after=<seq> — hello, then replay events seq > after in

@@ -145,6 +145,23 @@ export async function getRoom(pool: Pool, id: string): Promise<RoomRow | null> {
   return rows[0] ?? null;
 }
 
+/**
+ * The rooms a member is enrolled in, newest first — the scoped list behind the MCP `list_rooms` tool
+ * (B1). Scoped by the join, not filtered after: a member only ever learns of rooms they belong to, so
+ * the tool cannot be used to enumerate rooms or probe who exists, the same isolation the reads hold.
+ */
+export async function listRoomsForMember(pool: Pool, memberId: string): Promise<RoomRow[]> {
+  const { rows } = await pool.query<RoomRow>(
+    `SELECT r.id, r.title, r.created_at, r.created_by
+       FROM rooms r
+       JOIN room_members rm ON rm.room_id = r.id
+      WHERE rm.member_id = $1
+      ORDER BY r.created_at DESC`,
+    [memberId],
+  );
+  return rows;
+}
+
 export async function lastSeq(pool: Pool, roomId: string): Promise<number> {
   const { rows } = await pool.query<{ last: string }>(
     'SELECT COALESCE(MAX(seq), 0)::bigint AS last FROM events WHERE room_id = $1',
