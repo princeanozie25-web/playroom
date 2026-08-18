@@ -251,6 +251,23 @@ const MODEL_GENERATED_EVENT_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The address tokens in a span of member text — lowercased `@…` words, by the word-boundary rule the
+ * summon rule uses. The split keeps `@sol,` addressable while `@solar` is not `@sol`; `-` and `_` stay
+ * word characters, so `@claude-main` is one token and cannot be read as `@claude`.
+ *
+ * Exported so a SECOND reader — the pending-tag surface (B3), which tells a member who was NOT summoned
+ * (a connected/pull member) that it was mentioned — agrees, token for token, with what WOULD have
+ * addressed it, rather than maintaining a second tokenizer that could drift from this one.
+ */
+export function addressTokens(text: string): string[] {
+  const out: string[] = [];
+  for (const word of text.toLowerCase().split(/[^a-z0-9@_-]+/)) {
+    if (word.length >= 2 && word.startsWith('@')) out.push(word);
+  }
+  return out;
+}
+
+/**
  * The span of text A MEMBER IS THE AUTHOR OF, or null if this event carries none.
  *
  * ALLOWLIST, not a filter: exactly one event type qualifies, and every other one —
@@ -336,11 +353,7 @@ export function summonRuling(event: ServerEvent): SummonRuling {
   const members: string[] = [];
   const unknown: string[] = [];
   const elsewhere: string[] = [];
-  // Word-boundary split keeps `@sol,` addressable while `@solar` is not `@sol`. `-` and
-  // `_` are kept as word characters, so `@claude-main` is one token and cannot be read
-  // as `@claude` — which is why a prefix pair in the table is not an ambiguity.
-  for (const word of text.toLowerCase().split(/[^a-z0-9@_-]+/)) {
-    if (word.length < 2 || !word.startsWith('@')) continue;
+  for (const word of addressTokens(text)) {
     const id = table.get(word);
     if (id) {
       if (!members.includes(id)) members.push(id);

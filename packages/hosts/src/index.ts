@@ -13,6 +13,7 @@ export {
   type RoomSummary,
   type RoomView,
   type RoomEvent,
+  type PendingTag,
   type ActionVerdict,
   type PostMessageResult,
   type RespondResult,

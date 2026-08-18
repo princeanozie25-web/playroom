@@ -170,6 +170,55 @@ describe('roomMcpPortFor — the governed loop over the command layer (B1)', () 
   });
 });
 
+describe('pending tags — mentions with nothing to answer them (B3)', () => {
+  // The recipient is a member NOT answered by a hosted summon — a human member (prince) driving via a
+  // connection. Mentioning it drops the tag (it is not summonable), which is exactly what this surfaces.
+  // The mentioner is claude-main; an agent-authored message never fires a summon, so nothing else moves.
+  const princePort = () =>
+    roomMcpPortFor({ memberId: 'prince', principalId: 'principal:prince' }, deps());
+  const mine = (roomId: string) =>
+    princePort()
+      .listPendingTags()
+      .then((all) => all.filter((p) => p.room_id === roomId));
+
+  it('surfaces a message that @-mentions the member, with author and snippet', async () => {
+    const roomId = await room();
+    await claudeMain().postMessage({ roomId, body: '@prince please decide on pr-1' });
+    const pending = await mine(roomId);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].from).toBe('claude-main');
+    expect(pending[0].snippet).toContain('@prince');
+    expect(pending[0].seq).toBeGreaterThan(0);
+  });
+
+  it('matches the exact tag, not a superstring — @princeps is not @prince', async () => {
+    const roomId = await room();
+    await claudeMain().postMessage({ roomId, body: 'ping @princeps, not you' });
+    expect(await mine(roomId)).toHaveLength(0);
+  });
+
+  it('DRAINS once the member acts in that room — pending is measured since last activity', async () => {
+    const roomId = await room();
+    await claudeMain().postMessage({ roomId, body: '@prince early' });
+    expect(await mine(roomId)).toHaveLength(1);
+    await princePort().postMessage({ roomId, body: 'looking now' }); // prince acts -> clears it
+    expect(await mine(roomId)).toHaveLength(0);
+  });
+
+  it("does not surface the member's own mentions or the room's system notices", async () => {
+    const roomId = await room();
+    await princePort().postMessage({ roomId, body: '@prince note to self' });
+    expect(await mine(roomId)).toHaveLength(0);
+  });
+
+  it('is scoped to the rooms the member is in — a mention in a room it left is not surfaced', async () => {
+    const roomId = await room();
+    await claudeMain().postMessage({ roomId, body: '@prince here' });
+    await deEnrol(roomId, 'prince'); // prince leaves the room
+    expect(await mine(roomId)).toHaveLength(0);
+  });
+});
+
 describe('the /mcp route (B1)', () => {
   it('refuses a request with no credential — 401, before any MCP handling', async () => {
     const server = await startTestServer();
@@ -224,7 +273,7 @@ describe('the /mcp route (B1)', () => {
     try {
       await client.connect(transport);
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(6);
+      expect(tools).toHaveLength(7);
       expect(tools.map((t) => t.name)).toContain('post_message');
 
       const res = await client.callTool({

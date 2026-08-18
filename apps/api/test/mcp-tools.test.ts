@@ -25,6 +25,12 @@ function recordingPort(overrides: Partial<RoomMcpPort> = {}): { port: RoomMcpPor
         { id: 'r1', title: 'Room 1', created_at: 't', created_by: 'prince' },
       ]);
     },
+    listPendingTags: () => {
+      calls.push({ m: 'listPendingTags', args: null });
+      return Promise.resolve([
+        { room_id: 'r1', seq: 9, ts: 't', from: 'prince', snippet: '@claude-main look' },
+      ]);
+    },
     readRoom: (roomId) => {
       calls.push({ m: 'readRoom', args: { roomId } });
       return Promise.resolve({
@@ -75,6 +81,7 @@ async function connect(port: RoomMcpPort): Promise<Client> {
 
 const GOVERNED_LOOP = [
   'list_rooms',
+  'list_pending_tags',
   'read_room',
   'post_message',
   'request_action',
@@ -87,9 +94,8 @@ describe('the MCP tool surface (B1)', () => {
     const client = await connect(recordingPort().port);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(GOVERNED_LOOP);
-    // Deferred tools are NOT stubbed in: their backends (A3 receipts, B3 pending tags) do not exist yet.
+    // get_receipt stays DEFERRED, not stubbed — its backend (A3 receipts) does not exist yet.
     expect(tools.map((t) => t.name)).not.toContain('get_receipt');
-    expect(tools.map((t) => t.name)).not.toContain('list_pending_tags');
   });
 
   it('NO tool takes an identity argument — the acting member is the credential, never a claim', async () => {
@@ -119,6 +125,16 @@ describe('the MCP tool surface (B1)', () => {
     ]);
     expect(res.isError).toBeFalsy();
     expect(JSON.parse((res.content as Array<{ text: string }>)[0].text)).toEqual({ seq: 7 });
+  });
+
+  it('list_pending_tags routes to the port and returns the items', async () => {
+    const { port, calls } = recordingPort();
+    const client = await connect(port);
+    const res = await client.callTool({ name: 'list_pending_tags', arguments: {} });
+    expect(calls).toEqual([{ m: 'listPendingTags', args: null }]);
+    const items = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(items[0].room_id).toBe('r1');
+    expect(items[0].from).toBe('prince');
   });
 
   it('request_action returns the fabric verdict as the tool result', async () => {

@@ -87,6 +87,18 @@ export function buildRoomMcpServer(
   );
 
   server.registerTool(
+    'list_pending_tags',
+    {
+      title: 'List pending tags',
+      description:
+        'List messages that @-mentioned you and had nothing to answer them — the tags no summon fired ' +
+        'for, because you connect rather than being summoned. Poll this to discover when you have been ' +
+        'called into a room; a mention clears once you act there.',
+    },
+    () => run(() => port.listPendingTags()),
+  );
+
+  server.registerTool(
     'read_room',
     {
       title: 'Read a room',

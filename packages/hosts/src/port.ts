@@ -56,6 +56,15 @@ export interface RaiseHandView {
   refused: string | null;
 }
 
+/** A message that `@`-mentioned you and had nothing to answer it (you were not summoned). */
+export interface PendingTag {
+  room_id: string;
+  seq: number;
+  ts: string;
+  from: string;
+  snippet: string;
+}
+
 /**
  * A refusal the port surfaces to a tool as an MCP error RESULT (isError), not a thrown 500. It carries a
  * stable code + a sentence — a room a caller may not see, a mandate refusal, a budget hit — so the model
@@ -81,6 +90,8 @@ export interface RoomMcpPort {
   readonly memberId: string;
   /** The rooms the member belongs to. */
   listRooms(): Promise<RoomSummary[]>;
+  /** Messages that `@`-mentioned the member since it last acted — the tags no summon answered (B3). */
+  listPendingTags(): Promise<PendingTag[]>;
   /** Read a room the member belongs to; RoomMcpError('room_not_found') otherwise (no existence leak). */
   readRoom(roomId: string): Promise<RoomView>;
   /** Post a message into a room as the member. */

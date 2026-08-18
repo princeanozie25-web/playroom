@@ -10,6 +10,7 @@ import {
 } from '@playroom/hosts';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { getRoom, eventsAfter, roomWindowFloor, listRoomsForMember } from './events.js';
+import { pendingTagsForMember } from './mentions.js';
 import { isRoomMember, listRoomMembers } from './members.js';
 import { activeBriefing } from './briefings.js';
 import { DECISION_POLL_HINT_MS } from './decisions.js';
@@ -79,6 +80,11 @@ export function roomMcpPortFor(identity: McpIdentity, deps: CommandDeps): RoomMc
         created_at: toIso(r.created_at),
         created_by: r.created_by,
       }));
+    },
+
+    listPendingTags() {
+      // Scoped to the member by construction (its own rooms, its own mentions); no room argument to gate.
+      return pendingTagsForMember(pool, identity.memberId);
     },
 
     async readRoom(roomId: string): Promise<RoomView> {
