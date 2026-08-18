@@ -1678,6 +1678,66 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
               }
               return;
             }
+            if (msg.type === 'document_upload') {
+              // GIVE THE ROOM A DOCUMENT (S-UPLOAD). The actor is the authenticated member; the command
+              // refuses any non-human BY KIND — before the screen and the caps — so an agent socket
+              // cannot give a room a document whatever this frame says. Reference material, pinned into
+              // every summon and inert: it confers no authority and can no more act than a briefing can.
+              const result = await executeCommand(
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+                {
+                  kind: 'uploadDocument',
+                  roomId,
+                  clientMsgId: msg.client_msg_id,
+                  title: msg.title,
+                  purpose: msg.purpose,
+                  provenance: msg.provenance,
+                  declaredType: msg.declared_type,
+                  content: msg.content,
+                },
+                deps,
+              );
+              if (!result.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: result.refusal.code,
+                      message: result.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
+              return;
+            }
+            if (msg.type === 'document_remove') {
+              // TAKE A DOCUMENT BACK (S-UPLOAD). Human-only, like giving one; the command refuses a
+              // non-human, and an unknown or already-removed document, each by its own named reason.
+              const result = await executeCommand(
+                { actorId: actor.member_id, principalId: actor.principal_id, mode: 'human' },
+                {
+                  kind: 'removeDocument',
+                  roomId,
+                  clientMsgId: msg.client_msg_id,
+                  documentId: msg.document_id,
+                },
+                deps,
+              );
+              if (!result.ok) {
+                socket.send(
+                  JSON.stringify(
+                    ServerErrorFrame.parse({
+                      type: 'error',
+                      code: result.refusal.code,
+                      message: result.refusal.message,
+                      room_id: roomId,
+                    }),
+                  ),
+                );
+              }
+              return;
+            }
             if (msg.type === 'downgrade') {
               // ONE TAP, and it costs the raiser (Bible §21.3). The actor is the authenticated
               // member, which is also the authorisation: only the member an interrupt is

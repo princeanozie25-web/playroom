@@ -119,7 +119,7 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     expect(dispatchers).toEqual(['commands/summon.ts']);
   });
 
-  it('the wire admits exactly nine frames, and every path to agent work traces to a human', () => {
+  it('the wire admits exactly eleven frames, and every path to agent work traces to a human', () => {
     // Read off the schema at runtime rather than grepped, so this cannot pass against a stale
     // build or a comment. A new frame type makes this test fail, which is the point: adding one
     // is then a decision about the activation boundary rather than an addition to a union.
@@ -159,10 +159,20 @@ describe('the gateway is the only path — as a decision, not a shape', () => {
     // before ownership, and a non-owner after), and it CONFERS NO AUTHORITY — a member's evaluated
     // mandate is byte-identical with and without it. So the boundary holds untouched: no agent turn
     // traces to a briefing, and an agent can send neither frame that lands.
+    //
+    // IT FIRED AGAIN in S-UPLOAD, for `document_upload` and `document_remove` — the briefing's answer
+    // one region over. A document PUTS NO AGENT TO WORK: it is inert assembled context with its own
+    // event type (`document.added`, never a `message`), so a document that reads like `@sol` summons
+    // nobody. Only a HUMAN may give or take one back (commands/document.ts refuses a non-human by KIND
+    // first, before the screen and the caps), and it CONFERS NO AUTHORITY — a member's evaluated mandate
+    // is byte-identical with and without it (proven in context-isolation.test.ts, SU-3). So the wire
+    // grew a region and the boundary did not move: an agent can send neither frame that lands.
     const types = ClientFrame.options.map((o) => o.shape.type.value).sort();
     expect(types).toEqual([
       'briefing_clear',
       'briefing_set',
+      'document_remove',
+      'document_upload',
       'downgrade',
       'handoff',
       'order_control',

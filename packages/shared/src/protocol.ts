@@ -195,6 +195,42 @@ export const ClientBriefingClear = z.object({
 });
 export type ClientBriefingClear = z.infer<typeof ClientBriefingClear>;
 
+/**
+ * Client → server: GIVE the room a document (S-UPLOAD) — reference material pinned into every summon,
+ * after the briefing and before the conversation.
+ *
+ * The briefing's frame, one region over, and human-only for the same reason: a member that could put
+ * text into every other member's context would have a channel that routes around the mandate. Only a
+ * HUMAN may give a room a document — the command checks the socket's AUTHENTICATED member's kind (never
+ * this frame) and refuses an agent FIRST, before the screen and the caps. And like `send`, the frame
+ * carries the document's fields and NOTHING about who gave it: the uploader is the authenticated
+ * socket, not a claim the frame can make. A document CONFERS NO AUTHORITY and is INERT — its own event
+ * type (`document.added`), never a `message`, so a document that reads like `@sol` summons nobody.
+ */
+export const ClientDocumentUpload = z.object({
+  type: z.literal('document_upload'),
+  client_msg_id: z.string().min(1),
+  title: z.string().min(1),
+  purpose: z.string().min(1),
+  provenance: z.string().min(1),
+  declared_type: z.string().min(1),
+  content: z.string().min(1),
+});
+export type ClientDocumentUpload = z.infer<typeof ClientDocumentUpload>;
+
+/**
+ * Client → server: TAKE a document back (S-UPLOAD). Human-only, like giving one — an agent that could
+ * remove a document could remove the framing another member is working from. Names WHICH document and
+ * nothing else; a removal that names an unknown or already-removed document is refused by its own
+ * reason rather than silently no-op'd, so absent and removed stay distinguishable.
+ */
+export const ClientDocumentRemove = z.object({
+  type: z.literal('document_remove'),
+  client_msg_id: z.string().min(1),
+  document_id: z.string().min(1),
+});
+export type ClientDocumentRemove = z.infer<typeof ClientDocumentRemove>;
+
 /** Every frame a client may send. Parsed as a union; an unknown `type` is dropped. */
 export const ClientFrame = z.discriminatedUnion('type', [
   ClientSend,
@@ -206,6 +242,8 @@ export const ClientFrame = z.discriminatedUnion('type', [
   ClientOrderControl,
   ClientBriefingSet,
   ClientBriefingClear,
+  ClientDocumentUpload,
+  ClientDocumentRemove,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 
