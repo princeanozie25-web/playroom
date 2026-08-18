@@ -4,13 +4,42 @@ Mandate documents, one per member, versioned in git exactly like prompts (Bible 
 Every evaluation logs the hash of the document it decided under, so a behavioural change
 is answered with a diff and a revert rather than archaeology.
 
-Shape: Bible §9.1. **`sig` is omitted, not stubbed.** Mandates are unsigned in v0 and a
-placeholder `ed25519:` string would make a document look verified — omit, never stub.
-S2.1 adds signing and the `sig_valid()` branch together.
+Shape: Bible §9.1. Every mandate now carries a **real Ed25519 signature** as a `sig` field
+(S2.1). Authority is attributable to a KEY, not to whoever could edit a git file: a forged or
+edited document fails verification and the evaluator refuses it at §0 (`SIGNATURE_INVALID`) before
+reading a word it claims. The old rule still holds in a stronger form — a placeholder `ed25519:`
+string is never acceptable: a document carries a genuine signature or none, and a `sig` inside the
+payload (rather than beside it) is rejected by the strict schema.
 
-Also omitted, and for the same reason: `room` (mandates are per-member, not per-room,
-until S1.1 has rooms with membership) and `route_constraints` (route selection does not
+Also omitted, and for the same reason placeholders are: `room` (mandates are per-member, not
+per-room, until S1.1 has rooms with membership) and `route_constraints` (route selection does not
 exist until S1.1).
+
+## Signing — the trust root (S2.1, Bible §4.1)
+
+The `sig` is signed over the **canonical payload** (the ten fields, keys sorted — the exact bytes
+`mandateHash` covers, so adding a signature never changes a mandate's hash). It is a **sibling** of
+the payload: `loadMandates` splits it off before the schema parse, which is why the hash stays over
+the payload and the schema stays the ten fields it understands.
+
+- **Public key — COMMITTED.** `TRUSTED_MANDATE_PUBKEY` in `packages/fabric/src/mandate.ts` (Ed25519,
+  SPKI DER, base64). Runtime, CI and tests establish authenticity from the tree alone, **with no
+  secret** — a serving machine needs only this constant and the signed files.
+- **Private key — NEVER in the tree.** It signs, and lives in a local `.env` (or a CI secret) as
+  `PLAYROOM_MANDATE_SIGNING_KEY` (Ed25519, PKCS8 DER, base64). This is a **custodial bootstrap key**
+  (§4.1: "custodial keys in v1"); Prince holds it and rotates it for production.
+
+Re-sign after editing any mandate, or the evaluator will refuse it:
+
+```
+PLAYROOM_MANDATE_SIGNING_KEY=<pkcs8-der-base64> pnpm tsx scripts/sign-mandates.ts
+pnpm tsx scripts/sign-mandates.ts --check     # verify committed signatures; needs no key
+```
+
+**Rotation.** Generate a new keypair; either replace `TRUSTED_MANDATE_PUBKEY` and redeploy, or set
+`PLAYROOM_MANDATE_PUBKEY` (an operator override on the same footing as `PLAYROOM_MANDATES_DIR`, with
+the committed constant as its default) — then re-sign the mandates with the new private key and ship
+them. Because the runtime only ever VERIFIES, rotation never puts a secret on a serving machine.
 
 `scope` and `protected_actions` are drawn from the **command layer** — the action surface
 `executeCommand` already dispatches on — not from a wishlist. `pr.merge` is listed as

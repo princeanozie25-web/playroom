@@ -1,8 +1,10 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { generateKeyPairSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
+import { Mandate, signMandate } from '@playroom/fabric';
 import { testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
 import { appendDecision, createRoom, type DecisionPayload } from '../src/events.js';
@@ -64,25 +66,40 @@ afterEach(async () => {
  * Run `fn` with claude-main's summon.initiate DESIGNATED protected — a temp mandate dir with just that
  * one edit. Models "an action a principal has marked protected" without shipping the change; a mandate
  * change is a restart (S2.2), which resetMandateCache stands in for.
+ *
+ * Post-S2.1 an authority change is a RE-SIGNING, not a text edit: the modified mandate is signed with a
+ * throwaway keypair whose public half is pointed to via `PLAYROOM_MANDATE_PUBKEY` for the duration. So
+ * the mandate the evaluator sees is authentic (it would otherwise be refused at §0 as a tampered
+ * document), which is exactly the production shape of "a principal re-issued an authority" — not a
+ * forgery. The other mandates are re-signed unchanged with the same key so they too verify.
  */
 async function withProtectedSummon<T>(fn: () => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'playroom-cosign-'));
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const pub = publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+  const priv = privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64');
   for (const f of readdirSync(MANDATES_DIR).filter((f) => f.endsWith('.json'))) {
     const raw = JSON.parse(readFileSync(join(MANDATES_DIR, f), 'utf8'));
+    delete raw.sig; // drop the shipped signature; this edit is re-signed below with the test key
     if (raw.member === 'claude-main') {
       raw.protected_actions = [...raw.protected_actions, 'summon.initiate'];
       raw.co_sign.actions = [...raw.co_sign.actions, 'summon.initiate'];
     }
-    writeFileSync(join(dir, f), JSON.stringify(raw));
+    const sig = signMandate(Mandate.parse(raw), priv);
+    writeFileSync(join(dir, f), JSON.stringify({ ...raw, sig }));
   }
-  const previous = process.env.PLAYROOM_MANDATES_DIR;
+  const previousDir = process.env.PLAYROOM_MANDATES_DIR;
+  const previousPub = process.env.PLAYROOM_MANDATE_PUBKEY;
   process.env.PLAYROOM_MANDATES_DIR = dir;
+  process.env.PLAYROOM_MANDATE_PUBKEY = pub;
   resetMandateCache();
   try {
     return await fn();
   } finally {
-    if (previous === undefined) delete process.env.PLAYROOM_MANDATES_DIR;
-    else process.env.PLAYROOM_MANDATES_DIR = previous;
+    if (previousDir === undefined) delete process.env.PLAYROOM_MANDATES_DIR;
+    else process.env.PLAYROOM_MANDATES_DIR = previousDir;
+    if (previousPub === undefined) delete process.env.PLAYROOM_MANDATE_PUBKEY;
+    else process.env.PLAYROOM_MANDATE_PUBKEY = previousPub;
     resetMandateCache();
     rmSync(dir, { recursive: true, force: true });
   }

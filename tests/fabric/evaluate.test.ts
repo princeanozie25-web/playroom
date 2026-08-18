@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { performance } from 'node:perf_hooks';
+import { generateKeyPairSync } from 'node:crypto';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import {
   evaluate,
   loadMandates,
   mandateHash,
+  signMandate,
+  verifyMandateSig,
+  TRUSTED_MANDATE_PUBKEY,
   Mandate,
   type LoadedMandate,
   type ReasonCode,
@@ -21,7 +28,10 @@ import {
 
 const NOW = new Date('2026-07-26T12:00:00.000Z');
 
-function loaded(overrides: Partial<Mandate> = {}): LoadedMandate {
+// `sigValid` defaults to true so every pre-S2.1 case reads as an authentic mandate and exercises
+// the branch it was written for. The SIGNATURE_INVALID cases pass `false` to prove authenticity is
+// checked ahead of scope, expiry and protection — see cases 22–25.
+function loaded(overrides: Partial<Mandate> = {}, sigValid = true): LoadedMandate {
   const mandate = Mandate.parse({
     mandate_id: 'mnd_test',
     principal: 'principal:prince',
@@ -35,7 +45,7 @@ function loaded(overrides: Partial<Mandate> = {}): LoadedMandate {
     expires: '2026-11-30T00:00:00Z',
     ...overrides,
   });
-  return { mandate, hash: mandateHash(mandate) };
+  return { mandate, hash: mandateHash(mandate), sig_valid: sigValid };
 }
 
 interface Case {
@@ -238,11 +248,89 @@ const CASES: Case[] = [
     decision: 'BLOCK',
     reason: 'OUT_OF_SCOPE',
   },
+
+  // --- signature: authenticity is checked BEFORE anything the document claims (S2.1, §0) ---
+  // Each case would reach a DIFFERENT decision if the §0 check were deleted or moved later — that
+  // is what makes them mutation-worthy rather than decorative. A mutant that drops the check turns
+  // 22 into ALLOW, 24 into CO_SIGN and 23 into MANDATE_EXPIRED; a mutant that orders §0 after
+  // expiry turns 23 into MANDATE_EXPIRED. All four are caught here.
+  {
+    name: '22. bad signature — an otherwise in-scope action is BLOCKED, not ALLOWED',
+    action: 'pr.review', // in scope; would ALLOW if authenticity were not checked first
+    member: 'claude-main',
+    mandate: loaded({}, false),
+    decision: 'BLOCK',
+    reason: 'SIGNATURE_INVALID',
+  },
+  {
+    name: '23. bad signature outranks EXPIRY — a forged mandate is not judged on the expiry it claims',
+    action: 'pr.review',
+    member: 'claude-main',
+    mandate: loaded({ expires: '2026-07-25T00:00:00Z' }, false), // also expired
+    decision: 'BLOCK',
+    reason: 'SIGNATURE_INVALID', // not MANDATE_EXPIRED — §0 precedes §1
+  },
+  {
+    name: '24. bad signature outranks PROTECTED — no human is ever asked to co-sign a forgery (RA-007)',
+    action: 'pr.merge', // protected AND in scope; would CO_SIGN if authenticity were not checked first
+    member: 'claude-main',
+    mandate: loaded({ scope: ['pr.review', 'pr.merge'] }, false),
+    decision: 'BLOCK',
+    reason: 'SIGNATURE_INVALID', // never CO_SIGN — refused outright, no signer named
+  },
+  {
+    name: '25. bad signature — even an out-of-scope action reports the deeper failure',
+    action: 'pr.close',
+    member: 'claude-main',
+    mandate: loaded({}, false),
+    decision: 'BLOCK',
+    reason: 'SIGNATURE_INVALID', // authenticity is the root; it is reported over OUT_OF_SCOPE
+  },
+  {
+    name: '26. bad signature outranks the WRONG-MEMBER guard — §0 precedes even the member check',
+    action: 'pr.review',
+    member: 'sol', // mandate.member is claude-main; would be NO_MANDATE if authenticity were second
+    mandate: loaded({}, false),
+    decision: 'BLOCK',
+    reason: 'SIGNATURE_INVALID',
+  },
+
+  // --- more exact-match boundaries on the deny-by-default line --------------------
+  {
+    name: '27. scope matching does not trim — a padded action string is out of scope',
+    action: ' pr.review ',
+    member: 'claude-main',
+    mandate: loaded(),
+    decision: 'BLOCK',
+    reason: 'OUT_OF_SCOPE',
+  },
+  {
+    name: '28. scope matching rejects a SUPERSTRING — pr.reviewed is not pr.review',
+    action: 'pr.reviewed',
+    member: 'claude-main',
+    mandate: loaded(),
+    decision: 'BLOCK',
+    reason: 'OUT_OF_SCOPE',
+  },
+  {
+    name: '29. the second protected action, absent from scope, is BLOCK not CO_SIGN (mirror of 11)',
+    action: 'deploy', // protected, but not in the default scope
+    member: 'claude-main',
+    mandate: loaded(),
+    decision: 'BLOCK',
+    reason: 'OUT_OF_SCOPE',
+  },
 ];
 
 describe('mandate evaluation (Bible §9.2)', () => {
-  it(`covers at least the 12-case v0 floor (has ${CASES.length})`, () => {
-    expect(CASES.length).toBeGreaterThanOrEqual(12);
+  // §20 sets 40 cases at S2.1. The count is stated, not implied: this TABLE is the decision
+  // matrix (now 29, including the §0 authenticity/hijack cases 22–26 that S2.1 adds), and the
+  // engine's S2.1 bar is met across this file as a whole — the table plus the dedicated
+  // `signatures — the trust root` suite (round-trip, tamper, load, and the through-evaluate
+  // integration) plus the counterparties and hashing suites — which together exceed 40. The
+  // floor below is raised from 12 so a deleted case fails loudly rather than silently.
+  it(`covers at least the raised S2.1 floor of 29 (has ${CASES.length})`, () => {
+    expect(CASES.length).toBeGreaterThanOrEqual(29);
   });
 
   for (const c of CASES) {
@@ -303,9 +391,11 @@ describe('mandate hashing (Bible §9.5)', () => {
     expect(narrow.hash).not.toBe(wide.hash);
   });
 
-  it('rejects a mandate carrying a signature field — omit, never stub', () => {
-    // `.strict()` refuses unknown keys, so a fake `sig` cannot be smuggled in and then
-    // silently ignored by a future sig_valid() that assumes absence means unsigned.
+  it('rejects a signature smuggled INTO the payload — sig is a sibling, never a field', () => {
+    // Post-S2.1 the `sig` is real, but it lives BESIDE the payload; loadMandates splits it off
+    // before this parse. `.strict()` therefore still refuses a `sig` INSIDE the payload — which
+    // is what keeps the hash over the ten fields (never over its own signature) and stops a
+    // forged document from smuggling authenticity in as just another key.
     const withSig = { ...loaded().mandate, sig: 'ed25519:not-a-real-signature' };
     expect(Mandate.safeParse(withSig).success).toBe(false);
   });
@@ -316,7 +406,7 @@ describe('mandate hashing (Bible §9.5)', () => {
 });
 
 describe('the shipped mandates load', () => {
-  it('loads mandates/ from disk, keyed by member, with hashes', () => {
+  it('loads mandates/ from disk, keyed by member, with hashes AND a verified signature', () => {
     const all = loadMandates();
     expect(all.size).toBeGreaterThan(0);
     const claude = all.get('claude-main');
@@ -324,6 +414,13 @@ describe('the shipped mandates load', () => {
     expect(claude?.mandate.principal).toBe('principal:prince');
     expect(claude?.mandate.protected_actions).toContain('pr.merge');
     expect(claude?.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    // Every SHIPPED mandate is signed by the committed trust root — so none is refused at §0.
+    for (const [member, m] of all) {
+      expect(
+        m.sig_valid,
+        `shipped mandate ${member} must verify against TRUSTED_MANDATE_PUBKEY`,
+      ).toBe(true);
+    }
   });
 
   it('the shipped mandate refuses a merge and allows a review', () => {
@@ -338,6 +435,170 @@ describe('the shipped mandates load', () => {
     expect(merge.reason_code).toBe('PROTECTED_ACTION');
     expect(merge.required_signer).toBe('principal:prince');
     expect(review.decision).toBe('ALLOW');
+  });
+});
+
+// ── SIGNATURES: THE TRUST ROOT (S2.1, Bible §4.1, §9.2) ──────────────────────────────────
+//
+// The point of signing is that authority is attributable to a KEY, not to whoever could edit a
+// git file. These tests prove the three things that has to mean: a genuine signature verifies; a
+// changed byte anywhere (payload OR signature) fails; and the committed public key matches the
+// committed signatures, so the shipped mandates are authentic on any machine with no secret.
+describe('signatures — the trust root (S2.1, Bible §4.1)', () => {
+  // A fresh keypair per test proves the crypto round-trip WITHOUT the committed private key
+  // (which is not in the tree). Public/private are exported to the same base64 DER encodings the
+  // runtime uses: SPKI for the public key, PKCS8 for the private.
+  function freshKeypair(): { pub: string; priv: string } {
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+    return {
+      pub: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+      priv: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
+    };
+  }
+
+  const sample = () => loaded().mandate;
+
+  it('round-trips — a mandate signed with a key verifies with its public half', () => {
+    const { pub, priv } = freshKeypair();
+    const sig = signMandate(sample(), priv);
+    expect(sig).toMatch(/^ed25519:[A-Za-z0-9+/]+=*$/);
+    expect(verifyMandateSig(sample(), sig, pub)).toBe(true);
+  });
+
+  it('fails when the PAYLOAD is tampered — a widened scope no longer matches the signature', () => {
+    const { pub, priv } = freshKeypair();
+    const sig = signMandate(loaded({ scope: ['pr.review'] }).mandate, priv);
+    // Same signature, a mandate whose authority was widened after signing.
+    const widened = loaded({ scope: ['pr.review', 'pr.merge', 'deploy'] }).mandate;
+    expect(verifyMandateSig(widened, sig, pub)).toBe(false);
+  });
+
+  it('fails when the SIGNATURE is tampered — a single flipped byte does not verify', () => {
+    const { pub, priv } = freshKeypair();
+    const sig = signMandate(sample(), priv);
+    const i = 'ed25519:'.length;
+    const flipped = sig.slice(0, i) + (sig[i] === 'A' ? 'B' : 'A') + sig.slice(i + 1);
+    expect(verifyMandateSig(sample(), flipped, pub)).toBe(false);
+  });
+
+  it('fails safe — malformed, wrong-prefix and empty signatures return false, never throw', () => {
+    const { pub } = freshKeypair();
+    const m = sample();
+    expect(verifyMandateSig(m, '', pub)).toBe(false);
+    expect(verifyMandateSig(m, 'not-even-close', pub)).toBe(false);
+    expect(verifyMandateSig(m, 'rsa:AAAA', pub)).toBe(false); // wrong algorithm prefix
+    expect(verifyMandateSig(m, 'ed25519:@@@not-base64@@@', pub)).toBe(false);
+    expect(verifyMandateSig(m, 'ed25519:', pub)).toBe(false); // empty body
+  });
+
+  it('fails when verified against the WRONG key — a valid signature from another signer is rejected', () => {
+    const a = freshKeypair();
+    const b = freshKeypair();
+    const sig = signMandate(sample(), a.priv);
+    expect(verifyMandateSig(sample(), sig, a.pub)).toBe(true);
+    expect(verifyMandateSig(sample(), sig, b.pub)).toBe(false); // signed by A, checked against B
+  });
+
+  it('the committed public key matches the committed signatures — authentic with no secret', () => {
+    // Read a real shipped mandate, split its sig, and verify against the DEFAULT (committed)
+    // public key. This is what CI and prod do: establish authenticity from the tree alone.
+    const dir = resolve(process.cwd(), 'mandates');
+    const raw = JSON.parse(readFileSync(join(dir, 'claude-main.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    const { sig, ...payload } = raw;
+    const mandate = Mandate.parse(payload);
+    expect(typeof sig).toBe('string');
+    expect(verifyMandateSig(mandate, sig as string)).toBe(true); // default pub = TRUSTED_MANDATE_PUBKEY
+    // And it is genuinely checking the key, not rubber-stamping: a different key rejects it.
+    expect(verifyMandateSig(mandate, sig as string, freshKeypair().pub)).toBe(false);
+    expect(TRUSTED_MANDATE_PUBKEY).toMatch(/^[A-Za-z0-9+/]+=*$/);
+  });
+
+  it('loadMandates marks a byte-tampered file invalid while its neighbours stay valid', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'playroom-sig-'));
+    try {
+      const real = resolve(process.cwd(), 'mandates');
+      for (const f of readdirSync(real).filter((f) => f.endsWith('.json'))) {
+        writeFileSync(join(dir, f), readFileSync(join(real, f), 'utf8'));
+      }
+      // Tamper claude-main's payload but keep its (now-stale) signature.
+      const path = join(dir, 'claude-main.json');
+      const doc = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+      doc.scope = [...(doc.scope as string[]), 'deploy']; // widen authority after signing
+      writeFileSync(path, JSON.stringify(doc, null, 2));
+
+      const all = loadMandates(dir);
+      expect(all.get('claude-main')?.sig_valid).toBe(false); // the tampered one
+      expect(all.get('sol')?.sig_valid).toBe(true); // an untouched neighbour
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('an UNSIGNED mandate (no sig field) loads with sig_valid false — absence is not authenticity', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'playroom-sig-'));
+    try {
+      // A valid ten-field payload with NO sig sibling.
+      writeFileSync(join(dir, 'ghost.json'), JSON.stringify(loaded().mandate));
+      expect(loadMandates(dir).get('claude-main')?.sig_valid).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('END TO END: a tampered file on disk becomes a BLOCK/SIGNATURE_INVALID at the evaluator', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'playroom-sig-'));
+    try {
+      const real = resolve(process.cwd(), 'mandates');
+      const path = join(dir, 'claude-main.json');
+      const doc = JSON.parse(readFileSync(join(real, 'claude-main.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      doc.scope = [...(doc.scope as string[]), 'deploy']; // forge a broader authority
+      writeFileSync(path, JSON.stringify(doc, null, 2));
+
+      const tampered = loadMandates(dir).get('claude-main');
+      // The whole chain: forged file → loader marks it unauthentic → evaluator refuses at §0,
+      // even for pr.review which the (forged) scope still lists. No authority flows from a forgery.
+      const v = evaluate({ type: 'pr.review', resource: 'r' }, 'claude-main', tampered, NOW);
+      expect(v.decision).toBe('BLOCK');
+      expect(v.reason_code).toBe('SIGNATURE_INVALID');
+      expect(v.required_signer).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('PLAYROOM_MANDATE_PUBKEY overrides the trust root — matching key verifies, otherwise fails closed', () => {
+    // The rotation/testing affordance (mandate.ts trustedMandatePubKey). This is what makes an env
+    // that names a DIFFERENT key take effect — a mutant that ignored the override and always used the
+    // committed constant would fail the first assertion, because the committed key never signed this.
+    const { pub, priv } = freshKeypair();
+    const dir = mkdtempSync(join(tmpdir(), 'playroom-sig-'));
+    const previous = process.env.PLAYROOM_MANDATE_PUBKEY;
+    try {
+      const mandate = sample(); // member: claude-main
+      writeFileSync(
+        join(dir, 'claude-main.json'),
+        JSON.stringify({ ...mandate, sig: signMandate(mandate, priv) }),
+      );
+
+      process.env.PLAYROOM_MANDATE_PUBKEY = pub; // the key that DID sign it
+      expect(loadMandates(dir).get('claude-main')?.sig_valid).toBe(true);
+
+      delete process.env.PLAYROOM_MANDATE_PUBKEY; // default committed key did NOT sign it → fail closed
+      expect(loadMandates(dir).get('claude-main')?.sig_valid).toBe(false);
+
+      process.env.PLAYROOM_MANDATE_PUBKEY = freshKeypair().pub; // a WRONG override → still fail closed
+      expect(loadMandates(dir).get('claude-main')?.sig_valid).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.PLAYROOM_MANDATE_PUBKEY;
+      else process.env.PLAYROOM_MANDATE_PUBKEY = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

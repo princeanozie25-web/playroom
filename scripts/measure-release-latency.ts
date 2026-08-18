@@ -16,9 +16,11 @@
 // A SCRIPT, NOT A TEST: it hits the live database and must never run in CI or `pnpm verify`.
 import { performance } from 'node:perf_hooks';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { generateKeyPairSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
+import { Mandate, signMandate } from '@playroom/fabric';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
 import { RoomBus } from '../apps/api/src/bus.js';
@@ -46,18 +48,31 @@ function pct(sorted: number[], p: number): number {
   return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
 }
 
-/** A temp mandate dir with claude-main's summon.initiate marked protected. */
-function protectedMandateDir(): string {
+/**
+ * A temp mandate dir with claude-main's summon.initiate marked protected.
+ *
+ * Post-S2.1 that edit is a RE-SIGNING, not a text change: the mandates are signed with a throwaway
+ * keypair whose public half is returned for the caller to point PLAYROOM_MANDATE_PUBKEY at. Keeping
+ * the shipped (now-stale) signature would load claude-main as sig_valid:false, and the evaluator's
+ * §0 authenticity check would BLOCK the summon before it ever reached CO_SIGN — the release path
+ * would have nothing to measure. This mirrors decision-execution.test.ts's withProtectedSummon.
+ */
+function protectedMandateDir(): { dir: string; pub: string } {
   const dir = mkdtempSync(join(tmpdir(), 'playroom-release-'));
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const pub = publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+  const priv = privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64');
   for (const f of readdirSync(MANDATES_DIR).filter((f) => f.endsWith('.json'))) {
     const raw = JSON.parse(readFileSync(join(MANDATES_DIR, f), 'utf8'));
+    delete raw.sig; // drop the shipped signature; every file is re-signed below with the test key
     if (raw.member === 'claude-main') {
       raw.protected_actions = [...raw.protected_actions, 'summon.initiate'];
       raw.co_sign.actions = [...raw.co_sign.actions, 'summon.initiate'];
     }
-    writeFileSync(join(dir, f), JSON.stringify(raw));
+    const sig = signMandate(Mandate.parse(raw), priv);
+    writeFileSync(join(dir, f), JSON.stringify({ ...raw, sig }));
   }
-  return dir;
+  return { dir, pub };
 }
 
 async function main(): Promise<void> {
@@ -73,9 +88,11 @@ async function main(): Promise<void> {
     execute: (ctx, command) => executeCommand(ctx, command, deps),
   };
 
-  const dir = protectedMandateDir();
-  const previous = process.env.PLAYROOM_MANDATES_DIR;
+  const { dir, pub } = protectedMandateDir();
+  const previousDir = process.env.PLAYROOM_MANDATES_DIR;
+  const previousPub = process.env.PLAYROOM_MANDATE_PUBKEY;
   process.env.PLAYROOM_MANDATES_DIR = dir;
+  process.env.PLAYROOM_MANDATE_PUBKEY = pub; // verify the re-signed mandates under the throwaway key
   resetMandateCache();
 
   const roomIds: string[] = [];
@@ -150,8 +167,10 @@ async function main(): Promise<void> {
       await pool.query('DELETE FROM room_members WHERE room_id = $1', [roomId]);
       await pool.query('DELETE FROM rooms WHERE id = $1', [roomId]);
     }
-    if (previous === undefined) delete process.env.PLAYROOM_MANDATES_DIR;
-    else process.env.PLAYROOM_MANDATES_DIR = previous;
+    if (previousDir === undefined) delete process.env.PLAYROOM_MANDATES_DIR;
+    else process.env.PLAYROOM_MANDATES_DIR = previousDir;
+    if (previousPub === undefined) delete process.env.PLAYROOM_MANDATE_PUBKEY;
+    else process.env.PLAYROOM_MANDATE_PUBKEY = previousPub;
     resetMandateCache();
     rmSync(dir, { recursive: true, force: true });
     await pool.end();

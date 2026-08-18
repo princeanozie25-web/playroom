@@ -1,21 +1,56 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 
-// Mandate loading and hashing. Bible §9.1 (document), §9.5 (mandates as code).
+// Mandate loading, hashing, signing and verification. Bible §9.1 (document), §9.2 (the
+// sig_valid() branch), §9.5 (mandates as code), §4.1 (Ed25519, custodial keys in v1).
 //
-// This is the whole of the fabric today, and that is deliberate: S2.1 replaces the
-// INTERNALS of this package — signatures, replay protection, the counterparties and
-// limits branches — rather than introducing a package. The same reasoning the Bible
-// gives for packages/hosts/ existing at P2 with one occupant (§13).
+// This is the whole of the fabric today, and that is deliberate: S2.1 replaced the INTERNALS
+// of this package — signatures and their enforcement — rather than introducing a package. The
+// same reasoning the Bible gives for packages/hosts/ existing at P2 with one occupant (§13).
 
-// NO `sig` FIELD. Mandates are unsigned in v0 and the field is OMITTED, not stubbed
-// with a fake `ed25519:` string. A placeholder signature is worse than none: it makes
-// a document look verified, and every reader downstream — including a future
-// sig_valid() — has to know it is a lie. Omit, never stub. Bible §9.2's first branch
-// (`not mandate.sig_valid()`) therefore has nothing to check yet and is absent rather
-// than faked; S2.1 adds signing and the branch together.
+// ── THE TRUST ROOT (Bible §4.1) ──
+//
+// The one public key every reader verifies against — Ed25519, SPKI, DER, base64. Committing the
+// PUBLIC half is the whole point: runtime, CI and tests establish a mandate's authenticity with
+// NO secret, so a forged or edited mandate fails `verifyMandateSig` on every machine, and prod
+// enforces authenticity with nothing but this constant and the signed files it ships with.
+//
+// The PRIVATE half signs, and lives NOWHERE in this tree: a local `.env` for the signing script
+// (scripts/sign-mandates.ts) and, for CI re-signing, a secret. This is a custodial BOOTSTRAP key
+// (§4.1: "custodial keys in v1"); mandates/README.md records how Prince rotates it for
+// production — generate a new pair, replace this constant, re-sign, deploy. Because the runtime
+// only ever VERIFIES, rotation touches this line and the signatures, never the running servers'
+// secrets.
+export const TRUSTED_MANDATE_PUBKEY =
+  'MCowBQYDK2VwAyEAZmJL35FBiszAjTkkW5ffqGPQA2dnnGSSiZZR7lBAqGU=';
+
+/**
+ * The public key `loadMandates` actually verifies against: the committed
+ * {@link TRUSTED_MANDATE_PUBKEY} unless `PLAYROOM_MANDATE_PUBKEY` overrides it.
+ *
+ * The override is an OPERATOR affordance on exactly the same footing as `PLAYROOM_MANDATES_DIR`:
+ * whoever can set the environment already decides WHICH mandates load at all, so trusting them to
+ * name the key those mandates were signed with adds no reachable attack surface. What it buys is
+ * real: key ROTATION becomes a config change (publish the new public key, ship re-signed mandates
+ * — no rebuild, §4.1), and a test can verify re-signed mandates under a throwaway key. The
+ * DEFAULT — env unset — is the whole point of S2.1: authenticity established from the committed
+ * tree alone, with no secret anywhere near a serving machine.
+ */
+function trustedMandatePubKey(): string {
+  return process.env.PLAYROOM_MANDATE_PUBKEY || TRUSTED_MANDATE_PUBKEY;
+}
+
+// The `sig` field is a SIBLING of the mandate payload, never a field of it. `loadMandates`
+// splits it off before the strict parse below, so three things stay true at once: the schema
+// remains the ten fields it understands; `mandateHash` stays over the payload, so every hash
+// ever recorded is still stable; and a `sig` smuggled INTO the payload is rejected by
+// `.strict()` rather than silently covered by the hash or mistaken for authenticity. A mandate
+// is signed over the SAME canonical bytes the hash is taken over — the payload, keys sorted,
+// without the signature that does not yet exist when those bytes are computed. (Before S2.1 the
+// field was OMITTED entirely; the ban on a placeholder `ed25519:` string still holds — a
+// document either carries a real signature or none, never a fake one.)
 export const Mandate = z
   .object({
     mandate_id: z.string().regex(/^mnd_/, 'mandate_id must carry the mnd_ prefix'),
@@ -43,16 +78,25 @@ export const Mandate = z
   .strict(); // an unknown field is a mandate we do not understand — reject it
 export type Mandate = z.infer<typeof Mandate>;
 
-/** A mandate plus the hash of the document it was loaded from. */
+/** A mandate, the hash of the document it was loaded from, and whether its signature verified. */
 export interface LoadedMandate {
   mandate: Mandate;
   /** sha256 over canonically-serialised JSON, prefixed `sha256:` per Bible §9.3. */
   hash: string;
+  /**
+   * Did this document's `sig` verify against {@link TRUSTED_MANDATE_PUBKEY}? The evaluator
+   * BLOCKs a mandate with `sig_valid: false` before any other check (evaluate.ts §0): an
+   * unsigned, tampered or wrongly-keyed document carries no authority, whatever it claims about
+   * scope or expiry. Established at LOAD, from the file on disk — never carried over a wire and
+   * never trusted from a caller.
+   */
+  sig_valid: boolean;
 }
 
 // Canonical serialisation: keys sorted at every level, no incidental whitespace. Two
 // files that differ only in key order or formatting must hash identically, or the hash
-// records the editor rather than the authority.
+// records the editor rather than the authority. The signature is taken over these same bytes,
+// so signing and hashing agree by construction — one serialiser, not two that could drift.
 function canonicalise(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
   if (Array.isArray(value)) return `[${value.map(canonicalise).join(',')}]`;
@@ -64,6 +108,50 @@ function canonicalise(value: unknown): string {
 
 export function mandateHash(mandate: Mandate): string {
   return `sha256:${createHash('sha256').update(canonicalise(mandate)).digest('hex')}`;
+}
+
+/**
+ * Sign a mandate payload with an Ed25519 private key (PKCS8 DER, base64), returning the
+ * `ed25519:<base64>` string that becomes the document's `sig`.
+ *
+ * The SIGNING counterpart of {@link verifyMandateSig}: the two share {@link canonicalise}, so
+ * the bytes signed here are exactly the bytes checked there — signing and verification cannot
+ * disagree about what "the document" is. Used by scripts/sign-mandates.ts; the RUNTIME never
+ * signs, it only verifies, which is why the private key need not exist on a serving machine.
+ */
+export function signMandate(mandate: Mandate, privateKeyB64: string): string {
+  const key = createPrivateKey({
+    key: Buffer.from(privateKeyB64, 'base64'),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  const signature = sign(null, Buffer.from(canonicalise(mandate), 'utf8'), key);
+  return `ed25519:${signature.toString('base64')}`;
+}
+
+/**
+ * Verify a mandate's `sig` against a trusted public key (SPKI DER, base64; the committed
+ * {@link TRUSTED_MANDATE_PUBKEY} by default).
+ *
+ * Returns a boolean and NEVER throws. A wrong prefix, a malformed signature, a malformed key —
+ * all resolve to `false`, because a document that CANNOT be checked is exactly as unauthentic as
+ * one that fails the check, and a verifier that threw would turn a forged mandate into a crashed
+ * loader (a denial of service in place of a clean BLOCK). Deny-by-default extends to the failure
+ * of verification itself.
+ */
+export function verifyMandateSig(
+  mandate: Mandate,
+  sig: string,
+  pub: string = TRUSTED_MANDATE_PUBKEY,
+): boolean {
+  if (!sig.startsWith('ed25519:')) return false;
+  try {
+    const sigBytes = Buffer.from(sig.slice('ed25519:'.length), 'base64');
+    const key = createPublicKey({ key: Buffer.from(pub, 'base64'), format: 'der', type: 'spki' });
+    return verify(null, Buffer.from(canonicalise(mandate), 'utf8'), key, sigBytes);
+  } catch {
+    return false;
+  }
 }
 
 // mandates/ lives at the repo root. Resolved from cwd against a candidate list rather
@@ -91,22 +179,51 @@ function defaultMandatesDir(): string {
 }
 
 /**
+ * Split a raw parsed document into its signature and the payload the schema validates.
+ *
+ * A mandate file is `{ ...payload, sig }`. The `sig` is peeled off HERE, before the strict
+ * parse, so the schema never sees it and the hash never covers it. A non-object (a JSON `null`,
+ * array or scalar) is passed through untouched for the strict parse to reject with its own
+ * precise message, rather than crashing a destructure.
+ */
+function splitSignature(raw: unknown): { sig: string | undefined; payload: unknown } {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { sig: undefined, payload: raw };
+  }
+  const { sig, ...payload } = raw as Record<string, unknown>;
+  return { sig: typeof sig === 'string' ? sig : undefined, payload };
+}
+
+/**
  * Load every mandate under `mandates/`, keyed by member id.
  *
  * A malformed document THROWS rather than being skipped. A skipped mandate is an
  * absent mandate, an absent mandate evaluates to BLOCK, and a member silently losing
  * all authority because a comma moved is a failure mode nobody would debug. Loud at
  * boot beats mysterious at runtime.
+ *
+ * An INVALID or ABSENT signature, by contrast, does NOT throw — it is recorded as
+ * `sig_valid: false`. Refusing to load an unauthentic mandate would mean the evaluator never
+ * receives one, which makes its SIGNATURE_INVALID branch dead code: a fail-closed check nothing
+ * can reach is untestable and unfalsifiable. The loader's job is to report authenticity; the
+ * evaluator's job is to refuse on it (deny-by-default, per member, per action).
  */
 export function loadMandates(dir: string = defaultMandatesDir()): Map<string, LoadedMandate> {
   const out = new Map<string, LoadedMandate>();
+  const pub = trustedMandatePubKey(); // resolved once — the trust root does not change per file
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
     const raw: unknown = JSON.parse(readFileSync(resolve(dir, file), 'utf8'));
-    const parsed = Mandate.safeParse(raw);
+    const { sig, payload } = splitSignature(raw);
+    const parsed = Mandate.safeParse(payload);
     if (!parsed.success) {
       throw new Error(`mandates/${file} is not a valid mandate: ${parsed.error.message}`);
     }
-    out.set(parsed.data.member, { mandate: parsed.data, hash: mandateHash(parsed.data) });
+    const sig_valid = sig !== undefined && verifyMandateSig(parsed.data, sig, pub);
+    out.set(parsed.data.member, {
+      mandate: parsed.data,
+      hash: mandateHash(parsed.data),
+      sig_valid,
+    });
   }
   return out;
 }

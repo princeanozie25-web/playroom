@@ -16,12 +16,13 @@ export type Decision = 'ALLOW' | 'CO_SIGN' | 'BLOCK';
  * An OPEN string on the wire (see CONTRIBUTING: closed unions for what you dispatch
  * on, open strings for what will grow) — but a closed union HERE, inside the
  * evaluator, because this is precisely the place that dispatches on it and controls
- * both ends. S2.1 adds `REPLAY`, `ROSTER_VIOLATION`, `LIMIT_EXCEEDED`,
- * `SIGNATURE_INVALID`.
+ * both ends. S2.1 adds `SIGNATURE_INVALID` (now present, below); `REPLAY` and
+ * `LIMIT_EXCEEDED` stay reserved for replay protection and S2.7 limits.
  */
 export type ReasonCode =
   | 'ALLOWED_IN_SCOPE'
   | 'NO_MANDATE'
+  | 'SIGNATURE_INVALID'
   | 'MANDATE_EXPIRED'
   | 'OUT_OF_SCOPE'
   | 'ROSTER_VIOLATION'
@@ -53,6 +54,10 @@ export interface Verdict {
  * "fine" is indistinguishable from an enforced one in a test and in a demo, which is the
  * RT-001 mistake at the policy layer. Their position is held by the comments below so S2.1
  * inserts rather than reorders.
+ *
+ * S2.1 ALSO added position 0 — authenticity (`sig_valid`) — ahead of every branch below,
+ * because expiry, scope, roster and protection are all fields of a document whose signature
+ * must verify before a single one of them can be believed. See §0.
  *
  * `counterparties` was the third of those until S1.1b gave rooms a roster — see branch 3.
  *
@@ -100,6 +105,18 @@ export function evaluate(
   const { mandate: m, hash } = mandate;
   const base = { effective_mandate_hash: hash, policy_version: m.policy_version };
 
+  // 0. AUTHENTICITY — the root question, asked before anything the document merely CLAIMS. A
+  //    mandate whose signature does not verify against the trust root (mandate.ts) is not a
+  //    mandate: it is a JSON file asserting authority without the key that confers it, and its
+  //    member, scope, expiry and principal are untrustworthy in the same breath. It is refused
+  //    ahead of standing (expiry/scope/roster) and ahead of the request (protected/limits) for
+  //    the same RA-007 reason scope precedes protection: never let an unauthentic document reach
+  //    a branch that could ALLOW or CO_SIGN. The hash is still surfaced — it names WHICH document
+  //    was rejected, without trusting a word inside it. Bible §4.1, §9.2 (first branch).
+  if (!mandate.sig_valid) {
+    return { decision: 'BLOCK', reason_code: 'SIGNATURE_INVALID', required_signer: null, ...base };
+  }
+
   // A mandate held by someone else grants this member nothing. Loading is keyed by
   // member so this should be unreachable — which is exactly why it is checked, rather
   // than trusted to a Map lookup that a later refactor could widen.
@@ -107,7 +124,8 @@ export function evaluate(
     return { decision: 'BLOCK', reason_code: 'NO_MANDATE', required_signer: null, ...base };
   }
 
-  // 1. Expiry. (S2.1 adds `|| !sig_valid()` here, once mandates are signed.)
+  // 1. Expiry. (Authenticity — `sig_valid` — is checked above at §0, ahead of expiry: a forged
+  //    mandate must never be judged on, or saved by, the expiry it claims for itself.)
   if (new Date(m.expires).getTime() <= now.getTime()) {
     return { decision: 'BLOCK', reason_code: 'MANDATE_EXPIRED', required_signer: null, ...base };
   }
