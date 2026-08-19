@@ -47,6 +47,7 @@ import {
   HISTORY_PAGE_MAX,
 } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
+import { BackgroundWork } from './background.js';
 import { handleMcpRequest } from './mcp.js';
 import { chainCommitmentEvents } from './audit.js';
 import {
@@ -73,6 +74,7 @@ import {
   leaseAllows,
   isLeaseToken,
 } from './leases.js';
+import { recordCheck, roomFacts } from './facts.js';
 import { downgradeInterrupt } from './interrupts.js';
 import { activeBriefing } from './briefings.js';
 import { activeDocuments } from './documents.js';
@@ -363,6 +365,10 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   const pool: Pool | null = databaseUrl ? makePool(databaseUrl) : null;
   const bus = new RoomBus();
   const adapterFactory = opts.adapterFactory ?? createAdapter;
+  const background = new BackgroundWork((label, error) => {
+    app.log.error({ err: error, background_work: label }, `${label} failed`);
+  });
+  let anchor: ReturnType<typeof setInterval> | undefined;
 
   const db = (): Pool => {
     if (!pool) throw new Error('DATABASE_URL is not configured');
@@ -382,6 +388,7 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     log: app.log,
     adapterFactory,
     execute: (ctx, command) => executeCommand(ctx, command, deps),
+    defer: (label, task) => background.run(label, task),
   };
 
   // ── SLIVE-N1: THE /redeem THROTTLE ──────────────────────────────────────────────────────────
@@ -474,6 +481,15 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   app.register(fastifyWebsocket);
 
   app.addHook('onClose', async () => {
+    if (anchor) clearInterval(anchor);
+    background.stop();
+    const drained = await background.drain(30_000);
+    if (!drained) {
+      app.log.warn(
+        { pending_background_work: background.size },
+        'background work did not drain before the shutdown deadline',
+      );
+    }
     if (pool) await pool.end();
   });
 
@@ -504,7 +520,7 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   if (opts.warmOnBoot) {
     app.addHook('onReady', async () => {
       if (!pool) return;
-      void warmUp({ pool, adapterFactory, log: app.log });
+      background.run('adapter warm-up', () => warmUp({ pool, adapterFactory, log: app.log }));
     });
   }
 
@@ -513,14 +529,11 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   // next repairs it, so it can never break a decision. `unref` keeps the timer from holding the process
   // open, and onClose stops it so a closed server (every test that starts one) leaves nothing running.
   if (opts.anchorIntervalMs && opts.anchorIntervalMs > 0) {
-    const anchor = setInterval(() => {
+    anchor = setInterval(() => {
       if (!pool) return;
-      void chainCommitmentEvents(pool).catch((err) =>
-        app.log.error({ err }, 'audit anchor failed'),
-      );
+      background.run('audit anchor', () => chainCommitmentEvents(pool));
     }, opts.anchorIntervalMs);
     anchor.unref();
-    app.addHook('onClose', async () => clearInterval(anchor));
   }
 
   // Routes live inside a plugin registered after @fastify/websocket so the
@@ -1199,12 +1212,24 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         typeof b.client_msg_id === 'string' && b.client_msg_id.length <= 128
           ? b.client_msg_id
           : `node-${randomUUID()}`;
+      // C3: assemble this room's facts from the log (the latest check per name) and hand them to the gate,
+      // so a grant gated on `requires: [tests_passed]` resolves against what actually happened. Computed by
+      // the trusted caller, NOT claimed by the node — the body still says only what it wants, never a fact.
+      const facts = await roomFacts(db(), roomId);
       // mode 'bridged' (ADR-004, first live use): this request originates from a Local Node bridged to a
       // machine, distinct from the 'connected' door. Identity is the lease's member; the body says only what,
       // never who. requestAction stays the sole decision constructor and still executes nothing.
       const decided = await executeCommand(
         { actorId: lease.member_id, principalId: lease.principal_id, mode: 'bridged' },
-        { kind: 'requestAction', roomId, clientMsgId, subject: lease.member_id, action, resource },
+        {
+          kind: 'requestAction',
+          roomId,
+          clientMsgId,
+          subject: lease.member_id,
+          action,
+          resource,
+          facts,
+        },
         deps,
       );
       if (!decided.ok) {
@@ -1222,6 +1247,68 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         // The node runs the op only on ALLOW; a CO_SIGN is polled at /rooms/:id/decisions/:id like any other.
         poll_after_ms: decided.decisionId ? DECISION_POLL_HINT_MS : null,
       };
+    });
+
+    // POST /rooms/:id/checks { name, passed } → a node reports a check result (C3, ADR-014). Authenticated by
+    // the LEASE token — only a node with a live lease may report — and recorded with the member + lease as
+    // provenance. The report becomes a FACT (`<name>_passed` when the latest report passed), which the
+    // node-op gate reads: this is how "no push to main until tests pass" is established, not claimed.
+    fastify.post('/rooms/:id/checks', async (req, reply) => {
+      const roomId = (req.params as { id: string }).id;
+      const token = bearerToken(req);
+      if (!token || !isLeaseToken(token)) {
+        reply.code(401);
+        return { type: 'error', code: 'lease_required', message: 'a lease token is required' };
+      }
+      const lease = await verifyLease(db(), token);
+      if (!lease) {
+        reply.code(401);
+        return { type: 'error', code: 'lease_invalid', message: 'lease is not live' };
+      }
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const name = b.name;
+      if (
+        typeof name !== 'string' ||
+        name.length < 1 ||
+        name.length > 64 ||
+        typeof b.passed !== 'boolean'
+      ) {
+        reply.code(400);
+        return {
+          type: 'error',
+          code: 'check_malformed',
+          message: 'name (string ≤64) and passed (boolean) are required',
+        };
+      }
+      // A lease carries no room binding (it is a member-scoped host credential), so a live lease alone must
+      // not let a node write a fact into ANY room — only the rooms its member belongs to. Without this, a
+      // member of room A could flip room B's `tests_passed` and open a gate B's own members are waiting on.
+      // Keyed on the reporting lease's member, and 404 (not 403) for a non-member — the room-not-found
+      // silence the rest of the file uses, so a check-report is no membership oracle either.
+      const access = await roomAccess(db(), roomId, lease.member_id);
+      if (!access.room_exists || !access.is_member) {
+        reply.code(404).send(roomNotFound(roomId));
+        return;
+      }
+      await recordCheck(db(), {
+        roomId,
+        name,
+        passed: b.passed,
+        reportedBy: lease.member_id,
+        leaseId: lease.lease_id,
+      });
+      app.log.info(
+        {
+          room_id: roomId,
+          member: lease.member_id,
+          lease: lease.lease_id,
+          check: name,
+          passed: b.passed,
+        },
+        'node reported a check',
+      );
+      reply.code(201);
+      return { room_id: roomId, name, passed: b.passed };
     });
 
     // POST /ws-ticket { room_id } → a single-use ticket for the authenticated member (S1.3c).
@@ -2409,6 +2496,10 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           // one were indistinguishable from every angle. Context added so the next
           // one is greppable by room.
           .catch((err) => app.log.error({ err, room_id: roomId }, 'send failed'));
+        // WebSocket event listeners are not awaited by Fastify. Own the queued command explicitly
+        // so shutdown drains co-sign interrupts and other work that continues after its first event
+        // has already reached the client, before the PostgreSQL pool is ended.
+        background.own('websocket frame', sendQueue);
       });
 
       // Heartbeat: ping every 15s, terminate a socket that missed the last pong.

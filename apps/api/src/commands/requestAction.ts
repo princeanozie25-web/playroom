@@ -47,7 +47,17 @@ export type RequestActionResult =
 export async function requestActionCommand(
   deps: CommandDeps,
   ctx: CommandContext,
-  input: { roomId: string; clientMsgId: string; subject: string; action: string; resource: string },
+  input: {
+    roomId: string;
+    clientMsgId: string;
+    subject: string;
+    action: string;
+    resource: string;
+    // C3: the TRUE facts the caller assembled from history (e.g. `tests_passed`). Passed to the pure
+    // evaluator so a host grant's `requires` can be met. Absent means no fact holds — a conditional grant
+    // then BLOCKs, which is deny-by-default for a condition nobody established.
+    facts?: readonly string[];
+  },
 ): Promise<RequestActionResult> {
   // ── THE SUBJECT MUST BE JUSTIFIED, NOT ASSERTED (S12-N2, closed) ──────────────────────
   //
@@ -101,6 +111,7 @@ export async function requestActionCommand(
     mandate,
     undefined,
     roster,
+    input.facts,
   );
   const durationMs = Number((performance.now() - t0).toFixed(3));
 

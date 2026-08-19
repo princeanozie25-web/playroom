@@ -1017,3 +1017,133 @@ describe('the execution gate — host operations (C1, ADR-012)', () => {
     });
   }
 });
+
+// ── C3 — AUTHORITY THAT DEPENDS ON HISTORY (the facts object, ADR-014) ────────────────────────────
+//
+// A host grant can carry `requires: [factKey]`; the caller assembles the true facts from the event log and
+// passes them to evaluate, which stays PURE (a membership test, no I/O). A grant whose resource matches but
+// whose facts are unmet is BLOCK CONDITION_UNMET — "not yet", distinct from OUT_OF_SCOPE's "never". The Drift
+// rail: a push to `main` gated on `tests_passed` is refused until the fact holds, then resolves to CO_SIGN.
+const IN_ROOM = ['claude-main', 'prince'];
+const C3M = () =>
+  loaded({
+    host_scope: [
+      { action: 'git.push', resource: 'refs/heads/feature/*' }, // unconditional
+      { action: 'fs.write', resource: 'workspace/**', requires: ['tests_passed'] }, // conditional allow
+      { action: 'fs.read', resource: '**', requires: ['a', 'b'] }, // needs TWO facts
+    ],
+    host_protected: [
+      { action: 'git.push', resource: 'refs/heads/main', requires: ['tests_passed'] }, // conditional protected
+    ],
+  });
+
+describe('the facts object — temporal conditions (C3, ADR-014)', () => {
+  const ev = (type: string, resource: string, facts: readonly string[]) =>
+    evaluate({ type, resource }, 'claude-main', C3M(), NOW, IN_ROOM, facts);
+
+  it('a conditional protected push to main is CONDITION_UNMET until the fact holds, then CO_SIGN', () => {
+    expect(ev('git.push', 'refs/heads/main', [])).toMatchObject({
+      decision: 'BLOCK',
+      reason_code: 'CONDITION_UNMET',
+      required_signer: null,
+    });
+    expect(ev('git.push', 'refs/heads/main', ['tests_passed'])).toMatchObject({
+      decision: 'CO_SIGN',
+      reason_code: 'PROTECTED_ACTION',
+      required_signer: 'principal:prince',
+    });
+  });
+
+  it('a conditional allow is CONDITION_UNMET without the fact, ALLOW with it', () => {
+    expect(ev('fs.write', 'workspace/x.ts', [])).toMatchObject({ reason_code: 'CONDITION_UNMET' });
+    expect(ev('fs.write', 'workspace/x.ts', ['tests_passed'])).toMatchObject({ decision: 'ALLOW' });
+  });
+
+  it('the condition only bites when the RESOURCE matched — an out-of-scope path is still RESOURCE_OUT_OF_SCOPE', () => {
+    // /etc/passwd matches no fs.write pattern, so the unmet condition is irrelevant: it is refused for scope.
+    expect(ev('fs.write', '/etc/passwd', ['tests_passed'])).toMatchObject({
+      reason_code: 'RESOURCE_OUT_OF_SCOPE',
+    });
+  });
+
+  it('an unconditional grant ignores facts — the C1 behaviour is unchanged', () => {
+    expect(ev('git.push', 'refs/heads/feature/x', [])).toMatchObject({ decision: 'ALLOW' });
+  });
+
+  it('ALL required facts must hold — a subset does not satisfy the grant', () => {
+    expect(ev('fs.read', 'anything', ['a'])).toMatchObject({ reason_code: 'CONDITION_UNMET' });
+    expect(ev('fs.read', 'anything', ['a', 'b'])).toMatchObject({ decision: 'ALLOW' });
+    // Extra facts are harmless — it is a subset test, not equality.
+    expect(ev('fs.read', 'anything', ['a', 'b', 'c'])).toMatchObject({ decision: 'ALLOW' });
+  });
+
+  it('a satisfiable grant beats a waiting one — an unconditional allow wins over a conditional block', () => {
+    // Two grants for the same op: one conditional (unmet), one unconditional. The op still ALLOWs.
+    const m = loaded({
+      host_scope: [
+        { action: 'fs.write', resource: 'workspace/**', requires: ['never'] },
+        { action: 'fs.write', resource: 'workspace/**' },
+      ],
+    });
+    const v = evaluate(
+      { type: 'fs.write', resource: 'workspace/x' },
+      'claude-main',
+      m,
+      NOW,
+      IN_ROOM,
+      [],
+    );
+    expect(v.decision).toBe('ALLOW');
+  });
+
+  it('facts default to none — a caller that passes no facts cannot satisfy a condition (deny by default)', () => {
+    const v = evaluate(
+      { type: 'fs.write', resource: 'workspace/x' },
+      'claude-main',
+      C3M(),
+      NOW,
+      IN_ROOM,
+    );
+    expect(v.reason_code).toBe('CONDITION_UNMET');
+  });
+
+  it('an overlapping UNCONDITIONAL scope grant cannot steal a waiting protected push (bypass fix)', () => {
+    // The canonical shape "may push any branch, but main requires tests": a broad unconditional `refs/heads/**`
+    // ALONGSIDE a conditional protected `refs/heads/main`. Before the fix the broad grant matched main and
+    // returned ALLOW before the condition could bite — a push to protected main landing with neither the tests
+    // nor the co-sign. Protection must win even while it waits.
+    const m = loaded({
+      host_scope: [{ action: 'git.push', resource: 'refs/heads/**' }], // unconditional, ALSO covers main
+      host_protected: [
+        { action: 'git.push', resource: 'refs/heads/main', requires: ['tests_passed'] },
+      ],
+    });
+    const push = (facts: readonly string[]) =>
+      evaluate(
+        { type: 'git.push', resource: 'refs/heads/main' },
+        'claude-main',
+        m,
+        NOW,
+        IN_ROOM,
+        facts,
+      );
+    // No tests yet: the condition holds the gate shut — CONDITION_UNMET, not a silent ALLOW.
+    expect(push([])).toMatchObject({ decision: 'BLOCK', reason_code: 'CONDITION_UNMET' });
+    // Tests pass: the protected grant applies and CO_SIGNs — protection still outranks the scope grant.
+    expect(push(['tests_passed'])).toMatchObject({
+      decision: 'CO_SIGN',
+      reason_code: 'PROTECTED_ACTION',
+    });
+    // A branch the protected pattern does NOT cover is unaffected — the unconditional scope still ALLOWs it.
+    expect(
+      evaluate(
+        { type: 'git.push', resource: 'refs/heads/feature/x' },
+        'claude-main',
+        m,
+        NOW,
+        IN_ROOM,
+        [],
+      ),
+    ).toMatchObject({ decision: 'ALLOW' });
+  });
+});

@@ -86,6 +86,7 @@ export function executeCommand(
     subject: string;
     action: string;
     resource: string;
+    facts?: readonly string[];
   },
   deps: CommandDeps,
 ): Promise<RequestActionResult>;

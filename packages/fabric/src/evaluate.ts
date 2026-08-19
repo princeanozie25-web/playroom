@@ -33,7 +33,10 @@ export type ReasonCode =
   | 'RESOURCE_OUT_OF_SCOPE'
   // C1 — a `shell.*` command the mandate grants the member to run, but which matched no allowlist pattern.
   // CO_SIGN, not BLOCK: allowlist + co-sign the rest (Prince's ruling) — never a raw shell, but not a wall.
-  | 'SHELL_NOT_ALLOWLISTED';
+  | 'SHELL_NOT_ALLOWLISTED'
+  // C3 — a host grant matched the resource but a fact it `requires` did not hold (e.g. tests have not passed).
+  // BLOCK, distinct from a scope refusal: it means "not yet", not "never" — the condition, not the authority.
+  | 'CONDITION_UNMET';
 
 export interface ActionRequest {
   /** Action type. An ABSTRACT action (`pr.review`, `pr.merge`) matched against `scope` by type; OR a HOST op
@@ -103,6 +106,9 @@ function isHostAction(type: string): boolean {
   return HOST_ACTION_PREFIXES.some((p) => type.startsWith(p));
 }
 
+/** One host grant entry — a resource pattern for an action, optionally gated on facts (C3). */
+type HostGrant = { action: string; resource: string; requires?: readonly string[] };
+
 /**
  * Glob-match a host resource against a mandate pattern. `**` matches any run of characters INCLUDING `/`;
  * `*` matches within a single path segment (never `/`); every other character is literal. Anchored — the
@@ -143,6 +149,7 @@ function matchResourceGlob(resource: string, pattern: string): boolean {
 function evaluateHostOp(
   action: ActionRequest,
   m: Mandate,
+  facts: readonly string[],
   base: { effective_mandate_hash: string | null; policy_version: string | null },
 ): Verdict {
   const signer = m.co_sign.by === 'principal' ? m.principal : m.co_sign.by;
@@ -153,9 +160,16 @@ function evaluateHostOp(
   if (grants.length === 0 && protectedGrants.length === 0) {
     return { decision: 'BLOCK', reason_code: 'OUT_OF_SCOPE', required_signer: null, ...base };
   }
+
+  const resourceMatches = (g: HostGrant) => matchResourceGlob(action.resource, g.resource);
+  // C3: a grant APPLIES only when its resource matches AND every fact it `requires` holds. The caller
+  // assembled `facts` from the event log; here it is a pure membership test, so the evaluator stays pure.
+  const factsMet = (g: HostGrant) => (g.requires ?? []).every((k) => facts.includes(k));
+  const applies = (g: HostGrant) => resourceMatches(g) && factsMet(g);
+
   // Protected resource wins over an allowed one — checked first, so a push to a protected ref co-signs even
   // when a broader `host_scope` pattern would also have matched it.
-  if (protectedGrants.some((g) => matchResourceGlob(action.resource, g.resource))) {
+  if (protectedGrants.some(applies)) {
     return {
       decision: 'CO_SIGN',
       reason_code: 'PROTECTED_ACTION',
@@ -163,11 +177,31 @@ function evaluateHostOp(
       ...base,
     };
   }
-  if (grants.some((g) => matchResourceGlob(action.resource, g.resource))) {
+  // C3: a PROTECTED pattern that matched the resource but whose required facts are unmet GATES here — BEFORE a
+  // broader `host_scope` grant could ALLOW the same resource. Protection outranks scope even when its condition
+  // reads "not yet" (line 170-171 extended to the temporal case): the push to `main` waits for tests, it must
+  // not fall through to an overlapping `refs/heads/*`. Without this, an unconditional scope grant that also
+  // covers the protected resource silently steals ALLOW — the push lands with neither the tests nor the co-sign.
+  if (protectedGrants.some((g) => resourceMatches(g) && !factsMet(g))) {
+    return { decision: 'BLOCK', reason_code: 'CONDITION_UNMET', required_signer: null, ...base };
+  }
+  if (grants.some(applies)) {
     return { decision: 'ALLOW', reason_code: 'ALLOWED_IN_SCOPE', required_signer: null, ...base };
   }
-  // Granted type, unmatched resource. A shell command off the allowlist goes to a human rather than being
-  // refused outright; anything else (a write, a push) confined to its patterns is blocked outside them.
+
+  // C3: nothing applied. If a grant matched the RESOURCE but its facts were unmet, the only barrier is the
+  // temporal condition — say so, so the caller (and a human) can read "not yet" rather than "never". This is
+  // the Drift rail: a push to a protected ref granted `requires: [tests_passed]` reads CONDITION_UNMET until
+  // the fact holds, then resolves to its underlying verdict (here, CO_SIGN).
+  const resourceMatchedButUnmet = [...grants, ...protectedGrants].some(
+    (g) => resourceMatches(g) && !factsMet(g),
+  );
+  if (resourceMatchedButUnmet) {
+    return { decision: 'BLOCK', reason_code: 'CONDITION_UNMET', required_signer: null, ...base };
+  }
+
+  // Granted type, resource matched no grant at all. A shell command off the allowlist goes to a human rather
+  // than being refused outright; anything else (a write, a push) confined to its patterns is blocked outside.
   if (action.type.startsWith('shell.')) {
     return {
       decision: 'CO_SIGN',
@@ -190,6 +224,10 @@ export function evaluate(
   mandate: LoadedMandate | undefined,
   now: Date = new Date(),
   roomRoster?: readonly string[],
+  // C3 (ADR-014): the TRUE facts the caller assembled from history ("tests_passed", ...). A host grant's
+  // `requires` is satisfied only by a key present here. Absent/empty means no temporal condition can be met,
+  // so a conditional grant BLOCKs — deny-by-default extends to conditions. Every other branch ignores it.
+  facts: readonly string[] = [],
 ): Verdict {
   // A member with no mandate has no authority. Not "default authority", not "ask a
   // human" — none. This is the deny-by-default line at its bluntest (Bible §10).
@@ -279,7 +317,7 @@ export function evaluate(
   //     gate only decides; nothing here executes (RT-005), which is why closing invariant #7 end-to-end
   //     also needs the Local Node (C2) that runs an op only on this ALLOW and holds its revocable lease.
   if (isHostAction(action.type)) {
-    return evaluateHostOp(action, m, base);
+    return evaluateHostOp(action, m, facts, base);
   }
 
   // 4. (S2.1) replay protection — `if replayed(nonce, resource_hash) return BLOCK`.

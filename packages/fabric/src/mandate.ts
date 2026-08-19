@@ -83,17 +83,40 @@ export const Mandate = z
      * including `/`; `*` = within a single path segment): `fs.write` is confined to the paths it lists,
      * `git.push` to the refs it lists, `shell.exec` to the commands it lists. A member with no matching
      * pattern under a granted type is refused (fs/git) or escalated to a human (shell — see the evaluator).
+     *
+     * `requires` (C3, ADR-014) is the TEMPORAL condition: a list of fact keys that must ALL hold for the
+     * grant to apply. The caller assembles the facts from the event log and passes them to `evaluate` — so
+     * "may push to `main` only after tests pass" is expressible as `requires: ["tests_passed"]`, and a
+     * matched grant whose facts are unmet is BLOCKed with `CONDITION_UNMET` rather than silently ignored.
+     * Absent `requires` = unconditional (the C1 behaviour, unchanged).
      */
     host_scope: z
-      .array(z.object({ action: z.string().min(1), resource: z.string().min(1) }).strict())
+      .array(
+        z
+          .object({
+            action: z.string().min(1),
+            resource: z.string().min(1),
+            requires: z.array(z.string().min(1)).optional(),
+          })
+          .strict(),
+      )
       .optional(),
     /**
      * The host grants that require a human co-signature EVEN WHEN allowed — e.g. a push to `main`. A
      * resource matching a `host_protected` pattern is CO_SIGN (signer = `co_sign.by`), taking precedence
-     * over any `host_scope` match. The host-op counterpart of `protected_actions`.
+     * over any `host_scope` match. The host-op counterpart of `protected_actions`. Also carries `requires`
+     * (C3): a protected grant whose facts are unmet is BLOCKed, not co-signed — the condition gates first.
      */
     host_protected: z
-      .array(z.object({ action: z.string().min(1), resource: z.string().min(1) }).strict())
+      .array(
+        z
+          .object({
+            action: z.string().min(1),
+            resource: z.string().min(1),
+            requires: z.array(z.string().min(1)).optional(),
+          })
+          .strict(),
+      )
       .optional(),
     limits: z.record(z.number()),
     counterparties: z.string().min(1),
