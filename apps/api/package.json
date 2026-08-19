@@ -13,6 +13,7 @@
     "@playroom/fabric": "workspace:*",
     "@playroom/hosts": "workspace:*",
     "@playroom/shared": "workspace:*",
+    "@playroom/x-read": "workspace:*",
     "fastify": "^5.2.0",
     "pg": "^8.13.0",
     "web-push": "3.6.7"

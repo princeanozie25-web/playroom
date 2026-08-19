@@ -56,6 +56,9 @@ importers:
       '@playroom/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@playroom/x-read':
+        specifier: workspace:*
+        version: link:../../packages/x-read
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
