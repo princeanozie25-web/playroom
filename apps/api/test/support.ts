@@ -104,6 +104,9 @@ export async function startTestServer(
     // S2.1b: drive the /rooms/:id/actions throttle low so a test can burst one caller to a 429.
     actionRateMax?: number;
     actionRateWindowMs?: number;
+    // B2: drive the OAuth surface throttle low so a test can hammer /authorize/consent to a 429.
+    oauthRateMax?: number;
+    oauthRateWindowMs?: number;
     // A3: run the in-process audit anchor on a short interval so a test can watch a commitment get chained.
     anchorIntervalMs?: number;
   } = {},
@@ -117,6 +120,8 @@ export async function startTestServer(
     redeemRateWindowMs: opts.redeemRateWindowMs,
     actionRateMax: opts.actionRateMax,
     actionRateWindowMs: opts.actionRateWindowMs,
+    oauthRateMax: opts.oauthRateMax,
+    oauthRateWindowMs: opts.oauthRateWindowMs,
     anchorIntervalMs: opts.anchorIntervalMs,
   });
   await app.listen({ port: 0, host: '127.0.0.1' });

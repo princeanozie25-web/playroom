@@ -49,6 +49,18 @@ import {
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { handleMcpRequest } from './mcp.js';
 import { chainCommitmentEvents } from './audit.js';
+import {
+  registerClient,
+  getClient,
+  createAuthCode,
+  exchangeCode,
+  exchangeRefresh,
+  revokeOAuthToken,
+  verifyOAuthToken,
+  isOAuthAccessToken,
+  authorizationServerMetadata,
+  protectedResourceMetadata,
+} from './oauth.js';
 import { warmUp } from './warmup.js';
 import { makeScrubStream } from './scrub.js';
 import { authenticate, diagnoseCredential, type AuthFailure } from './credentials.js';
@@ -97,6 +109,15 @@ export interface BuildOptions {
    */
   actionRateMax?: number;
   actionRateWindowMs?: number;
+  /**
+   * B2: the IP-keyed throttle on the unauthenticated OAuth surfaces — POST /register (client creation) and
+   * POST /authorize/consent (which tries a presented `prm_` credential). Consent is a credential-guessing
+   * oracle and /register is a resource-exhaustion vector, so both are bounded per IP the same way /redeem is.
+   * Configurable so a test can drive it low; the default lets a real login flow retry a mistyped credential
+   * a handful of times without inconveniencing anyone.
+   */
+  oauthRateMax?: number;
+  oauthRateWindowMs?: number;
   /**
    * A3: how often (ms) to fold new commitment events into the tamper-evident audit chain, in-process.
    * Undefined or ≤0 disables it — the anchor is then a manual/cron concern (scripts/anchor-audit.ts), and
@@ -266,6 +287,60 @@ function frameRefusal(unrecognised: boolean, roomId: string): ServerErrorFrame {
   });
 }
 
+/** Escape text before it goes into HTML — the consent page reflects query params, which are untrusted. */
+function escapeHtml(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
+  );
+}
+
+/**
+ * The OAuth consent page (B2). Server-rendered, self-contained, no scripts. Every reflected value is escaped;
+ * the redirect_uri is validated against the client's registered set BEFORE this is ever produced, so the page
+ * cannot be turned into an open redirect or an injection surface. The credential input is a password field,
+ * POSTed in the body (never the URL) and never stored.
+ */
+function consentPage(p: {
+  clientName: string;
+  clientId: string;
+  redirectUri: string;
+  codeChallenge: string;
+  state: string;
+  scope: string;
+  error: string;
+}): string {
+  const h = escapeHtml;
+  // Name the destination the code will be sent to, so the resource owner can see WHERE their authorization
+  // goes before pasting a credential. redirect_uri is already validated against the client's registered set
+  // upstream; showing only its origin keeps a long path from crowding the sentence.
+  let dest = p.redirectUri;
+  try {
+    dest = new URL(p.redirectUri).origin;
+  } catch {
+    dest = p.redirectUri;
+  }
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Authorize · Playroom</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;color:#111;background:#fafafa}h1{font-size:1.2rem;margin:0 0 .75rem}.card{border:1px solid #e5e5e5;border-radius:14px;padding:1.5rem;background:#fff}p{line-height:1.5}code{background:#f0f0f0;padding:.1rem .3rem;border-radius:5px}input[name=credential]{width:100%;padding:.65rem;font-family:ui-monospace,monospace;border:1px solid #ccc;border-radius:9px;box-sizing:border-box;font-size:1rem}button{margin-top:1rem;padding:.65rem 1.3rem;border:0;border-radius:9px;background:#111;color:#fff;font-size:1rem;cursor:pointer}.err{color:#b00020;margin-top:.6rem;font-size:.95rem}.muted{color:#666;font-size:.92rem}.dest{margin-top:.4rem}</style></head><body><div class="card"><h1>Authorize ${h(p.clientName)}</h1><p class="muted"><strong>${h(p.clientName)}</strong> is asking to act in Playroom as your member, under your mandate. Paste a Playroom credential (it starts with <code>prm_</code>) to authorize it — the credential proves which member you are and is never stored.</p><p class="muted dest">On approval, an authorization code is sent to <code>${h(dest)}</code> (client <code>${h(p.clientId)}</code>). Authorize only if you started this from there.</p><form method="post" action="/authorize/consent"><input type="hidden" name="client_id" value="${h(p.clientId)}"><input type="hidden" name="redirect_uri" value="${h(p.redirectUri)}"><input type="hidden" name="code_challenge" value="${h(p.codeChallenge)}"><input type="hidden" name="state" value="${h(p.state)}"><input type="hidden" name="scope" value="${h(p.scope)}"><label class="muted" for="credential">Your Playroom credential</label><input id="credential" type="password" name="credential" placeholder="prm_…" autocomplete="off" autofocus>${p.error ? `<div class="err">${h(p.error)}</div>` : ''}<button type="submit">Authorize</button></form></div></body></html>`;
+}
+
+/**
+ * Response headers for the consent HTML (B2 review F4). The page is self-contained and script-free, so the
+ * CSP is maximally tight: no scripts at all, styles only from the inline <style>, forms may post only to our
+ * own origin, and the page may not be framed (anti-clickjacking on a credential form). `no-referrer` keeps the
+ * consent URL — which carries the PKCE challenge and state — out of the redirect target's Referer, and
+ * `no-store` keeps a credential-entry page out of shared caches. `nosniff` stops content-type games.
+ */
+function applyConsentHeaders(reply: { header(k: string, v: string): unknown }): void {
+  reply.header(
+    'content-security-policy',
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  );
+  reply.header('x-content-type-options', 'nosniff');
+  reply.header('referrer-policy', 'no-referrer');
+  reply.header('x-frame-options', 'DENY');
+  reply.header('cache-control', 'no-store');
+}
+
 export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: loggerOptions(opts),
@@ -349,6 +424,43 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     }
     return hits.length > actionMax;
   }
+
+  // ── B2: THE OAUTH SURFACE THROTTLE ────────────────────────────────────────────────────────────
+  //
+  // POST /authorize/consent presents a `prm_` credential to authenticate — a guessing oracle if left open —
+  // and POST /register creates a client row for anyone who asks. Both are UNAUTHENTICATED, so this is keyed
+  // on the IP (same sliding window as /redeem). It bounds credential-guessing and client-row flooding without
+  // touching the authenticated /token exchange, which is already gated by the single-use code and PKCE.
+  const oauthMax = opts.oauthRateMax ?? 30;
+  const oauthWindowMs = opts.oauthRateWindowMs ?? 10 * 60_000;
+  const oauthHits = new Map<string, number[]>();
+  function oauthThrottled(ip: string): boolean {
+    const now = Date.now();
+    const cutoff = now - oauthWindowMs;
+    const hits = (oauthHits.get(ip) ?? []).filter((t) => t > cutoff);
+    hits.push(now);
+    oauthHits.set(ip, hits);
+    if (oauthHits.size > 20_000) {
+      for (const [k, v] of oauthHits) if (v[v.length - 1] <= cutoff) oauthHits.delete(k);
+    }
+    return hits.length > oauthMax;
+  }
+
+  // OAuth /token and the consent form POST as application/x-www-form-urlencoded (OAuth 2.1), which Fastify
+  // does not parse by default. One content-type parser rather than a plugin dependency — it turns the form
+  // body into a plain object, the same shape a JSON body arrives as, so the OAuth handlers read `req.body`
+  // uniformly. A malformed body is a parse error (400), never a throw.
+  app.addContentTypeParser(
+    'application/x-www-form-urlencoded',
+    { parseAs: 'string' },
+    (_req, body, done) => {
+      try {
+        done(null, Object.fromEntries(new URLSearchParams(body as string)));
+      } catch (err) {
+        done(err as Error);
+      }
+    },
+  );
 
   app.register(fastifyWebsocket);
 
@@ -1320,6 +1432,195 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       };
     });
 
+    // ── OAuth 2.1 for the subscription login (B2, S4.1) ──────────────────────────────────────────────
+    //
+    // A native authorization-code + PKCE server so a Claude subscription gets a short-lived, revocable token
+    // instead of a pasted `prm_` credential. There is no login system yet, so the GRANT is a `prm_`
+    // credential presented ONCE at consent (Prince's ruling) — it proves which member the user is. The
+    // issuer is derived from the request, so it is right behind Fly's proxy (trustProxy) and on 127.0.0.1 in
+    // a test alike. Everything the /mcp door already governs is unchanged; this only mints the token that
+    // reaches it.
+    const issuerOf = (req: FastifyRequest): string => `${req.protocol}://${req.headers.host}`;
+
+    // Discovery (RFC 8414 / RFC 9728): a client reads these to find the endpoints and the resource.
+    fastify.get('/.well-known/oauth-authorization-server', async (req) =>
+      authorizationServerMetadata(issuerOf(req)),
+    );
+    fastify.get('/.well-known/oauth-protected-resource', async (req) => {
+      const issuer = issuerOf(req);
+      return protectedResourceMetadata(issuer, `${issuer}/mcp`);
+    });
+
+    // Dynamic Client Registration (RFC 7591). A PUBLIC client — redirect_uris required, no secret issued.
+    fastify.post('/register', async (req, reply) => {
+      if (oauthThrottled(req.ip)) {
+        app.log.warn({ ip: req.ip }, 'oauth: /register throttled');
+        reply.code(429);
+        return { error: 'temporarily_unavailable', error_description: 'too many requests' };
+      }
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const uris = Array.isArray(b.redirect_uris)
+        ? b.redirect_uris.filter((u): u is string => typeof u === 'string')
+        : [];
+      if (uris.length === 0) {
+        reply.code(400);
+        return { error: 'invalid_client_metadata', error_description: 'redirect_uris is required' };
+      }
+      const client = await registerClient(db(), {
+        redirect_uris: uris,
+        client_name: typeof b.client_name === 'string' ? b.client_name : undefined,
+      });
+      reply.code(201);
+      return {
+        client_id: client.client_id,
+        redirect_uris: client.redirect_uris,
+        client_name: client.client_name,
+        token_endpoint_auth_method: 'none',
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+      };
+    });
+
+    // The authorization endpoint — renders the consent page. Everything is validated BEFORE any HTML is
+    // produced: an unknown client, an unregistered redirect_uri, or a missing S256 challenge is refused, so
+    // the page can never become an open redirect or an injection surface.
+    fastify.get('/authorize', async (req, reply) => {
+      const q = req.query as Record<string, string | undefined>;
+      const client = q.client_id ? await getClient(db(), q.client_id) : null;
+      if (!client) {
+        reply.code(400);
+        return { error: 'invalid_client' };
+      }
+      const redirectUri = q.redirect_uri ?? '';
+      if (!client.redirect_uris.includes(redirectUri)) {
+        // NEVER redirect to an unregistered URI — that is the open redirect the allowlist exists to stop.
+        reply.code(400);
+        return {
+          error: 'invalid_request',
+          error_description: 'redirect_uri is not registered for this client',
+        };
+      }
+      if (q.response_type !== 'code' || q.code_challenge_method !== 'S256' || !q.code_challenge) {
+        const url = new URL(redirectUri);
+        url.searchParams.set('error', 'invalid_request');
+        url.searchParams.set(
+          'error_description',
+          'response_type=code and a PKCE S256 challenge are required',
+        );
+        if (q.state) url.searchParams.set('state', q.state);
+        reply.redirect(url.toString());
+        return;
+      }
+      reply.type('text/html; charset=utf-8');
+      applyConsentHeaders(reply);
+      return consentPage({
+        clientName: client.client_name ?? client.client_id,
+        clientId: client.client_id,
+        redirectUri,
+        codeChallenge: q.code_challenge,
+        state: q.state ?? '',
+        scope: q.scope ?? 'playroom',
+        error: '',
+      });
+    });
+
+    // The consent submit — the user presented a `prm_` credential. Verify it, mint a code bound to the
+    // member/principal it resolves to, and redirect back with the code. A bad credential re-renders the page
+    // with a generic error (it does not confirm whether the credential was real — the door's discipline).
+    fastify.post('/authorize/consent', async (req, reply) => {
+      if (oauthThrottled(req.ip)) {
+        // Bound credential-guessing here, before the credential is even looked at. Same 429 shape whether the
+        // credential would have been right or wrong, so a throttled attacker learns nothing from the response.
+        app.log.warn({ ip: req.ip }, 'oauth: /authorize/consent throttled');
+        reply.code(429);
+        return { error: 'temporarily_unavailable', error_description: 'too many requests' };
+      }
+      const b = (req.body ?? {}) as Record<string, string | undefined>;
+      const client = b.client_id ? await getClient(db(), b.client_id) : null;
+      const redirectUri = b.redirect_uri ?? '';
+      if (!client || !client.redirect_uris.includes(redirectUri) || !b.code_challenge) {
+        reply.code(400);
+        return { error: 'invalid_request' };
+      }
+      const auth = await authenticate(db(), b.credential);
+      if (!auth.ok) {
+        reply.type('text/html; charset=utf-8').code(401);
+        applyConsentHeaders(reply);
+        return consentPage({
+          clientName: client.client_name ?? client.client_id,
+          clientId: client.client_id,
+          redirectUri,
+          codeChallenge: b.code_challenge,
+          state: b.state ?? '',
+          scope: b.scope ?? 'playroom',
+          error: 'That credential was not accepted. Check it and try again.',
+        });
+      }
+      const code = await createAuthCode(db(), {
+        clientId: client.client_id,
+        memberId: auth.auth.member_id,
+        principalId: auth.auth.principal_id,
+        // Bind the granting credential so revoking it later cascades to the OAuth tokens (verifyOAuthToken joins it).
+        credentialId: auth.auth.credential_id,
+        codeChallenge: b.code_challenge,
+        redirectUri,
+        scope: b.scope,
+      });
+      const url = new URL(redirectUri);
+      url.searchParams.set('code', code);
+      if (b.state) url.searchParams.set('state', b.state);
+      reply.redirect(url.toString());
+    });
+
+    // The token endpoint — authorization_code (with PKCE) or refresh_token. Form-encoded per OAuth 2.1.
+    fastify.post('/token', async (req, reply) => {
+      const b = (req.body ?? {}) as Record<string, string | undefined>;
+      let result;
+      if (b.grant_type === 'authorization_code') {
+        if (!b.code || !b.code_verifier || !b.client_id || !b.redirect_uri) {
+          reply.code(400);
+          return {
+            error: 'invalid_request',
+            error_description: 'code, code_verifier, client_id and redirect_uri are required',
+          };
+        }
+        result = await exchangeCode(db(), {
+          code: b.code,
+          codeVerifier: b.code_verifier,
+          clientId: b.client_id,
+          redirectUri: b.redirect_uri,
+        });
+      } else if (b.grant_type === 'refresh_token') {
+        if (!b.refresh_token || !b.client_id) {
+          reply.code(400);
+          return {
+            error: 'invalid_request',
+            error_description: 'refresh_token and client_id are required',
+          };
+        }
+        result = await exchangeRefresh(db(), {
+          refreshToken: b.refresh_token,
+          clientId: b.client_id,
+        });
+      } else {
+        reply.code(400);
+        return { error: 'unsupported_grant_type' };
+      }
+      if (!result.ok) {
+        reply.code(400);
+        return { error: result.error, error_description: result.description };
+      }
+      reply.header('cache-control', 'no-store');
+      return result.tokens;
+    });
+
+    // Revocation (RFC 7009). Always 200 — an unknown token is not an error, and saying so would confirm it existed.
+    fastify.post('/revoke', async (req) => {
+      const b = (req.body ?? {}) as Record<string, string | undefined>;
+      if (b.token) await revokeOAuthToken(db(), b.token);
+      return {};
+    });
+
     // POST /mcp — the remote MCP server (B1). "Make the infrastructure disappear": a Claude subscription
     // drives a room through the SAME command layer as every other surface, reached now as MCP tools instead
     // of REST. Auth is identical to the SCC door — a Bearer credential resolves to a member — and the tools
@@ -1330,18 +1631,46 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // and hand the raw socket to a per-request transport bound to this identity. GET/DELETE (SSE sessions)
     // are not offered — a room's state lives in Postgres, so there is no session to stream or to end.
     fastify.post('/mcp', async (req, reply) => {
-      const auth = await authenticate(db(), bearerToken(req));
-      if (!auth.ok) {
-        app.log.warn({ code: auth.failure }, 'mcp: credential refused');
-        reply.code(401);
-        return credentialRefusal(auth.failure);
+      // TWO credentials reach this door now: an OAuth ACCESS token (B2, the subscription login) or a raw
+      // `prm_` credential (B1, the static token). Both resolve to the SAME (member, principal); identity is
+      // DERIVED either way, and nothing in the body changes who the caller is. The refusal is uniform — an
+      // absent or invalid token of either kind gets one 401, never a hint about which it was.
+      const token = bearerToken(req);
+      let identity: { memberId: string; principalId: string; throttleKey: string } | null = null;
+      if (token && isOAuthAccessToken(token)) {
+        const oa = await verifyOAuthToken(db(), token);
+        if (oa) {
+          // Throttle keyed on the MEMBER, not the client: otherwise one credential buys N rate buckets by
+          // registering N clients (the B2 review's escape), and one hosted client would share a single bucket
+          // across all subscribers. Per-member bounds the denial-of-wallet the way S2.1b intends.
+          identity = {
+            memberId: oa.member_id,
+            principalId: oa.principal_id,
+            throttleKey: `member:${oa.member_id}`,
+          };
+        }
+      } else {
+        const auth = await authenticate(db(), token);
+        if (auth.ok) {
+          identity = {
+            memberId: auth.auth.member_id,
+            principalId: auth.auth.principal_id,
+            throttleKey: auth.auth.credential_id,
+          };
+        }
       }
-      // THE SAME per-credential bound the SCC door applies (S2.1b). B1 introduces exactly the caller that
-      // control exists for — a looping autonomous subscription on an internet-facing surface — so the MCP
-      // door must not grant a governed-request rate the action door refuses. Applied per request, it bounds
-      // the WHOLE write surface (post_message and request_action alike), not just one tool. Before hijack.
-      if (actionThrottled(auth.auth.credential_id)) {
-        app.log.warn({ credential: auth.auth.credential_id }, 'mcp: throttled');
+      if (!identity) {
+        const failure: AuthFailure = token ? 'credential_invalid' : 'credential_required';
+        app.log.warn({ code: failure }, 'mcp: credential refused');
+        reply.code(401);
+        return credentialRefusal(failure);
+      }
+      // THE SAME per-credential bound the SCC door applies (S2.1b), now keyed on the credential OR the OAuth
+      // client. B1 introduces exactly the caller that control exists for — a looping autonomous subscription
+      // on an internet-facing surface — so the MCP door must not grant a governed-request rate the action
+      // door refuses. Applied per request, it bounds the WHOLE write surface, not just one tool. Before hijack.
+      if (actionThrottled(identity.throttleKey)) {
+        app.log.warn({ throttle: identity.throttleKey }, 'mcp: throttled');
         reply.code(429);
         return { type: 'error', code: 'mcp_throttled', message: 'too many requests — slow down' };
       }
@@ -1354,7 +1683,7 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
           req.raw,
           reply.raw,
           req.body,
-          { memberId: auth.auth.member_id, principalId: auth.auth.principal_id },
+          { memberId: identity.memberId, principalId: identity.principalId },
           deps,
         );
       } catch (err) {
