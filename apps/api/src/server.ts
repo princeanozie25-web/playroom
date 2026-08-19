@@ -48,6 +48,7 @@ import {
 } from './events.js';
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { handleMcpRequest } from './mcp.js';
+import { chainCommitmentEvents } from './audit.js';
 import { warmUp } from './warmup.js';
 import { makeScrubStream } from './scrub.js';
 import { authenticate, diagnoseCredential, type AuthFailure } from './credentials.js';
@@ -96,6 +97,13 @@ export interface BuildOptions {
    */
   actionRateMax?: number;
   actionRateWindowMs?: number;
+  /**
+   * A3: how often (ms) to fold new commitment events into the tamper-evident audit chain, in-process.
+   * Undefined or ≤0 disables it — the anchor is then a manual/cron concern (scripts/anchor-audit.ts), and
+   * tests leave it off so no background writer touches their chain. Set in production so `get_receipt`
+   * returns real receipts without an external scheduler; the work is idempotent and off the request path.
+   */
+  anchorIntervalMs?: number;
 }
 
 const WS_OPEN = 1; // ws.WebSocket.OPEN
@@ -377,6 +385,21 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
       if (!pool) return;
       void warmUp({ pool, adapterFactory, log: app.log });
     });
+  }
+
+  // A3: fold new commitments into the audit chain on an interval, so `get_receipt` returns real receipts
+  // without an external cron. OFF the request path and idempotent — a failure only skips one tick, and the
+  // next repairs it, so it can never break a decision. `unref` keeps the timer from holding the process
+  // open, and onClose stops it so a closed server (every test that starts one) leaves nothing running.
+  if (opts.anchorIntervalMs && opts.anchorIntervalMs > 0) {
+    const anchor = setInterval(() => {
+      if (!pool) return;
+      void chainCommitmentEvents(pool).catch((err) =>
+        app.log.error({ err }, 'audit anchor failed'),
+      );
+    }, opts.anchorIntervalMs);
+    anchor.unref();
+    app.addHook('onClose', async () => clearInterval(anchor));
   }
 
   // Routes live inside a plugin registered after @fastify/websocket so the

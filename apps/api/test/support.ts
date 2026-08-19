@@ -104,6 +104,8 @@ export async function startTestServer(
     // S2.1b: drive the /rooms/:id/actions throttle low so a test can burst one caller to a 429.
     actionRateMax?: number;
     actionRateWindowMs?: number;
+    // A3: run the in-process audit anchor on a short interval so a test can watch a commitment get chained.
+    anchorIntervalMs?: number;
   } = {},
 ): Promise<TestServer> {
   const app = buildServer({
@@ -115,6 +117,7 @@ export async function startTestServer(
     redeemRateWindowMs: opts.redeemRateWindowMs,
     actionRateMax: opts.actionRateMax,
     actionRateWindowMs: opts.actionRateWindowMs,
+    anchorIntervalMs: opts.anchorIntervalMs,
   });
   await app.listen({ port: 0, host: '127.0.0.1' });
   // Narrow, don't cast: a port-0 TCP listen returns an AddressInfo object, never

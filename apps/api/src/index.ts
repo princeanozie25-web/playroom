@@ -15,9 +15,15 @@ installProcessScrubGuards(scrubber);
 const port = Number(process.env.PORT ?? 3001);
 
 try {
-  // `warmOnBoot` is opt-in HERE and nowhere else: the test suite builds servers constantly,
-  // and a warm-up wired into every buildServer would make real provider calls 20 files over.
-  const app = buildServer({ warmOnBoot: true });
+  // `warmOnBoot` and the audit anchor are opt-in HERE and nowhere else: the test suite builds servers
+  // constantly, and a warm-up (real provider calls) or a background anchor (a writer to the chain) wired
+  // into every buildServer would fire across 20 files. The anchor interval comes from the environment so a
+  // deployment chooses its cadence (or leaves it to a cron); default ~5 min, disabled with 0.
+  const anchorIntervalMs = Number(process.env.PLAYROOM_ANCHOR_INTERVAL_MS ?? 300_000);
+  const app = buildServer({
+    warmOnBoot: true,
+    anchorIntervalMs: Number.isFinite(anchorIntervalMs) ? anchorIntervalMs : 300_000,
+  });
 
   app
     .listen({ port, host: '0.0.0.0' })

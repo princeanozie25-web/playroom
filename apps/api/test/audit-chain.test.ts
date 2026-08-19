@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { testPool, uniqueRoomId } from './support.js';
+import { testPool, uniqueRoomId, startTestServer } from './support.js';
 import {
   createRoom,
   appendDecision,
@@ -164,5 +164,29 @@ describe('the audit chain (S2.3 / A3)', () => {
     const v = await verifyAuditChain(pool);
     expect(v.ok).toBe(false);
     expect(v.reason).toMatch(/envelope/i);
+  });
+
+  it('the in-process anchor chains a new commitment on its interval (no manual call)', async () => {
+    // A server with a short anchor interval folds commitments in on its own — the pipeline that makes
+    // get_receipt return real receipts in production without an external cron. Polled, not slept-on.
+    const server = await startTestServer({ anchorIntervalMs: 100 });
+    try {
+      const { resolvedSeq } = await commitmentRoom();
+      const deadline = Date.now() + 8000;
+      let chained = 0;
+      while (Date.now() < deadline) {
+        const { rows } = await pool.query('SELECT 1 FROM audit_chain WHERE source_seq = $1', [
+          resolvedSeq,
+        ]);
+        if (rows.length > 0) {
+          chained = rows.length;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(chained).toBe(1); // the background anchor picked it up, no chainCommitmentEvents() call here
+    } finally {
+      await server.close();
+    }
   });
 });
