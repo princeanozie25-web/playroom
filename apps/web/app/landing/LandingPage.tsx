@@ -211,7 +211,6 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 
 export function LandingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [ready, setReady] = useState(false);
   const [activeStage, setActiveStage] = useState(0);
   const [mandateAction, setMandateAction] = useState<keyof typeof mandateActions>('merge');
   const [demonstrationStage, setDemonstrationStage] = useState(0);
@@ -219,7 +218,6 @@ export function LandingPage() {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const readyFrame = window.requestAnimationFrame(() => setReady(true));
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const revealNodes = document.querySelectorAll<HTMLElement>('[data-landing-reveal]');
     let observer: IntersectionObserver | undefined;
@@ -241,7 +239,6 @@ export function LandingPage() {
     }
 
     return () => {
-      window.cancelAnimationFrame(readyFrame);
       observer?.disconnect();
     };
   }, []);
@@ -308,17 +305,6 @@ export function LandingPage() {
 
   return (
     <div className="landing">
-      {!ready && (
-        <div className="landing-loader" role="status" aria-live="polite">
-          <span className="landing-loader__mark" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-          <span>Preparing the room</span>
-        </div>
-      )}
       <a className="landing-skip-link" href="#main-content">
         Skip to content
       </a>
@@ -543,27 +529,31 @@ export function LandingPage() {
             <div className="landing-section-heading">
               <h2 id="why-title">Collaboration needs more than another pipe.</h2>
               <p>
-                Transport can move a message. Playroom supplies the operational contract around it.
+                Chat tools move messages. Playroom adds the rules around them — who&rsquo;s acting,
+                what they may do, and what it leaves behind.
               </p>
             </div>
             <div className="landing-question-grid">
               {[
                 [
                   'Who does the agent represent?',
-                  'A room member is bound to a principal, independent of its current route.',
+                  'Every agent acts for a specific person — and that binding follows it, however it connected.',
                 ],
                 [
                   'What can it see?',
-                  'Private principal context stays private; promoted common ground is explicit.',
+                  "Each person's private context stays private. Only what someone shares becomes common ground.",
                 ],
-                ['What may it do?', 'A signed mandate scopes actions and denies by default.'],
+                [
+                  'What may it do?',
+                  'A mandate a human signed says what it may do. Anything else is denied.',
+                ],
                 [
                   'Who approves protected work?',
-                  'The named human signer receives a bounded co-sign decision.',
+                  'The specific person the mandate names — they get a decision to approve or deny.',
                 ],
                 [
                   'What proves what happened?',
-                  'Ordered events and audit-chain receipts preserve the outcome.',
+                  'An append-only record and a tamper-evident receipt for every outcome.',
                 ],
               ].map(([question, answer], index) => (
                 <article key={question}>
@@ -585,11 +575,8 @@ export function LandingPage() {
           <div className="landing-shell">
             <p className="landing-eyebrow">02 · Governed collaboration loop</p>
             <div className="landing-section-heading">
-              <h2 id="loop-title">Select a boundary. See the system state.</h2>
-              <p>
-                Each stage is distinct, inspectable, and represented with text and shape as well as
-                colour.
-              </p>
+              <h2 id="loop-title">Pick a boundary. Watch it hold.</h2>
+              <p>Each step stands on its own — shown in words and shape, never colour alone.</p>
             </div>
             <div className="landing-trust-explorer">
               <div
@@ -735,8 +722,8 @@ export function LandingPage() {
             <div className="landing-section-heading">
               <h2 id="product-title">The public story opens into a real room.</h2>
               <p>
-                These capabilities exist in the repository today. The page keeps the governed
-                collaboration loop prominent and the supporting system quiet.
+                Everything here already works. The page keeps the important part loud and the
+                plumbing quiet.
               </p>
             </div>
             <div className="landing-product-proof">
@@ -744,24 +731,24 @@ export function LandingPage() {
                 <span>Room</span>
                 <h3>People and agents share one ordered thread.</h3>
                 <p>
-                  Working rooms include human and agent membership, messages, streamed agent turns,
-                  tasks, handoffs, summons, interrupts, and spend visibility.
+                  A room holds people and agents together — messages, live agent replies, tasks and
+                  handoffs, interruptions, and what each turn costs.
                 </p>
               </article>
               <article data-tone="orange">
                 <span>Authority</span>
                 <h3>Protected work becomes a human decision.</h3>
                 <p>
-                  Signed mandates, deny-by-default evaluation, and co-sign decisions bind authority
-                  to the requested action.
+                  A signed mandate decides each action, and anything protected pauses for the right
+                  person to sign.
                 </p>
               </article>
               <article data-tone="purple">
                 <span>Continuity</span>
                 <h3>The room retains more than conversation.</h3>
                 <p>
-                  Standing orders, briefings and documents, promoted common ground, and ordered
-                  canonical events preserve the working context.
+                  Standing orders, briefings, shared documents, and an ordered record keep the
+                  room&rsquo;s context between sessions.
                 </p>
               </article>
             </div>
@@ -803,13 +790,16 @@ export function LandingPage() {
             <dl className="landing-limit-list">
               <div>
                 <dt>Human identity</dt>
-                <dd>Credential- and process-based; not strong real-person verification.</dd>
+                <dd>
+                  People sign in with a credential — enough to attribute actions, not full identity
+                  verification.
+                </dd>
               </div>
               <div>
                 <dt>Receipt verification</dt>
                 <dd>
-                  Available through API and MCP; the complete public verification interface remains
-                  planned.
+                  Verify receipts through the API and MCP today; a full in-app view is still to
+                  come.
                 </dd>
               </div>
               <div>
@@ -832,10 +822,10 @@ export function LandingPage() {
           <div className="landing-shell">
             <p className="landing-eyebrow">06 · Planned, not claimed</p>
             <div className="landing-section-heading">
-              <h2 id="roadmap-title">Future surfaces stay visibly future.</h2>
+              <h2 id="roadmap-title">Planned work, labelled as planned.</h2>
               <p>
-                These capabilities are architectural direction or roadmap work. They are not
-                presented as available entry points.
+                These are things we&rsquo;re building, not things you can use yet — and the page
+                won&rsquo;t pretend otherwise.
               </p>
             </div>
             <ul className="landing-roadmap-list">
