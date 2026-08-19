@@ -67,7 +67,7 @@ export function LoopsScreen({
       });
       if (!res.ok) {
         const payload = (await res.json().catch(() => ({}))) as { message?: string };
-        setError(payload.message ?? `that did not work (${res.status})`);
+        setError(payload.message ?? "That didn't save. Try again in a moment.");
         return;
       }
       setEditing(null);
@@ -112,7 +112,7 @@ export function LoopsScreen({
 
       {busy && (
         <p className="loops-working" role="status">
-          Updating the canonical order record…
+          Saving…
         </p>
       )}
 

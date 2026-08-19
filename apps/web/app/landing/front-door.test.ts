@@ -37,7 +37,8 @@ describe('Front Door product experience', () => {
     expect(component).toContain('no request leaves this page');
     expect(component).toMatch(/No backend request or\s+production action is made/);
     expect(component).toContain('Planned, not claimed');
-    expect(component).toContain('GitHub, email, and A2A bridges');
+    // Roadmap names real planned work (now in visitor-facing outcome language, not changelog entries).
+    expect(component).toContain('GitHub, email');
   });
 
   it('ships interactive trust stages, mandate verdicts, and theme persistence', () => {

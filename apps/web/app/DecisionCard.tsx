@@ -159,7 +159,13 @@ export function DecisionCard({
       <p className="decision-hash" {...pr(HOOK.decisionHash)}>
         {p.effective_mandate_hash ? (
           <>
-            under mandate <code>{p.effective_mandate_hash.slice(0, 23)}&#8230;</code>
+            under mandate{' '}
+            {/* Truncated for the sentence, but the FULL hash is in the DOM (title + sr-only): a hash you
+                can only half-read is a hash you cannot trust — MandateSurface's rule, kept here too. */}
+            <code title={p.effective_mandate_hash}>
+              {p.effective_mandate_hash.slice(0, 23)}&#8230;
+            </code>
+            <span className="sr-only"> (full hash {p.effective_mandate_hash})</span>
           </>
         ) : (
           'no mandate was in force'
@@ -207,6 +213,27 @@ export function DecisionCard({
           </span>
         )}
       </div>
+
+      {/* THE RECEIPT — the third pillar made visible in the room. "Receipts preserve why" is taught on the
+          landing but a resolved decision used to just say "Approved by X" and stop. A resolved decision
+          leaves durable evidence: its id (the reference into the append-only audit chain, A3) and the
+          mandate hash it ran under. Both are selectable/copyable and carry the full hash for AT — so the
+          outcome the product exists to produce is inspectable where it happens, not only claimed. */}
+      {resolution && (
+        <p className="decision-receipt">
+          <span className="decision-receipt__label">Receipt</span>
+          <code className="decision-receipt__id">{p.decision_id}</code>
+          {p.effective_mandate_hash && (
+            <>
+              <span aria-hidden="true"> · </span>
+              <code className="decision-receipt__hash" title={p.effective_mandate_hash}>
+                {p.effective_mandate_hash.slice(0, 15)}&#8230;
+              </code>
+              <span className="sr-only">under mandate {p.effective_mandate_hash}</span>
+            </>
+          )}
+        </p>
+      )}
     </Panel>
   );
 }

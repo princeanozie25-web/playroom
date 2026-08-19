@@ -106,6 +106,11 @@
   outline: 2px solid var(--indigo);
   outline-offset: 1px;
 }
+/* In dark mode --indigo is a pale blue that can wash out against dark surfaces; brighten the ring so a
+   keyboard user never loses their place. Applies to both dark scopes (the app shell and the landing). */
+html[data-landing-theme='dark'] :focus-visible {
+  outline-color: #d5d7ff;
+}
 
 html,
 body {
@@ -378,6 +383,22 @@ body {
 }
 .mandate > summary::-webkit-details-marker {
   display: none;
+}
+/* A keyboard user pressing Enter on the mandate summary now SEES the disclosure toggle: a small chevron
+   that rotates when open (the native marker is removed above, which otherwise leaves no open/closed cue). */
+.mandate > summary::after {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 4px;
+  vertical-align: middle;
+  border-right: 1.5px solid var(--ink-3);
+  border-bottom: 1.5px solid var(--ink-3);
+  transform: rotate(45deg);
+}
+.mandate[open] > summary::after {
+  transform: rotate(225deg);
 }
 .mandate[open] > summary {
   border-color: var(--accent-line, var(--line));
@@ -709,12 +730,14 @@ body {
 
 .composer {
   display: flex;
+  align-items: flex-end;
   gap: var(--s-2);
   padding: var(--s-4) var(--s-5);
   border-top: 1px solid var(--line);
   background: var(--paper);
 }
-.composer input {
+.composer input,
+.composer textarea {
   font: inherit;
   font-size: var(--t-sm);
   padding: var(--s-2) var(--s-3);
@@ -723,15 +746,48 @@ body {
   background: var(--paper);
   color: var(--ink);
 }
-.composer input:focus {
-  outline: 2px solid var(--indigo);
-  outline-offset: -1px;
+/* The composer is a textarea now (Enter sends, Shift+Enter breaks): it grows with content up to a cap,
+   no manual resize handle. `field-sizing` auto-grows where supported; elsewhere it holds min-height. */
+.composer textarea {
+  resize: none;
+  line-height: 1.45;
+  min-height: 44px;
+  max-height: 40vh;
+  field-sizing: content;
 }
-.composer .who {
-  width: 120px;
+.composer input:focus-visible,
+.composer textarea:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 1px;
 }
 .composer .what {
   flex: 1;
+}
+/* The composer's persistent instruction — quiet, below the box, never competing with the transcript. */
+.composer-hint {
+  width: min(100%, 948px);
+  margin: 4px auto 0;
+  padding: 0 24px 8px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+/* The room's skip links: off-screen until a keyboard user focuses them, then a real control top-left. */
+.room-skip-link {
+  position: fixed;
+  z-index: 30;
+  top: -100px;
+  left: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--indigo);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  font-weight: 650;
+  text-decoration: none;
+}
+.room-skip-link:focus-visible {
+  top: 10px;
 }
 .composer button {
   font: inherit;
@@ -837,8 +893,18 @@ body {
   color: var(--ink);
   cursor: pointer;
 }
-.decision-actions button:hover {
-  border-color: var(--ink-3);
+/* SEMANTIC hover on the two most consequential buttons in the app. A generic
+   `.decision-actions button:hover { border-color: var(--ink-3) }` used to outrank the approve/deny
+   colour rules and silently repaint the green/red border neutral grey on hover — so the primary
+   governance control lost its meaning exactly when a pointer was on it. Darken each button's own
+   colour instead, never clobber it; :disabled stays inert (a non-signer is never invited to press). */
+.decision-actions .decision-approve:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--ok) 85%, #000);
+  background: color-mix(in srgb, var(--ok) 85%, #000);
+}
+.decision-actions .decision-deny:hover:not(:disabled) {
+  border-color: var(--bad);
+  background: var(--bad-soft);
 }
 /* A disabled control must LOOK disabled wherever the card is mounted. The :disabled
    qualifier is not decoration — it outranks any ambient `<container> button` rule
@@ -863,6 +929,30 @@ body {
   font-size: var(--t-sm);
   font-weight: 650;
   color: var(--ink);
+}
+/* THE RECEIPT line under a resolved decision — quiet, monospace, the durable reference (decision id +
+   mandate hash) a reader can select and keep. The third pillar, present where the outcome happens. */
+.decision-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+.decision-receipt__label {
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.decision-receipt__id,
+.decision-receipt__hash {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  user-select: all;
+  overflow-wrap: anywhere;
 }
 .decision-resolved[data-pr-resolution='DENIED'] {
   color: var(--ink-2);
@@ -893,8 +983,9 @@ html[data-landing-theme='dark'] .public-entry {
   --paper: #101010;
   --paper-2: #000;
   --line: rgba(255, 255, 255, 0.16);
-  --bad: #ff8686;
-  --bad-soft: #210b0b;
+  /* One dark refused/blocked pair, shared with the authenticated shell (was #ff8686 / #210b0b here). */
+  --bad: #ff8585;
+  --bad-soft: #280d0d;
   background: #000;
 }
 .entry-shell {
@@ -1286,6 +1377,7 @@ html[data-landing-theme='dark'] .public-entry {
   line-height: 1.5;
 }
 .join-label {
+  font-size: var(--t-sm);
   font-weight: 650;
   margin-bottom: var(--s-1);
 }
@@ -1739,6 +1831,8 @@ html[data-landing-theme='dark'] .public-entry {
 .join-submit,
 .start-form button,
 .room-tools button,
+.push-control button,
+.system-action,
 .loop-submit,
 .loop-edit-save {
   transition:
@@ -1849,6 +1943,10 @@ html[data-landing-theme='dark'] .public-entry {
   color: var(--ink-2);
   cursor: pointer;
 }
+.push-control button:hover:not(:disabled) {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
 .push-control button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -1890,7 +1988,9 @@ html[data-landing-theme='dark'] .public-entry {
   --landing-surface: #fffdf8;
   --landing-surface-muted: #eeece5;
   --landing-ink: #171717;
-  --landing-ink-muted: #5f5d58;
+  /* Darkened from #5f5d58 (≈3.9:1) to clear WCAG AA (~5.2:1) on --landing-surface #fffdf8 — this page
+     carries the product's trust/governance claims, so its secondary text must be comfortably readable. */
+  --landing-ink-muted: #56544e;
   --landing-line: #d4d1c8;
   --landing-blue: #3157d5;
   --landing-blue-soft: #e8edff;
@@ -2355,7 +2455,9 @@ html[data-landing-theme='dark'] .landing a.landing-button--primary {
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  animation: landing-loader-out 240ms var(--ease-out) 180ms forwards;
+  /* No fade-out animation: the loader is unmounted the moment `ready` flips (one rAF), well before a
+     240ms/180ms-delay fade could start — it was dead on fast devices and a one-frame flash otherwise.
+     The unmount IS the transition now. */
   pointer-events: none;
 }
 .landing-loader__mark,
@@ -2401,12 +2503,6 @@ html[data-landing-theme='dark'] .landing a.landing-button--primary {
   50% {
     transform: scaleY(1);
     opacity: 1;
-  }
-}
-@keyframes landing-loader-out {
-  to {
-    opacity: 0;
-    visibility: hidden;
   }
 }
 .landing-brand {
@@ -3604,7 +3700,7 @@ html[data-landing-theme='dark'] .theme-toggle__sun {
   border-bottom: 1px solid var(--line);
 }
 .room-nav a {
-  min-height: 38px;
+  min-height: 40px;
   display: inline-flex;
   align-items: center;
   padding: 0 11px;
@@ -3710,7 +3806,7 @@ html[data-landing-theme='dark'] .theme-toggle__sun {
   min-width: 0;
 }
 .push-control button {
-  min-height: 32px;
+  min-height: 40px;
   padding: 0 10px;
   background: var(--paper);
 }
@@ -3853,14 +3949,16 @@ html[data-landing-theme='dark'] .decision-actions .decision-approve {
   border: 0;
   background: transparent;
 }
-.composer input {
+.composer input,
+.composer textarea {
   min-height: 48px;
-  padding: 0 15px;
+  padding: 12px 15px;
   border-color: var(--line);
   background: var(--paper);
   font-size: 15px;
 }
-.composer input::placeholder {
+.composer input::placeholder,
+.composer textarea::placeholder {
   color: var(--ink-3);
 }
 .composer button {
@@ -4311,6 +4409,16 @@ html[data-landing-theme='dark'] .loop-submit {
 }
 html[data-landing-theme='dark'] .system-action--primary {
   color: #0b0c0b;
+}
+/* The recovery buttons (error.tsx "Try again", not-found.tsx "Back to Playroom" / "Create a room" /
+   "Join a room") are the ones a frustrated user reaches for and were the only primary family with no
+   pointer feedback — give them the darken-on-hover the rest of the app uses. */
+.system-action:hover:not(:disabled) {
+  border-color: var(--ink-3);
+}
+.system-action--primary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--indigo) 90%, #000);
+  background: color-mix(in srgb, var(--indigo) 90%, #000);
 }
 .dev-fixture {
   background: var(--paper-2);

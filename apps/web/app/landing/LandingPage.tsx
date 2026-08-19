@@ -30,7 +30,7 @@ const trustStages = [
     icon: 'identity' as IconName,
     tone: 'blue' as Tone,
     title: 'Know who the agent represents.',
-    copy: 'A route-independent room member is bound to its principal before it participates. Human identity remains credential- and process-based, not strong real-person verification.',
+    copy: 'An agent is bound to the person it acts for before it can do anything here — so every action traces to someone. People sign in with a credential, short of full identity verification.',
     input: 'member: claude.prince',
     output: 'principal: prince',
   },
@@ -39,7 +39,7 @@ const trustStages = [
     icon: 'context' as IconName,
     tone: 'purple' as Tone,
     title: 'Share the brief, not the private history.',
-    copy: 'Each principal keeps private context. Only deliberately promoted material becomes common ground for the room.',
+    copy: 'Everyone keeps their own private context. Only what someone deliberately promotes becomes shared ground the whole room can see.',
     input: 'private: principal/prince',
     output: 'room: promoted excerpt',
   },
@@ -48,7 +48,7 @@ const trustStages = [
     icon: 'mandate' as IconName,
     tone: 'green' as Tone,
     title: 'Evaluate authority before action.',
-    copy: 'The Fabric authority engine evaluates a signed, scoped mandate. Unknown or invalid authority denies by default.',
+    copy: 'Every action is checked against a mandate a human signed and scoped. Anything not clearly granted is denied.',
     input: 'action: pr.merge',
     output: 'verdict: CO_SIGN',
   },
@@ -56,8 +56,8 @@ const trustStages = [
     label: 'Co-sign',
     icon: 'shield' as IconName,
     tone: 'orange' as Tone,
-    title: 'Stop protected work for the right human.',
-    copy: 'A protected action waits for the signer named by the decision. The agent cannot turn silence into approval.',
+    title: 'Protected work waits for the right person.',
+    copy: 'A protected action waits for the signer the decision names. The agent cannot turn silence into approval.',
     input: 'required signer: prince',
     output: 'decision: approved',
   },
@@ -66,7 +66,7 @@ const trustStages = [
     icon: 'receipt' as IconName,
     tone: 'purple' as Tone,
     title: 'Keep durable evidence of the outcome.',
-    copy: 'Ordered canonical events feed an audit-chain receipt. Verification exists through API and MCP; a complete public verification UI is still planned.',
+    copy: 'Every outcome leaves a tamper-evident receipt in an append-only record. You can verify it through the API and MCP today; a full in-app view is on the way.',
     input: 'decision + mandate hash',
     output: 'receipt: chain linked',
   },
@@ -130,12 +130,12 @@ const demonstrationStages = [
 ];
 
 const roadmapItems = [
-  'GitHub, email, and A2A bridges',
-  'Embedded ChatGPT, Claude, and Buzz projections',
-  'Independent public receipt verification',
-  'Inbound screening and classification',
-  'Egress DLP/canary enforcement',
-  'Multi-host projection reconciliation',
+  'Bring a room into GitHub, email, and other agents',
+  'Work alongside ChatGPT and Claude from inside a room',
+  'Verify any receipt yourself, without trusting us',
+  'Screen what comes in before an agent ever sees it',
+  'Catch sensitive data before it can leave the room',
+  'Keep the same room consistent across machines',
 ];
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -268,7 +268,18 @@ export function LandingPage() {
       }
     };
     window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    // While the flyout is open, lock background scroll and make the page content INERT — so a keyboard
+    // user tabbing past the last nav link cannot land in the hero underneath, and touch/keyboard scroll
+    // of the page behind the overlay is disabled. Both are restored when the menu closes.
+    const main = document.getElementById('main-content');
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    main?.setAttribute('inert', '');
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      document.body.style.overflow = prevOverflow;
+      main?.removeAttribute('inert');
+    };
   }, [menuOpen]);
 
   function closeMenu() {
@@ -382,12 +393,12 @@ export function LandingPage() {
           <div className="landing-hero__copy landing-page-enter landing-delay-1">
             <p className="landing-eyebrow">
               <span className="landing-live-dot" aria-hidden="true" />
-              Governed collaboration for people and AI agents
+              Governed collaboration
             </p>
             <h1 id="landing-title">Agents can move fast. Authority stays clear.</h1>
             <p className="landing-hero__lede">
-              Playroom is a governed collaboration room for people and AI agents. It binds identity,
-              scoped context, and action authority to one canonical record.
+              People and AI agents work in one room. Every action is checked against a mandate a
+              human signed, and everything that happens is on the record.
             </p>
             <div className="landing-hero__actions">
               <Link
@@ -461,7 +472,8 @@ export function LandingPage() {
                     <span className="landing-avatar landing-avatar--agent">C</span>
                   </div>
                   <p className="landing-product-demo__kicker">
-                    {String(demonstrationStage + 1).padStart(2, '0')} / 07
+                    {String(demonstrationStage + 1).padStart(2, '0')} /{' '}
+                    {String(demonstrationStages.length).padStart(2, '0')}
                   </p>
                   <h2>{selectedDemoStage.label}</h2>
                   <p>{selectedDemoStage.detail}</p>
@@ -484,7 +496,6 @@ export function LandingPage() {
                 <button
                   className="landing-product-demo__replay"
                   type="button"
-                  aria-pressed={demoPaused}
                   onClick={() => setDemoPaused((paused) => !paused)}
                 >
                   {demoPaused ? 'Play the walkthrough' : 'Pause the walkthrough'}
@@ -608,6 +619,7 @@ export function LandingPage() {
                 id="landing-trust-panel"
                 className="landing-trust-panel"
                 role="tabpanel"
+                tabIndex={0}
                 aria-labelledby={`landing-trust-tab-${activeStage}`}
                 data-tone={selectedStage.tone}
                 key={selectedStage.label}
@@ -769,7 +781,7 @@ export function LandingPage() {
               </li>
               <li>
                 <Icon name="check" />
-                Local-node leases and gated node-operation decisions
+                Revoke a machine&rsquo;s lease and its next action fails
               </li>
             </ul>
           </div>

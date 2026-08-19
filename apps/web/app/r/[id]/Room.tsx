@@ -482,21 +482,57 @@ export function Room({
   // S1.3 widened who can be NAMED, not who is drawn in the header.
   const agents = useMemo(() => roster.filter((m) => m.kind === 'agent'), [roster]);
 
-  // Human chips are still DERIVED FROM THE EVENT LOG — the people who have actually spoken here.
-  // Membership IS a table now (S1.1b), so this could show every enrolled human from the start;
-  // that is a change to what the header displays and it belongs to the shell slice, not to a
-  // slice about tasks. What DID change: the chip now resolves through the roster, so it renders
-  // a display name instead of a member id.
+  // Human chips: the enrolled humans, plus anyone who has spoken, plus ALWAYS the viewer. Membership
+  // is a table now (S1.1b), so a freshly-joined member should find themselves in the roster on arrival
+  // rather than only after their first message — the Welcome panel says "the people here", so the header
+  // must show them. The viewer is force-included even before the roster round-trip reflects them (the
+  // dock already knows "Posting as"); the log fallback keeps guests who spoke visible in older rooms.
   const humans = useMemo<string[]>(() => {
     const agentIds = new Set(agents.map((m) => m.id));
-    const seen = new Set<string>();
+    const ids = new Set<string>();
+    for (const m of roster) if (m.kind === 'human') ids.add(m.id);
     for (const e of events) {
       if (e.event_type !== 'message') continue;
       if (e.actor_id === 'system' || agentIds.has(e.actor_id)) continue;
-      seen.add(e.actor_id);
+      ids.add(e.actor_id);
     }
-    return [...seen];
-  }, [events, agents]);
+    if (viewer) ids.add(viewer);
+    return [...ids];
+  }, [events, agents, roster, viewer]);
+
+  // THE TRUST-CRITICAL BEAT, ANNOUNCED. A decision that needs THIS viewer's signature — and the resolution
+  // of one — is the moment the product exists for, and it used to be silent to assistive tech (only
+  // agent-turn milestones were announced). The viewer is the signer only if their roster membership is
+  // bound to the decision's required principal (mirrors DecisionCard and the server). Two dedicated
+  // regions below: an ASSERTIVE "a decision needs your signature" (it interrupts — it is a claim on YOU)
+  // and a POLITE announcement of the resolution.
+  const viewerPrincipal = viewer ? byId.get(viewer)?.principal : undefined;
+  const attentionMessage = useMemo(() => {
+    if (!viewer || byId.get(viewer)?.kind !== 'human' || !viewerPrincipal) return '';
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const it = items[i];
+      if (it.kind === 'decision' && it.view.resolution === null) {
+        const pd = it.view.event.payload;
+        if (pd.required_signer && pd.required_signer === viewerPrincipal) {
+          return `A decision needs your signature: ${pd.action}`;
+        }
+      }
+    }
+    return '';
+  }, [items, viewer, viewerPrincipal, byId]);
+  const decisionMessage = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const it = items[i];
+      if (it.kind === 'decision' && it.view.resolution) {
+        const who = it.view.signedBy
+          ? (byId.get(it.view.signedBy)?.id ?? it.view.signedBy)
+          : 'a signer';
+        const verb = it.view.resolution === 'APPROVED' ? 'approved' : 'denied';
+        return `${it.view.event.payload.action} ${verb} by ${who}`;
+      }
+    }
+    return '';
+  }, [items, byId]);
 
   const wsRef = useRef<WebSocket | null>(null);
   // THE RESUME CURSOR, IN MEMORY ONLY (S16b). It was persisted to sessionStorage, which is what
@@ -726,8 +762,7 @@ export function Room({
     tailRef.current?.scrollIntoView({ block: 'end' });
   }, [items]);
 
-  const onSubmit = (e: FormEvent<HTMLFormElement>): void => {
-    e.preventDefault();
+  const submitMessage = (): void => {
     const text = body.trim();
     const ws = wsRef.current;
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -739,6 +774,10 @@ export function Room({
     pendingRef.current = text;
     ws.send(JSON.stringify(payload));
     setBody('');
+  };
+  const onSubmit = (e: FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    submitMessage();
   };
 
   // Send any client frame over the room socket — used by the room tools (briefing_set, document_upload).
@@ -757,6 +796,15 @@ export function Room({
 
   return (
     <main className="room" {...pr(HOOK.room)}>
+      {/* First focusable elements: a keyboard user reaches the conversation and the composer without
+          tabbing through the brand, nav, theme toggle and every agent chip's mandate disclosure first
+          (the landing has a skip link; the room did not). */}
+      <a className="room-skip-link" href="#room-transcript">
+        Skip to messages
+      </a>
+      <a className="room-skip-link" href="#room-message">
+        Skip to composer
+      </a>
       <header className="room-header">
         <div className="room-topbar">
           <AppBrand />
@@ -770,7 +818,7 @@ export function Room({
 
         <div className="room-heading-row">
           <div>
-            <p className="room-eyebrow">Canonical collaboration room</p>
+            <p className="room-eyebrow">Shared room</p>
             <h1 className="room-title">
               <span className="room-id">{roomId}</span>
             </h1>
@@ -830,9 +878,8 @@ export function Room({
 
       {refusal && (
         <p role="alert" className="refusal" {...pr(HOOK.refusal)}>
-          <strong>{refusal.message}</strong>
-          <span className="code">{refusal.code}</span> — nothing you type here will be delivered.
-          Your message was not sent.
+          <strong>{refusal.message}</strong> — nothing you type here will be delivered.{' '}
+          <span className="code">{refusal.code}</span>
         </p>
       )}
 
@@ -843,7 +890,15 @@ export function Room({
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {liveMessage}
       </div>
-      <ul className="transcript" {...pr(HOOK.transcript)}>
+      {/* The RESOLUTION of a decision (the central moment) — polite, so it does not talk over a turn. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {decisionMessage}
+      </div>
+      {/* A decision that needs YOUR signature — assertive, because it is a claim on this reader. */}
+      <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="true">
+        {attentionMessage}
+      </div>
+      <ul id="room-transcript" className="transcript" {...pr(HOOK.transcript)}>
         {loadingHistory && (
           <li className="history-loading" role="status">
             <span className="route-loading__mark" aria-hidden="true">
@@ -862,8 +917,19 @@ export function Room({
               <i />
               <i />
             </span>
-            <strong>The room is ready.</strong>
-            <span>Send a message or mention an agent to begin the shared record.</span>
+            {conn === 'reconnecting' ? (
+              // A socket that keeps failing used to leave a blank room with only a tiny pulsing pill —
+              // "every part working, nothing explaining it". Say it inline so it reads as a state.
+              <>
+                <strong>Still trying to connect&#8230;</strong>
+                <span>The room hasn&rsquo;t loaded yet — this keeps retrying on its own.</span>
+              </>
+            ) : (
+              <>
+                <strong>The room is ready.</strong>
+                <span>Send a message or mention an agent to begin the shared record.</span>
+              </>
+            )}
           </li>
         )}
         {/* LOAD EARLIER — the top of a WINDOW, not the top of the room (S16b). It appears only when
@@ -1009,18 +1075,34 @@ export function Room({
           <label className="sr-only" htmlFor="room-message">
             Message the room
           </label>
-          {/* The placeholder teaches the @-convention without adding a persistent instruction row. */}
-          <input
+          {/* A TEXTAREA, not an input: agent output, briefings and order objectives all preserve
+              whitespace on principle ("a person's line breaks are theirs"), so the one box a human types
+              into must be able to make a line break too. Enter sends; Shift+Enter breaks. */}
+          <textarea
             id="room-message"
             className="what"
-            placeholder="Message the room — @ to bring someone in"
+            rows={1}
+            placeholder="Message the room"
+            aria-describedby="composer-hint"
             value={body}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setBody(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setBody(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitMessage();
+              }
+            }}
           />
           <button type="submit" disabled={conn === 'refused' || body.trim() === ''}>
             Send
           </button>
         </form>
+        {/* The @-convention as a PERSISTENT hint, not placeholder-only: a placeholder vanishes on focus
+            and many screen readers skip it, so the instruction that matters lives here and is tied to the
+            textarea with aria-describedby. */}
+        <p id="composer-hint" className="composer-hint">
+          Enter sends · Shift+Enter for a line break · @ to bring someone in
+        </p>
       </footer>
     </main>
   );

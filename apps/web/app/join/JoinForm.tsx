@@ -35,7 +35,11 @@ export function JoinForm() {
       });
       const body = (await res.json()) as { room_id?: string; error?: string };
       if (!res.ok || !body.room_id) {
-        setError(body.error ?? 'That did not work.');
+        // Friendly, with a next step — a raw wire code at the point a person has the least context is
+        // no help. The likely cause (an expired or mistyped invite code) and the fix are named.
+        setError(
+          "That code didn't work — invite codes expire, and it's easy to mistype one. Ask whoever invited you for a fresh code.",
+        );
         setBusy(false);
         return;
       }

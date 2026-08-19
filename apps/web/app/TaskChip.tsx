@@ -73,7 +73,15 @@ export function TaskChip({
         // The sentence a handoff earns, and no more: it moved, and this is the mandate the
         // RECEIVING member acts under. Never the sender's — a handoff confers no authority.
         <span className="task-mandate" {...pr(HOOK.taskMandate)}>
-          under {task.mandate_hash ? `${task.mandate_hash.slice(0, 14)}…` : 'no mandate'}
+          under{' '}
+          {task.mandate_hash ? (
+            <span title={task.mandate_hash}>
+              {task.mandate_hash.slice(0, 14)}&#8230;
+              <span className="sr-only"> (full hash {task.mandate_hash})</span>
+            </span>
+          ) : (
+            'no mandate'
+          )}
         </span>
       )}
     </Chip>
@@ -134,7 +142,15 @@ export function HandoffRow({
           authorised it: mandates are unsigned until S2.1, and the claims sheet says so of the
           decision card's hash for the same reason. */}
       <span className="task-mandate" {...pr(HOOK.taskMandate)}>
-        under {handoff.mandate_hash ? `${handoff.mandate_hash.slice(0, 21)}…` : 'no mandate'}
+        under{' '}
+        {handoff.mandate_hash ? (
+          <span title={handoff.mandate_hash}>
+            {handoff.mandate_hash.slice(0, 21)}&#8230;
+            <span className="sr-only"> (full hash {handoff.mandate_hash})</span>
+          </span>
+        ) : (
+          'no mandate'
+        )}
       </span>
     </Chip>
   );

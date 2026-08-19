@@ -46,7 +46,7 @@ export function CreateRoomForm() {
 
   return (
     <section className="start-card" aria-labelledby="create-room-title">
-      <p className="start-eyebrow">New canonical room</p>
+      <p className="start-eyebrow">New room</p>
       <h1 id="create-room-title">Create a room</h1>
       <p className="start-lede">Give the room a clear name. You can also choose its URL slug.</p>
       <form
@@ -66,7 +66,10 @@ export function CreateRoomForm() {
         <label htmlFor="room-slug">
           Room slug <span>(optional)</span>
         </label>
-        <p id="room-slug-help">Used in the room URL. Leave blank to let Playroom choose one.</p>
+        <p id="room-slug-help">
+          Used in the room URL — lowercase letters, numbers and hyphens. Leave blank to let Playroom
+          choose one.
+        </p>
         <input
           id="room-slug"
           name="slug"
@@ -74,6 +77,9 @@ export function CreateRoomForm() {
           onChange={(event) => setSlug(event.target.value)}
           placeholder="product-launch"
           autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          pattern="[a-z0-9-]+"
           aria-describedby="room-slug-help"
         />
         <button type="submit" disabled={busy}>

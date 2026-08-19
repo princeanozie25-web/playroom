@@ -43,8 +43,10 @@ export function Welcome({
   // the same tick, which would have removed the content before any exit could run; with presence at
   // the conditional site it was dead code wearing a job.
 
+  // role="region", not "dialog": this is a non-modal inline panel — no focus trap, no Escape, no focus
+  // move on mount — so it must not claim dialog semantics it does not honour.
   return (
-    <Panel className="welcome" hook={HOOK.welcome} role="dialog" aria-label="Welcome">
+    <Panel className="welcome" hook={HOOK.welcome} role="region" aria-label="Welcome">
       <p className="welcome-line">
         <strong>This is a shared room.</strong> The people here have their own AI assistants, and
         everyone can see everything that happens.
@@ -71,6 +73,10 @@ export function Welcome({
       <p className="welcome-line welcome-optional">
         <strong>Then, if you like:</strong> ask it to merge something. It will refuse, out loud, and
         name the person whose signature it would need — including when that person is you.
+      </p>
+      <p className="welcome-line welcome-optional">
+        <strong>Room tools</strong>, under the header, let you set a briefing everyone reads or hand
+        the room a document — shared context every assistant can see.
       </p>
       <button
         className="welcome-dismiss"

@@ -2,12 +2,31 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
 
+// A shared link used to render a bare "Playroom" with no card and no description. The description is the
+// hero line in the join-form register; openGraph/twitter give a link preview a title and summary. The
+// favicon comes from app/icon.svg (Next App Router picks it up); a full maskable PWA icon set from the
+// three-bar mark is still a design asset to generate, tracked separately.
+const DESCRIPTION =
+  'People and AI agents work in one room. Every action is checked against a mandate a human signed, and everything that happens is on the record.';
+
 export const metadata: Metadata = {
-  title: 'Playroom',
+  title: { default: 'Playroom', template: '%s · Playroom' },
+  description: DESCRIPTION,
+  applicationName: 'Playroom',
   // S-PUSH: a web app must declare a manifest before a browser will install it or, on some
-  // platforms, before it will deliver a push at all. It carries no icons yet — an icon set is
-  // design work this slice has no business inventing, and an empty array is honest about that.
+  // platforms, before it will deliver a push at all.
   manifest: '/manifest.webmanifest',
+  openGraph: {
+    title: 'Playroom',
+    description: DESCRIPTION,
+    siteName: 'Playroom',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Playroom',
+    description: DESCRIPTION,
+  },
 };
 
 /**

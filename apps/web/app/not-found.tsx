@@ -11,10 +11,9 @@ export default function NotFound() {
       </header>
       <section className="system-page__content" aria-labelledby="not-found-title">
         <p className="system-page__code">404 · Route not found</p>
-        <h1 id="not-found-title">This room surface does not exist.</h1>
+        <h1 id="not-found-title">There&rsquo;s nothing at this address.</h1>
         <p>
-          Return to the public front door, create a new room, or use an invitation to join an
-          existing one.
+          Head back to Playroom, create a new room, or use an invitation to join an existing one.
         </p>
         <div className="system-page__actions">
           <Link className="system-action system-action--primary" href="/">
