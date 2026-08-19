@@ -97,7 +97,12 @@ export interface LoadedMandate {
 // files that differ only in key order or formatting must hash identically, or the hash
 // records the editor rather than the authority. The signature is taken over these same bytes,
 // so signing and hashing agree by construction — one serialiser, not two that could drift.
-function canonicalise(value: unknown): string {
+//
+// Exported because the audit chain (S2.3) hashes event bodies over the SAME canonical form:
+// a JSONB payload has no stable key order or whitespace, so a body_hash needs this exact
+// discipline, and a second canonicaliser is a second place for the chain and the log to
+// disagree about what "the body" is.
+export function canonicalise(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
   if (Array.isArray(value)) return `[${value.map(canonicalise).join(',')}]`;
   const entries = Object.entries(value as Record<string, unknown>)
