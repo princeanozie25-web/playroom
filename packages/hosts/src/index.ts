@@ -14,6 +14,7 @@ export {
   type RoomView,
   type RoomEvent,
   type PendingTag,
+  type Receipt,
   type ActionVerdict,
   type PostMessageResult,
   type RespondResult,

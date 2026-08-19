@@ -202,5 +202,20 @@ export function buildRoomMcpServer(
       run(() => port.raiseHand({ roomId: room_id, urgency, reason, clientMsgId: client_msg_id })),
   );
 
+  server.registerTool(
+    'get_receipt',
+    {
+      title: 'Get a receipt',
+      description:
+        'Fetch the tamper-evident receipt for a co-signed decision in a room you belong to. Returns the ' +
+        'chain entry_hash once the decision has been anchored (status "chained"), or the interim status ' +
+        '("pending_anchor" awaiting the next anchor, "unresolved" awaiting a signature).',
+      inputSchema: {
+        decision_id: z.string().min(1).max(128).describe('The decision id from a CO_SIGN verdict.'),
+      },
+    },
+    ({ decision_id }) => run(() => port.getReceipt(decision_id)),
+  );
+
   return server;
 }

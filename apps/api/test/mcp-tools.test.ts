@@ -31,6 +31,20 @@ function recordingPort(overrides: Partial<RoomMcpPort> = {}): { port: RoomMcpPor
         { room_id: 'r1', seq: 9, ts: 't', from: 'prince', snippet: '@claude-main look' },
       ]);
     },
+    getReceipt: (id) => {
+      calls.push({ m: 'getReceipt', args: { decisionId: id } });
+      return Promise.resolve({
+        decision_id: id,
+        room_id: 'r1',
+        status: 'chained' as const,
+        resolution: 'APPROVED' as const,
+        signed_by: 'prince',
+        entry_hash: 'sha256:entry',
+        body_hash: 'sha256:body',
+        chained_at: 't',
+        verified: true,
+      });
+    },
     readRoom: (roomId) => {
       calls.push({ m: 'readRoom', args: { roomId } });
       return Promise.resolve({
@@ -87,6 +101,7 @@ const GOVERNED_LOOP = [
   'request_action',
   'respond_to_decision',
   'raise_hand',
+  'get_receipt',
 ].sort();
 
 describe('the MCP tool surface (B1)', () => {
@@ -94,8 +109,6 @@ describe('the MCP tool surface (B1)', () => {
     const client = await connect(recordingPort().port);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(GOVERNED_LOOP);
-    // get_receipt stays DEFERRED, not stubbed — its backend (A3 receipts) does not exist yet.
-    expect(tools.map((t) => t.name)).not.toContain('get_receipt');
   });
 
   it('NO tool takes an identity argument — the acting member is the credential, never a claim', async () => {
@@ -135,6 +148,16 @@ describe('the MCP tool surface (B1)', () => {
     const items = JSON.parse((res.content as Array<{ text: string }>)[0].text);
     expect(items[0].room_id).toBe('r1');
     expect(items[0].from).toBe('prince');
+  });
+
+  it('get_receipt routes to the port with the decision id', async () => {
+    const { port, calls } = recordingPort();
+    const client = await connect(port);
+    const res = await client.callTool({ name: 'get_receipt', arguments: { decision_id: 'dec_1' } });
+    expect(calls).toEqual([{ m: 'getReceipt', args: { decisionId: 'dec_1' } }]);
+    const receipt = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(receipt.status).toBe('chained');
+    expect(receipt.entry_hash).toBe('sha256:entry');
   });
 
   it('request_action returns the fabric verdict as the tool result', async () => {

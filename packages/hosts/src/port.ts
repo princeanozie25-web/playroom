@@ -65,6 +65,21 @@ export interface PendingTag {
   snippet: string;
 }
 
+/** The tamper-evident receipt for a co-signed decision. `status` says whether it is in the chain yet. */
+export interface Receipt {
+  decision_id: string;
+  room_id: string;
+  status: 'chained' | 'pending_anchor' | 'unresolved';
+  resolution?: 'APPROVED' | 'DENIED';
+  signed_by?: string;
+  /** The receipt's tamper-evident id — the chain entry_hash. Present when `status` is `chained`. */
+  entry_hash?: string;
+  body_hash?: string;
+  chained_at?: string;
+  /** The chained receipt still matches its source — this one receipt is intact. */
+  verified?: boolean;
+}
+
 /**
  * A refusal the port surfaces to a tool as an MCP error RESULT (isError), not a thrown 500. It carries a
  * stable code + a sentence — a room a caller may not see, a mandate refusal, a budget hit — so the model
@@ -121,4 +136,6 @@ export interface RoomMcpPort {
     reason: string;
     clientMsgId?: string;
   }): Promise<RaiseHandView>;
+  /** The tamper-evident receipt for a co-signed decision in a room the member belongs to. */
+  getReceipt(decisionId: string): Promise<Receipt>;
 }

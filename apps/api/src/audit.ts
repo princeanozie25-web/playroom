@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { createHash } from 'node:crypto';
 import { canonicalise } from '@playroom/fabric';
+import { isRoomMember } from './members.js';
 
 // The tamper-evident audit chain (S2.3 / A3, Bible §17). A batch that reads the COMMITMENT events the room
 // already writes and folds them into the append-only `audit_chain` (migration 033), each row linked to the
@@ -231,4 +232,90 @@ export async function auditRoot(pool: Pool): Promise<string | null> {
     'SELECT entry_hash FROM audit_chain ORDER BY seq DESC LIMIT 1',
   );
   return rows[0]?.entry_hash ?? null;
+}
+
+/**
+ * A commitment's receipt (get_receipt, B-track). `status` distinguishes the three honest answers: the
+ * decision was resolved and is IN the chain (`chained`, with the tamper-evident entry_hash and a per-receipt
+ * integrity check); it was resolved but the anchor has not run yet (`pending_anchor`); or it exists but is
+ * still awaiting a signature (`unresolved`).
+ */
+export interface Receipt {
+  decision_id: string;
+  room_id: string;
+  status: 'chained' | 'pending_anchor' | 'unresolved';
+  resolution?: 'APPROVED' | 'DENIED';
+  signed_by?: string;
+  /** The receipt's tamper-evident id — the chain entry_hash. Present when `status` is `chained`. */
+  entry_hash?: string;
+  body_hash?: string;
+  chained_at?: string;
+  /** Re-hashing the source resolution still matches the chain — this one receipt is intact. */
+  verified?: boolean;
+}
+
+function toIsoString(v: unknown): string {
+  return v instanceof Date ? v.toISOString() : String(v);
+}
+
+/**
+ * The receipt for a co-signed decision, for a caller that is a member of its room. Returns null when the
+ * decision is unknown OR the caller is not in its room — one answer for both, so a receipt lookup cannot be
+ * used to probe which decisions exist. A resolution that is not yet anchored is `pending_anchor` (the anchor
+ * runs on a schedule); one still awaiting a signature is `unresolved`.
+ */
+export async function receiptForDecision(
+  pool: Pool,
+  decisionId: string,
+  memberId: string,
+): Promise<Receipt | null> {
+  const resolved = await pool.query<{ seq: string; room_id: string; payload: unknown }>(
+    `SELECT seq, room_id, payload FROM events
+      WHERE event_type = 'decision.resolved' AND payload ->> 'decision_id' = $1
+      ORDER BY seq DESC LIMIT 1`,
+    [decisionId],
+  );
+
+  if (resolved.rows.length === 0) {
+    // Not resolved — but does the decision even exist, and may this caller see it?
+    const decision = await pool.query<{ room_id: string }>(
+      `SELECT room_id FROM events
+        WHERE event_type = 'decision' AND payload ->> 'decision_id' = $1 LIMIT 1`,
+      [decisionId],
+    );
+    if (decision.rows.length === 0) return null;
+    const roomId = decision.rows[0].room_id;
+    if (!(await isRoomMember(pool, roomId, memberId))) return null;
+    return { decision_id: decisionId, room_id: roomId, status: 'unresolved' };
+  }
+
+  const row = resolved.rows[0];
+  if (!(await isRoomMember(pool, row.room_id, memberId))) return null;
+  const payload = row.payload as { resolution?: 'APPROVED' | 'DENIED'; signed_by?: string };
+
+  const chained = await pool.query<{ entry_hash: string; body_hash: string; ts: Date | string }>(
+    'SELECT entry_hash, body_hash, ts FROM audit_chain WHERE source_seq = $1',
+    [Number(row.seq)],
+  );
+  if (chained.rows.length === 0) {
+    return {
+      decision_id: decisionId,
+      room_id: row.room_id,
+      status: 'pending_anchor',
+      resolution: payload.resolution,
+      signed_by: payload.signed_by,
+    };
+  }
+  const c = chained.rows[0];
+  return {
+    decision_id: decisionId,
+    room_id: row.room_id,
+    status: 'chained',
+    resolution: payload.resolution,
+    signed_by: payload.signed_by,
+    entry_hash: c.entry_hash,
+    body_hash: c.body_hash,
+    chained_at: toIsoString(c.ts),
+    verified: bodyHash(row.payload) === c.body_hash,
+  };
 }

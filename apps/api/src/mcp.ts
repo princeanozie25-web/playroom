@@ -11,6 +11,7 @@ import {
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { getRoom, eventsAfter, roomWindowFloor, listRoomsForMember } from './events.js';
 import { pendingTagsForMember } from './mentions.js';
+import { receiptForDecision } from './audit.js';
 import { isRoomMember, listRoomMembers } from './members.js';
 import { activeBriefing } from './briefings.js';
 import { DECISION_POLL_HINT_MS } from './decisions.js';
@@ -187,6 +188,18 @@ export function roomMcpPortFor(identity: McpIdentity, deps: CommandDeps): RoomMc
         raised: res.raised.length,
         refused: res.refused ? res.refused.code : null,
       };
+    },
+
+    async getReceipt(decisionId) {
+      // null covers both an unknown decision and a room the member is not in — one refusal, no leak.
+      const receipt = await receiptForDecision(pool, decisionId, identity.memberId);
+      if (!receipt) {
+        throw new RoomMcpError(
+          'receipt_not_found',
+          'no such decision, or it is not in a room you belong to',
+        );
+      }
+      return receipt;
     },
   };
 }

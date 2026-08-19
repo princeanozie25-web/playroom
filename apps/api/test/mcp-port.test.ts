@@ -6,6 +6,7 @@ import { RoomMcpError } from '@playroom/hosts';
 import { testPool, uniqueRoomId, startTestServer } from './support.js';
 import { RoomBus } from '../src/bus.js';
 import { createRoom } from '../src/events.js';
+import { chainCommitmentEvents } from '../src/audit.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 import { roomMcpPortFor } from '../src/mcp.js';
 
@@ -66,6 +67,7 @@ async function deEnrol(roomId: string, member: string): Promise<void> {
 
 afterEach(async () => {
   for (const r of rooms) {
+    await pool.query('DELETE FROM audit_chain WHERE room_id = $1', [r]);
     await pool.query('DELETE FROM interrupts WHERE room_id = $1', [r]);
     await pool.query('DELETE FROM events WHERE room_id = $1', [r]);
     await pool.query('DELETE FROM room_members WHERE room_id = $1', [r]);
@@ -219,6 +221,54 @@ describe('pending tags — mentions with nothing to answer them (B3)', () => {
   });
 });
 
+describe('get_receipt — the tamper-evident receipt for a decision (A3 + B-track)', () => {
+  const prince = () =>
+    roomMcpPortFor({ memberId: 'prince', principalId: 'principal:prince' }, deps());
+
+  it('is pending_anchor after a co-sign resolves, then chained once the anchor runs', async () => {
+    const roomId = await room();
+    const v = await claudeMain().requestAction({
+      roomId,
+      action: 'pr.merge',
+      resource: 'repo:x#1',
+    });
+    await prince().respondToDecision({
+      roomId,
+      decisionId: v.decision_id!,
+      resolution: 'APPROVED',
+    });
+
+    // Resolved, but the anchor (a cron in prod) has not folded it into the chain yet.
+    const before = await claudeMain().getReceipt(v.decision_id!);
+    expect(before.status).toBe('pending_anchor');
+    expect(before.resolution).toBe('APPROVED');
+
+    await chainCommitmentEvents(pool); // the anchor runs
+    const after = await claudeMain().getReceipt(v.decision_id!);
+    expect(after.status).toBe('chained');
+    expect(after.entry_hash).toBeTruthy();
+    expect(after.verified).toBe(true);
+    expect(after.room_id).toBe(roomId);
+  });
+
+  it('refuses a non-member and an unknown decision the same way (receipt_not_found)', async () => {
+    const roomId = await room();
+    const v = await claudeMain().requestAction({
+      roomId,
+      action: 'pr.merge',
+      resource: 'repo:x#1',
+    });
+    await deEnrol(roomId, 'sol');
+    const sol = roomMcpPortFor({ memberId: 'sol', principalId: 'principal:jerry' }, deps());
+    await expect(sol.getReceipt(v.decision_id!)).rejects.toMatchObject({
+      code: 'receipt_not_found',
+    });
+    await expect(claudeMain().getReceipt('dec_does_not_exist')).rejects.toMatchObject({
+      code: 'receipt_not_found',
+    });
+  });
+});
+
 describe('the /mcp route (B1)', () => {
   it('refuses a request with no credential — 401, before any MCP handling', async () => {
     const server = await startTestServer();
@@ -273,7 +323,7 @@ describe('the /mcp route (B1)', () => {
     try {
       await client.connect(transport);
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(7);
+      expect(tools).toHaveLength(8);
       expect(tools.map((t) => t.name)).toContain('post_message');
 
       const res = await client.callTool({
