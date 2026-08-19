@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import {
+  admitToRoom,
   Client,
   httpCreateRoom,
   issueTestCredential,
@@ -195,6 +196,7 @@ describe('the claim is gone from the wire', () => {
     // also why credentials are per-member rather than one shared secret for the deployment.
     const id = room('forge-cred');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const solToken = await issueTestCredential('sol', 'identity-test-as-sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, solToken);
     await c.open();

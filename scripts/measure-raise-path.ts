@@ -21,7 +21,7 @@
 import type { Pool } from 'pg';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
-import { createRoom } from '../apps/api/src/events.js';
+import { createRoom, admitMember } from '../apps/api/src/events.js';
 import { raiseInterrupt } from '../apps/api/src/interrupts.js';
 
 loadRootEnv();
@@ -48,6 +48,10 @@ async function main(): Promise<void> {
   const pool: Pool = makePool(url);
   const roomId = `raise-measure-${Date.now()}`;
   await createRoom(pool, roomId, roomId, 'prince');
+  // ADR-009: createRoom now enrols only the creator, so admit each member that raises here.
+  await admitMember(pool, roomId, 'claude-code');
+  await admitMember(pool, roomId, 'claude-main');
+  await admitMember(pool, roomId, 'sol');
 
   // A budget big enough that no sample is refused: a refusal returns BEFORE the row is written and
   // would time a different, shorter path. The measurement is of the path that DOES the work.

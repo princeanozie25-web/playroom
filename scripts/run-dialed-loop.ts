@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs';
 import type { Pool } from 'pg';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
+import { admitMember } from '../apps/api/src/events.js';
 
 loadRootEnv();
 
@@ -330,6 +331,10 @@ async function main(): Promise<void> {
   }
 
   await post(ctx, '/rooms', { id: roomId, title: roomId });
+  // ADR-009 (the room door): POST /rooms now enrols only the creator, so admit the loop's member
+  // explicitly — the orders below summon claude-main, and summon requires prior membership. The
+  // write goes through the pool this run already holds, which points at the same database the door does.
+  await admitMember(pool, roomId, MEMBER);
 
   // ── 0b. A COLLISION, ON PURPOSE (S-CYCLE, SC-3) ────────────────────────────────────
   //
@@ -343,6 +348,7 @@ async function main(): Promise<void> {
   // this run exists to report.
   const collideRoom = `${roomId}-collide`;
   await post(ctx, '/rooms', { id: collideRoom, title: collideRoom });
+  await admitMember(pool, collideRoom, MEMBER); // same door: admit the member the collision orders summon
   const cc: Ctx = { ...ctx, roomId: collideRoom };
   const first = await createOrder(cc, { task: FILLER_TASK, dial: 1, cap: 1 });
   const second = await createOrder(cc, { task: FILLER_TASK, dial: 1, cap: 1 });

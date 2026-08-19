@@ -10,7 +10,7 @@ import {
 } from '@playroom/shared';
 import { dropRoomQuiesced, testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { createRoom } from '../src/events.js';
+import { admitMember, createRoom } from '../src/events.js';
 import { orderById } from '../src/orders.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 
@@ -62,6 +62,11 @@ async function newRoom(prefix: string): Promise<string> {
   const id = uniqueRoomId(prefix);
   rooms.push(id);
   await createRoom(pool, id, id, 'prince');
+  // ADR-009: createRoom enrols only the creator, so admit the agents this file's orders wire
+  // together (trigger `sol`, action `claude-main`) — without them createOrder refuses with
+  // order_member_unknown before ever reaching the task rules these cases assert.
+  await admitMember(pool, id, 'sol');
+  await admitMember(pool, id, 'claude-main');
   return id;
 }
 

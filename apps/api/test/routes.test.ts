@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   Client,
   httpCreateRoom,
   scriptedAdapter,
@@ -148,6 +149,7 @@ describe('route.selected is recorded (§6.2)', () => {
   it('emits which route, for which member, and why — alongside the summon', async () => {
     const id = room('route-selected');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -179,6 +181,7 @@ describe('route.selected is recorded (§6.2)', () => {
     // message list is unchanged by it.
     const id = room('route-quiet');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@sol hello', 'rq-1');
@@ -196,6 +199,7 @@ describe('a member with no usable route', () => {
     // was asked for.
     const id = room('route-none');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     await pool.query("UPDATE routes SET status = 'unavailable' WHERE member_id = 'sol'");
     try {
       const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
@@ -220,6 +224,7 @@ describe('a member with no usable route', () => {
     // collapsing into one unhelpful refusal as the code grows.
     const id = room('route-distinct');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
       id,
       'claude-main',

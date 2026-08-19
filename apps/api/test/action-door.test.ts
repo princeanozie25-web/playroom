@@ -12,6 +12,7 @@ import {
   testPool,
   uniqueRoomId,
   httpCreateRoom,
+  admitToRoom,
   type TestServer,
 } from './support.js';
 import { issueCredential, revokeCredential } from '../src/credentials.js';
@@ -130,6 +131,7 @@ describe('S2.1b Phase 1 — the door: authenticated ingress, identity derived', 
     const server = await startTestServer();
     const roomId = room('s21b-ok');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       const res = await postAction(server, roomId, token, {
@@ -151,6 +153,7 @@ describe('S2.1b Phase 1 — the door: authenticated ingress, identity derived', 
     const server = await startTestServer();
     const roomId = room('s21b-derive');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       // The body tries to claim it is sol / jerry. Every one of those is ignored: the subject is the
@@ -179,6 +182,7 @@ describe('S2.1b Phase 1 — the door: authenticated ingress, identity derived', 
     const server = await startTestServer();
     const roomId = room('s21b-revoked');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main', { revoked: true });
     try {
       const res = await postAction(server, roomId, token, {
@@ -199,6 +203,7 @@ describe('S2.1b Phase 1 — the door: authenticated ingress, identity derived', 
     const server = await startTestServer({ loggerStream: stream, logLevel: 'info' });
     const roomId = room('s21b-distinct');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const revoked = await cred('claude-main', { revoked: true });
     const expired = await cred('claude-main', { expiredHoursAgo: 1 });
     const unknown = `prm_${'0'.repeat(64)}`; // well-formed shape, matches no row
@@ -246,6 +251,7 @@ describe('S2.1b Phase 1 — the door: authenticated ingress, identity derived', 
     const server = await startTestServer({ actionRateMax: 3, actionRateWindowMs: 60_000 });
     const roomId = room('s21b-throttle');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       const statuses: number[] = [];
@@ -302,6 +308,7 @@ describe('S2.1b Phase 2 — the round trip: verdicts over the wire, and polling 
     const server = await startTestServer({ loggerStream: stream, logLevel: 'info' });
     const roomId = room('s21b-verdicts');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       // ALLOW — in scope, not protected. A4-F1: no decision event, so the decision_id is null and the
@@ -339,6 +346,7 @@ describe('S2.1b Phase 2 — the round trip: verdicts over the wire, and polling 
     const server = await startTestServer();
     const roomId = room('s21b-poll');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       const raised = await jsonBody(
@@ -383,6 +391,7 @@ describe('S2.1b Phase 2 — the round trip: verdicts over the wire, and polling 
     const server = await startTestServer();
     const roomId = room('s21b-nosign');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       const raised = await jsonBody(
@@ -416,6 +425,7 @@ describe('S2.1b Phase 2 — the round trip: verdicts over the wire, and polling 
     const server = await startTestServer();
     const roomId = room('s21b-allow-noexec');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       const allow = await jsonBody(
@@ -437,6 +447,7 @@ describe('S2.1b Phase 3 — adversarial: a stranger, refused by a record it cann
     const server = await startTestServer();
     const roomId = room('s21b-headline');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main'); // a credential the server issued moments ago and never "met"
     try {
       const res = await postAction(server, roomId, token, {
@@ -463,6 +474,7 @@ describe('S2.1b Phase 3 — adversarial: a stranger, refused by a record it cann
     const server = await startTestServer();
     const roomId = room('s21b-replay');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       const body = { action: 'secrets.read', resource: 'vault:x', client_msg_id: 'replay-1' };
@@ -479,6 +491,7 @@ describe('S2.1b Phase 3 — adversarial: a stranger, refused by a record it cann
     const server = await startTestServer();
     const roomId = room('s21b-crossmember');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'sol');
     const token = await cred('sol');
     try {
       const res = await postAction(server, roomId, token, {
@@ -521,6 +534,7 @@ describe('S2.1b Phase 3 — adversarial: a stranger, refused by a record it cann
     const server = await startTestServer();
     const roomId = room('s21b-badbody');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       const bad: unknown[] = [
@@ -548,6 +562,7 @@ describe('S2.1b Phase 3 — adversarial: a stranger, refused by a record it cann
     const server = await startTestServer({ actionRateMax: 2, actionRateWindowMs: 60_000 });
     const roomId = room('s21b-burst');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const token = await cred('claude-main');
     try {
       let throttled: DoorBody | undefined;

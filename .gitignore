@@ -42,3 +42,6 @@ agent-browser.json
 # showing it is asking to be taken on trust. Full takes stay outside the tree.
 videos/
 *.webm
+
+# Office lock files (transient, binary)
+~$*

@@ -191,7 +191,7 @@ describe('OAuth end to end (B2)', () => {
       // And it resolves to the CREDENTIAL's member (prince): a message posted through it is attributed to prince.
       const roomId = uniqueRoomId('oauth');
       rooms.push(roomId);
-      await createRoom(pool, roomId, roomId, 'prince'); // prince blanket-enrolled
+      await createRoom(pool, roomId, roomId, 'prince'); // prince is the creator, so enrolled (ADR-009)
       const transport = new StreamableHTTPClientTransport(new URL(`${server.httpBase}/mcp`), {
         requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } },
       });

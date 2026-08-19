@@ -5,7 +5,13 @@ import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { ERROR_ORDER_NOT_HUMAN, ERROR_ORDER_NOT_CREATOR } from '@playroom/shared';
 import { dropRoomQuiesced, testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { appendAgentEvent, appendMessage, appendSummon, createRoom } from '../src/events.js';
+import {
+  admitMember,
+  appendAgentEvent,
+  appendMessage,
+  appendSummon,
+  createRoom,
+} from '../src/events.js';
 import { ensureTask } from '../src/tasks.js';
 import { setBriefing } from '../src/briefings.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
@@ -65,6 +71,11 @@ async function briefedRoomWithOrder(prefix: string): Promise<{ roomId: string; o
   const roomId = uniqueRoomId(prefix);
   rooms.push(roomId);
   await createRoom(pool, roomId, roomId, 'prince');
+  // ADR-009: createRoom enrols only the creator; admit the agents the order wires together and the
+  // cycle summons (trigger `sol`, action `claude-main`) so the human's createOrder passes its member
+  // check and the cycle's roster_only summon is not blocked.
+  await admitMember(pool, roomId, 'sol');
+  await admitMember(pool, roomId, 'claude-main');
   await setBriefing(pool, {
     roomId,
     content: BRIEFING,

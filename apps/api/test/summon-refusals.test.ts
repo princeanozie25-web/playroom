@@ -6,6 +6,7 @@ import { appendSummon } from '../src/events.js';
 import { ensureTask } from '../src/tasks.js';
 import {
   Client,
+  admitToRoom,
   httpCreateRoom,
   scriptedAdapter,
   startTestServer,
@@ -100,6 +101,7 @@ describe('refuse out loud', () => {
   it('names the known member AND refuses the unknown one in the same message', async () => {
     const id = room('summon-mixed');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main'); // @claude must resolve to a member; @nobody is the deliberate miss
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -118,6 +120,9 @@ describe('refuse out loud', () => {
     // Not silence, which is what a caught-and-swallowed factory error would have been.
     const id = room('summon-unreachable');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    // sol IS in the room and addressable — the failure is her adapter, not her membership. Admit her, so the
+    // summon is legitimate and the turn fails LOUDLY at construction (the whole point of this case).
+    await admitToRoom(id, 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 

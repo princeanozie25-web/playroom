@@ -7,7 +7,8 @@
 // revise — then prints the one thing left for a person to do: open the room and tag `@claude` to kick
 // cycle 0. Everything after is order-rooted and runs on its own, bounded by the dial and the limits.
 //
-// THROUGH THE PRODUCT'S OWN FUNCTIONS. `createRoom` enrols every member; `createOrder` runs the same
+// THROUGH THE PRODUCT'S OWN FUNCTIONS. `createRoom` enrols only the creator (ADR-009), so this script
+// then admits the loop's agents explicitly; `createOrder` runs the same
 // command a WS frame would, so the orders are minted exactly as a person would mint them — human
 // creator, agent trigger/action, evented and projected. Nothing here is raw SQL, so nothing here can
 // seed a shape the running app would refuse. The orders are DB-backed, so the running server picks them
@@ -19,7 +20,7 @@ import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
 import { RoomBus } from '../apps/api/src/bus.js';
-import { createRoom } from '../apps/api/src/events.js';
+import { admitMember, createRoom } from '../apps/api/src/events.js';
 import { executeCommand, type CommandDeps } from '../apps/api/src/commands/index.js';
 
 loadRootEnv();
@@ -52,6 +53,10 @@ async function main(): Promise<void> {
 
   try {
     await createRoom(pool, roomId, 'Loop demo', 'prince');
+    // ADR-009 (the room door): createRoom now enrols only the creator, so admit the loop's agents
+    // explicitly — the orders below summon them, and summon requires prior membership.
+    await admitMember(pool, roomId, 'claude-main');
+    await admitMember(pool, roomId, 'sol');
 
     // Two orders make the cycle. Prince (a human) creates both; each names agent members of the room.
     const orders: Array<{ label: string; trigger: string; action: string }> = [

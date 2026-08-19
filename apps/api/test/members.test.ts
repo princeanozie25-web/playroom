@@ -1,12 +1,18 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   Client,
+  admitToRoom,
   httpCreateRoom,
   issueTestCredential,
   startTestServer,
   testPool,
   type TestServer,
 } from './support.js';
+
+// The non-creator members a full room used to get by blanket enrolment (ADR-009). Creation now enrols only
+// the creator, so these roster tests admit them explicitly — the same rows a room code or the `admit`
+// command would write — and the reads then follow the membership the way the product does.
+const NON_CREATOR_MEMBERS = ['claude-audit', 'claude-code', 'claude-main', 'jerry', 'sol'];
 import { listMembers, listRoomMembers, loadRoomTokens } from '../src/members.js';
 import { mandateFor } from '../src/mandates.js';
 
@@ -238,20 +244,23 @@ describe('a room roster, scoped', () => {
     server = await startTestServer();
     const room = `members-scope-${Date.now()}`;
     expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
+    // Admit the roster this test expects. Creation enrols only the creator now (ADR-009); these are the
+    // members the product would let in by a room code or an `admit`, written here so the roster read has
+    // something to return. The scoping property the assertion checks is unchanged — a room contains exactly
+    // who was put in it — only the enrolment is explicit instead of blanket.
+    await admitToRoom(room, ...NON_CREATOR_MEMBERS);
 
     const res = await fetch(`${server.httpBase}/rooms/${room}/members`, {
       headers: { authorization: `Bearer ${server.token}` },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { members: Array<{ id: string; principal_name: string }> };
-    // A new room gets every current member EXCEPT A GUEST'S — S-LIVE narrowed exactly one thing.
-    // `jerry` is new (a human member of an existing principal, migration 017); `ada` and `bo` are
-    // absent because their principals are flagged `guest`, and a guest gets into a room only by
-    // redeeming a room code. Blanket enrolment would have made the code decoration over an open
-    // door.
-    // claude-code (S-CC) is a non-guest member of principal:prince, so room creation enrols it like
-    // every other agent — it is summonable in any room, and always operates in its confined scratch
-    // workspace regardless of which room summons it (see the RT-005 retirement).
+    // The roster is exactly the creator plus the admitted members. `ada` and `bo` are still ABSENT — their
+    // principals are flagged `guest` and nothing admitted them, so a guest reaches a room only by redeeming
+    // a room code, never incidentally. That property outlived blanket enrolment: it is now the DEFAULT for
+    // everyone (no one is here who was not admitted) rather than a guest-only exception.
+    // claude-code (S-CC) is a normal agent member of principal:prince, admitted like the others; it always
+    // operates in its confined scratch workspace regardless of which room summons it (RT-005 retirement).
     expect(body.members.map((m) => m.id).sort()).toEqual([
       'claude-audit',
       'claude-code',
@@ -275,6 +284,7 @@ describe('a room roster, scoped', () => {
     // but membership is data, and the read must follow it.
     const room = `members-remove-${Date.now()}`;
     expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
+    await admitToRoom(room, ...NON_CREATOR_MEMBERS);
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
       room,
       'sol',
@@ -300,6 +310,9 @@ describe('a room roster, scoped', () => {
     // film types, checked through both moves.
     const room = `members-tokens-${Date.now()}`;
     expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
+    // @claude and @sol resolve only if claude-main and sol are IN this room — the token table is per-room
+    // (S1.1a), built from membership. Admit them, then the tags mean what the film types.
+    await admitToRoom(room, 'claude-main', 'sol');
     await loadRoomTokens(pool, room);
 
     const { summonRuling } = await import('../src/agent.js');
@@ -510,19 +523,19 @@ describe('creating a room requires a credential (RT-002, closed in S1.3c)', () =
 });
 
 describe('a guest is not enrolled by creating a room', () => {
-  it('CREATION SKIPS GUEST PRINCIPALS — the room code is the only way in', async () => {
-    // THE HOLE THIS CLOSES, stated as the thing that would have happened. `createRoom` enrols
-    // every member in the database, which was harmless while every member was mine. A stranger
-    // holding a guest slot would have become a member of every room created after they redeemed —
-    // including rooms nobody meant to show them — and the room code, whose entire job is to enrol
-    // the redeemer, would have been decoration over a door already open.
+  it('CREATION ENROLS ONLY THE CREATOR — no guest, and no one else either (ADR-009)', async () => {
+    // THE HOLE THIS ONCE CLOSED, and the wider one ADR-009 closed after it. Creation used to enrol every
+    // NON-GUEST member, and guests were the single deliberate exclusion — the room code's whole job. That
+    // exclusion is now the DEFAULT for everyone: a new room enrols exactly its creator, and every other
+    // member (guest or not) arrives by a deliberate admission. So a guest is not auto-enrolled — but neither
+    // is any agent or other human, which is the stronger property this now asserts.
     //
-    // Asserted on the ROW rather than on the handshake, because the handshake is unchanged and
-    // must stay that way: this is about who is a member, not about what the front door does with
-    // one. A guest with a genuine enrolment still walks the identical path.
+    // Asserted on the ROW rather than the handshake, because the handshake is unchanged and must stay that
+    // way: this is about who is a member, not what the front door does with one.
     const room = `members-guest-${Date.now()}`;
     expect((await httpCreateRoom(server.httpBase, room, server.token)).status).toBe(201);
 
+    // No guest was enrolled — the property that used to be the point, still true.
     const { rows } = await pool.query<{ member_id: string }>(
       `SELECT rm.member_id FROM room_members AS rm
          JOIN members AS m ON m.id = rm.member_id
@@ -535,17 +548,11 @@ describe('a guest is not enrolled by creating a room', () => {
       'a guest was enrolled by room creation',
     ).toEqual([]);
 
-    // And the non-guests still are, so this narrowed one thing and not everything. Without this
-    // half, a bug that enrolled NOBODY would pass the assertion above.
+    // And the roster is EXACTLY the creator — no blanket enrolment of the non-guest roster follows. This is
+    // the assertion that a bug enrolling everyone (the old behaviour) would now fail, the mirror of the old
+    // half that a bug enrolling nobody would have failed.
     const all = await listRoomMembers(pool, room);
-    expect(all.map((m) => m.id).sort()).toEqual([
-      'claude-audit',
-      'claude-code',
-      'claude-main',
-      'jerry',
-      'prince',
-      'sol',
-    ]);
+    expect(all.map((m) => m.id).sort()).toEqual(['prince']);
 
     await pool.query('DELETE FROM rooms WHERE id = $1', [room]);
   });

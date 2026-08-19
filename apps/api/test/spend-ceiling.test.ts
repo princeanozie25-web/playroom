@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   Client,
   factoryFor,
   httpCreateRoom,
@@ -50,6 +51,7 @@ beforeAll(async () => {
     ),
   });
   expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+  await admitToRoom(roomId, 'claude-main');
 });
 
 /** Run one real turn, so today's spend moves by a real (tiny) amount. Returns nothing. */

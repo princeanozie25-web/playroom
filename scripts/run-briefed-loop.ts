@@ -26,7 +26,7 @@ import { createAdapter } from '@playroom/adapters';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
 import { RoomBus } from '../apps/api/src/bus.js';
-import { createRoom } from '../apps/api/src/events.js';
+import { admitMember, createRoom } from '../apps/api/src/events.js';
 import { setBriefing } from '../apps/api/src/briefings.js';
 import { issueCredential } from '../apps/api/src/credentials.js';
 import { buildServer } from '../apps/api/src/server.js';
@@ -80,6 +80,11 @@ async function seedRoom(
   withBriefing: boolean,
 ): Promise<string> {
   await createRoom(pool, roomId, roomId, 'prince');
+  // ADR-009 (the room door): createRoom now enrols only the creator, so admit the members this loop
+  // uses — sol (trigger) and claude-main (cycle) are summoned; claude-code pulls through the door.
+  await admitMember(pool, roomId, 'claude-main');
+  await admitMember(pool, roomId, 'sol');
+  await admitMember(pool, roomId, 'claude-code');
   if (withBriefing) {
     await setBriefing(pool, {
       roomId,

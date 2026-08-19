@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   Client,
   expectEvent,
   factoryFor,
@@ -25,6 +26,7 @@ describe('agent turn contract', () => {
     ]);
     server = await startTestServer({ adapterFactory: factoryFor(adapter) });
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
   });
 
   afterAll(async () => {

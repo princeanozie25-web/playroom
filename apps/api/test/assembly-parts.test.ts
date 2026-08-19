@@ -2,7 +2,13 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { dropRoomQuiesced, testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { appendAgentEvent, appendMessage, appendSummon, createRoom } from '../src/events.js';
+import {
+  admitMember,
+  appendAgentEvent,
+  appendMessage,
+  appendSummon,
+  createRoom,
+} from '../src/events.js';
 import { ensureTask } from '../src/tasks.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 import {
@@ -150,6 +156,10 @@ describe('a refusal pauses the loop OUT LOUD, wearing its own name', () => {
     const roomId = uniqueRoomId('sl2-refusal');
     rooms.push(roomId);
     await createRoom(pool, roomId, roomId, 'prince');
+    // ADR-009: createRoom enrols only the creator, so the order's trigger/action agents must be
+    // admitted or createOrder refuses with 'order_member_unknown' before the class under test.
+    await admitMember(pool, roomId, 'sol');
+    await admitMember(pool, roomId, PRINCE_MEMBER);
 
     const created = await executeCommand(
       { actorId: 'prince', mode: 'human' },

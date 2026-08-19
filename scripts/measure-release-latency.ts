@@ -24,7 +24,7 @@ import { Mandate, signMandate } from '@playroom/fabric';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
 import { RoomBus } from '../apps/api/src/bus.js';
-import { createRoom } from '../apps/api/src/events.js';
+import { createRoom, admitMember } from '../apps/api/src/events.js';
 import { executeCommand, type CommandDeps } from '../apps/api/src/commands/index.js';
 import { resetMandateCache } from '../apps/api/src/mandates.js';
 
@@ -102,6 +102,9 @@ async function main(): Promise<void> {
       const roomId = `release-${Date.now()}-${i}`;
       roomIds.push(roomId);
       await createRoom(pool, roomId, roomId, 'prince');
+      // ADR-009: createRoom now enrols only the creator, so admit the members this release path drives.
+      await admitMember(pool, roomId, 'claude-main');
+      await admitMember(pool, roomId, 'sol');
       // claude-main emits a protected summon of sol → a CO_SIGN decision (paused).
       await executeCommand(
         { actorId: 'claude-main', mode: 'hosted' },

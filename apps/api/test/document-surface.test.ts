@@ -6,6 +6,7 @@ import {
   ClientDocumentUpload,
 } from '@playroom/shared';
 import {
+  admitToRoom,
   Client,
   expectEvent,
   httpCreateRoom,
@@ -71,6 +72,7 @@ async function room(prefix: string): Promise<{ roomId: string; server: TestServe
   const roomId = uniqueRoomId(prefix);
   rooms.push(roomId);
   expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+  await admitToRoom(roomId, 'claude-main');
   return { roomId, server };
 }
 

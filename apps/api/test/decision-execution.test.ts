@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { Mandate, signMandate } from '@playroom/fabric';
-import { testPool, uniqueRoomId } from './support.js';
+import { admitToRoom, testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
 import { appendDecision, createRoom, type DecisionPayload } from '../src/events.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
@@ -213,6 +213,9 @@ describe('the pause: a protected summon writes a decision and NO summon', () => 
       const roomId = uniqueRoomId('exec-pause');
       rooms.push(roomId);
       await createRoom(pool, roomId, roomId, 'prince');
+      // The summon targets sol, so sol must be in the room for it to resolve (and to fire on approval);
+      // claude-main, the emitter, is admitted alongside (harmless). Creation enrols only prince now (ADR-009).
+      await admitToRoom(roomId, 'claude-main', 'sol');
 
       const dec = await emitProtectedSummon(d, roomId);
       // The decision is a CO_SIGN of summon.initiate, under claude-main's mandate, needing prince.
@@ -239,6 +242,7 @@ describe('the release: an approval fires the held summon exactly once', () => {
       const roomId = uniqueRoomId('exec-approve');
       rooms.push(roomId);
       await createRoom(pool, roomId, roomId, 'prince');
+      await admitToRoom(roomId, 'claude-main', 'sol'); // the approved summon fires sol's turn — she must be here
       const dec = await emitProtectedSummon(d, roomId);
 
       // The human signs. THE ONLY thing that releases the held summon.
@@ -284,6 +288,7 @@ describe('denied: the action never runs, and the room says so', () => {
       const roomId = uniqueRoomId('exec-deny');
       rooms.push(roomId);
       await createRoom(pool, roomId, roomId, 'prince');
+      await admitToRoom(roomId, 'claude-main', 'sol'); // sol resolvable so the emission reaches the pause, not a not-in-room refusal
       const dec = await emitProtectedSummon(d, roomId);
 
       const signed = await executeCommand(

@@ -2,6 +2,7 @@ import { describe, expect, it, afterAll, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  admitToRoom,
   httpCreateRoom,
   scriptedAdapter,
   startTestServer,
@@ -43,6 +44,7 @@ function adapterFor(id: string) {
 beforeAll(async () => {
   server = await startTestServer({ adapterFactory: (id) => adapterFor(id) });
   expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+  await admitToRoom(roomId, 'claude-main', 'sol');
 });
 
 afterAll(async () => {

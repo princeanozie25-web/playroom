@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { ERROR_BRIEFING_NOT_HUMAN } from '@playroom/shared';
 import {
+  admitToRoom,
   dropRoomQuiesced,
   httpCreateRoom,
   issueTestCredential,
@@ -11,7 +12,13 @@ import {
   type TestServer,
 } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { appendAgentEvent, appendMessage, appendSummon, createRoom } from '../src/events.js';
+import {
+  admitMember,
+  appendAgentEvent,
+  appendMessage,
+  appendSummon,
+  createRoom,
+} from '../src/events.js';
 import { ensureTask } from '../src/tasks.js';
 import { setBriefing } from '../src/briefings.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
@@ -80,6 +87,10 @@ async function briefedRoom(prefix: string): Promise<string> {
   const roomId = uniqueRoomId(prefix);
   rooms.push(roomId);
   await createRoom(pool, roomId, roomId, 'prince');
+  // ADR-009: createRoom enrols only the creator; the cycle's order trigger/action agents must be
+  // admitted or createOrder refuses with 'order_member_unknown'.
+  await admitMember(pool, roomId, 'sol');
+  await admitMember(pool, roomId, 'claude-main');
   await setBriefing(pool, {
     roomId,
     content: BRIEFING,
@@ -298,6 +309,9 @@ describe('the puller reads the briefing through the door, works, and posts its b
     const roomId = uniqueRoomId('sl2-puller');
     rooms.push(roomId);
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    // ADR-009: the puller reads GET /history and posts a message as claude-code, both
+    // membership-scoped, so it must be admitted to the room it never gets summoned into.
+    await admitToRoom(roomId, 'claude-code');
     await setBriefing(pool, {
       roomId,
       content: BRIEFING,

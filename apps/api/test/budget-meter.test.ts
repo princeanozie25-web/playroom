@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   Client,
   factoryFor,
   httpCreateRoom,
@@ -38,6 +39,8 @@ beforeAll(async () => {
   });
   expect((await httpCreateRoom(server.httpBase, roomA, server.token)).status).toBe(201);
   expect((await httpCreateRoom(server.httpBase, roomB, server.token)).status).toBe(201);
+  await admitToRoom(roomA, 'claude-main');
+  await admitToRoom(roomB, 'claude-main');
 });
 
 afterAll(async () => {

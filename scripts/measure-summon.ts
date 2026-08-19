@@ -17,7 +17,12 @@ import type { ServerEvent } from '@playroom/shared';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
 import { RoomBus } from '../apps/api/src/bus.js';
-import { createRoom, appendMessage, latestRoomSummary } from '../apps/api/src/events.js';
+import {
+  createRoom,
+  admitMember,
+  appendMessage,
+  latestRoomSummary,
+} from '../apps/api/src/events.js';
 import { executeCommand, type CommandDeps } from '../apps/api/src/commands/index.js';
 import { maintainRoomSummary, type SummaryDeps } from '../apps/api/src/summary.js';
 import { createAdapter } from '../packages/adapters/src/index.js';
@@ -72,6 +77,9 @@ async function measureOne(
 ): Promise<Sample> {
   const roomId = `measure-${messageCount}-${Date.now()}`;
   await createRoom(pool, roomId, roomId, 'prince');
+  // ADR-009: createRoom now enrols only the creator, so admit the members this summon path drives.
+  await admitMember(pool, roomId, 'claude-main');
+  await admitMember(pool, roomId, 'sol');
 
   // Seed N-1 human messages directly — a message row is a message row however it was written,
   // and this is faster and cheaper than driving each through a summon.

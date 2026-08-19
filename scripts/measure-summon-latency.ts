@@ -24,7 +24,7 @@ import { performance } from 'node:perf_hooks';
 import { evaluate } from '../packages/fabric/src/index.js';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
-import { createRoom } from '../apps/api/src/events.js';
+import { createRoom, admitMember } from '../apps/api/src/events.js';
 import { listRoomMembers, matchRoomAgent } from '../apps/api/src/members.js';
 import { mandateFor } from '../apps/api/src/mandates.js';
 import { SUMMON_INITIATE_ACTION } from '../apps/api/src/agent.js';
@@ -53,9 +53,11 @@ async function main(): Promise<void> {
   const pool = makePool(url);
   const roomId = `sumlat-${Date.now()}`;
   try {
-    // createRoom enrols every non-guest member, so claude-main and sol are agent members of this room —
-    // exactly the state summonCommand's agent branch resolves against.
+    // ADR-009: createRoom now enrols only the creator, so admit claude-main and sol explicitly — that
+    // makes them agent members of this room, exactly the state summonCommand's agent branch resolves against.
     await createRoom(pool, roomId, roomId, 'prince');
+    await admitMember(pool, roomId, 'claude-main');
+    await admitMember(pool, roomId, 'sol');
 
     // Warm the path once (mandate validation, member reads) so the first sample is not a cold outlier —
     // ADR-008's rule: a first sample after idle is a cold number and belongs in its own row, not here.

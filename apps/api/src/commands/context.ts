@@ -167,6 +167,10 @@ export type Command =
   | { kind: 'removeDocument'; roomId: string; clientMsgId: string; documentId: string }
   // Clear the room's briefing (S1.7). Explicit — a room with no active briefing has nothing to clear.
   | { kind: 'clearBriefing'; roomId: string; clientMsgId: string }
+  // Admit a member to a room (ADR-009, the room door). Creation enrols only the creator now; this is how
+  // everyone else gets in. Owner-only and human-only (an agent may never widen the room), idempotent, and
+  // it confers no authority beyond membership — the member becomes addressable and visible, nothing more.
+  | { kind: 'admit'; roomId: string; member: string }
   // The loop runner (S-LOOP): a completed turn drives the next cycle. Dispatched fire-and-forget from
   // the post-completion seam under a `system` actor — it is the room running its own standing orders,
   // not a member acting. `orderId` is the completed turn's order (from its chain), for the error-pause;

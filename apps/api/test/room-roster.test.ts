@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   Client,
+  admitToRoom,
   httpCreateRoom,
   scriptedAdapter,
   startTestServer,
@@ -53,6 +54,7 @@ describe('per-room summon resolution', () => {
   it('summons a member who IS in the room, exactly as before', async () => {
     const id = room('roster-in');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'sol'); // creation enrols only the creator now (ADR-009); @sol needs sol in the room
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -68,6 +70,9 @@ describe('per-room summon resolution', () => {
     // called that".
     const id = room('roster-out');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    // Admit sol, THEN remove her — so this genuinely exercises the removal path the title names, not a member
+    // who was simply never here. Both produce the same refusal, and the removal is the one worth testing.
+    await admitToRoom(id, 'sol');
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [id, 'sol']);
 
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
@@ -100,6 +105,7 @@ describe('per-room summon resolution', () => {
   it('distinguishes the two in one message', async () => {
     const id = room('roster-both');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'sol'); // admit then remove, so @sol is a removed member and @nobody a typo
     await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [id, 'sol']);
 
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
@@ -121,6 +127,7 @@ describe('per-room summon resolution', () => {
     // next deploy.
     const id = room('roster-live');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'sol'); // she is addressable for the first message, then removed mid-session
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -160,6 +167,7 @@ describe('membership records', () => {
   it('cannot enrol the same member twice — the composite key is the record', async () => {
     const id = room('roster-dupe');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'sol'); // sol is in the room now (creation no longer adds her), so the next insert dupes
     await expect(
       pool.query('INSERT INTO room_members (room_id, member_id) VALUES ($1, $2)', [id, 'sol']),
     ).rejects.toThrow(/duplicate key/i);

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   Client,
   credentialCount,
   httpCreateRoom,
@@ -73,6 +74,7 @@ describe('a task is created when a human asks a member for work', () => {
   it('starts WORKING, names its assignee and intent, and reaches DONE when the turn completes', async () => {
     const id = room('task-working');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -124,6 +126,7 @@ describe('a task is created when a human asks a member for work', () => {
     // because both frames can be in flight before either has committed.
     const id = room('task-replay');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -145,6 +148,7 @@ describe('a task is created when a human asks a member for work', () => {
   it('two tagged members produce TWO tasks, one each', async () => {
     const id = room('task-two');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@claude and @sol both please', 't-1');
@@ -170,6 +174,7 @@ describe('input-required, at last', () => {
     // record of the same refusal, not a new refusal, and this assertion is what says so.
     const id = room('task-inputreq');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     await pool.query("UPDATE routes SET status = 'unavailable' WHERE member_id = 'sol'");
     try {
       const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
@@ -206,6 +211,7 @@ describe('held, per §14', () => {
     // where the work stopped and not that anything picks it up.
     const id = room('task-held');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@sol please look', 'h-1');

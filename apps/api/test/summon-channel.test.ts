@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import {
   Client,
+  admitToRoom,
   httpCreateRoom,
   startTestServer,
   testPool,
@@ -120,6 +121,7 @@ describe('the near guard: the summon tool is offered only to a summon-authorised
     const roomId = uniqueRoomId('channel-tools');
     rooms.push(roomId);
     expect((await httpCreateRoom(s.httpBase, roomId, s.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main', 'sol'); // both are tagged and must take a turn (ADR-009)
 
     const c = new Client(`${s.wsBase}/rooms/${roomId}/ws`, s.token);
     await c.open();
@@ -148,6 +150,9 @@ describe('the path: an emitted summon converges and produces one attributed turn
     const roomId = uniqueRoomId('channel-path');
     rooms.push(roomId);
     expect((await httpCreateRoom(s.httpBase, roomId, s.token)).status).toBe(201);
+    // claude-main takes a turn AND emits a summon of sol — sol must be in the room for that emission to
+    // resolve (matchRoomAgent is per-room). Admit both.
+    await admitToRoom(roomId, 'claude-main', 'sol');
 
     const c = new Client(`${s.wsBase}/rooms/${roomId}/ws`, s.token);
     await c.open();
@@ -186,6 +191,9 @@ describe('the injection posture: a structured emission is only as authorised as 
     const roomId = uniqueRoomId('channel-inject');
     rooms.push(roomId);
     expect((await httpCreateRoom(s.httpBase, roomId, s.token)).status).toBe(201);
+    // sol must be in the room to take its turn; claude-main is admitted too so the refusal that fires is the
+    // MANDATE (sol lacks summon.initiate), never an incidental "target not in room" for claude-main.
+    await admitToRoom(roomId, 'sol', 'claude-main');
 
     const c = new Client(`${s.wsBase}/rooms/${roomId}/ws`, s.token);
     await c.open();
@@ -216,6 +224,9 @@ describe('the depth cap under emission: a summoned agent may not start another s
     const roomId = uniqueRoomId('channel-depth');
     rooms.push(roomId);
     await createRoom(pool, roomId, roomId, 'prince');
+    // The EMITTER (claude-main) must be in the room: its mandate is roster_only, so an action requested under
+    // it from a room it is not in is BLOCKed with ROSTER_VIOLATION before the depth cap can be the refusal.
+    await admitToRoom(roomId, 'claude-main');
 
     let turnsTriggered = 0;
     const deps: CommandDeps = {
@@ -258,6 +269,9 @@ describe('control a: an emitted summon cannot name a member outside the room', (
     const roomId = uniqueRoomId('channel-target');
     rooms.push(roomId);
     await createRoom(pool, roomId, roomId, 'prince');
+    // The emitter claude-main is in the room (roster_only mandate); the TARGET nobody-real is not — so the
+    // refusal that fires is matchRoomAgent's "no agent by that name", the control this test is about.
+    await admitToRoom(roomId, 'claude-main');
 
     const deps: CommandDeps = {
       pool,

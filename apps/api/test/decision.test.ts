@@ -2,6 +2,7 @@ import { describe, expect, it, afterAll } from 'vitest';
 import { Writable } from 'node:stream';
 import { DecisionEvent } from '@playroom/shared';
 import {
+  admitToRoom,
   startTestServer,
   testPool,
   uniqueRoomId,
@@ -78,6 +79,9 @@ describe('mandate v0 — the producer', () => {
     try {
       await httpCreateRoom(server.httpBase, roomId, server.token);
       await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
+      // The SUBJECT's mandate is roster_only, so it must be in the room or evaluate() BLOCKs with
+      // ROSTER_VIOLATION before the verdict this test is about (ADR-009).
+      await admitToRoom(roomId, 'claude-main');
       const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
@@ -119,6 +123,9 @@ describe('mandate v0 — the producer', () => {
     try {
       await httpCreateRoom(server.httpBase, roomId, server.token);
       await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
+      // The SUBJECT's mandate is roster_only, so it must be in the room or evaluate() BLOCKs with
+      // ROSTER_VIOLATION before the verdict this test is about (ADR-009).
+      await admitToRoom(roomId, 'claude-main');
       const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(
@@ -188,6 +195,9 @@ describe('mandate v0 — the producer', () => {
     try {
       await httpCreateRoom(server.httpBase, roomId, server.token);
       await delegateTask(pool, roomId, 'claude-main'); // standing, per S1.3
+      // The SUBJECT's mandate is roster_only, so it must be in the room or evaluate() BLOCKs with
+      // ROSTER_VIOLATION before the verdict this test is about (ADR-009).
+      await admitToRoom(roomId, 'claude-main');
       const c = new Client(`${server.wsBase}/rooms/${roomId}/ws?after=0`, server.token);
       await c.open();
       c.ws.send(

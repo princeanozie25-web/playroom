@@ -6,7 +6,14 @@ import {
   type AgentAdapter,
   type AgentTurnChunk,
 } from '@playroom/shared';
-import { Client, httpCreateRoom, startTestServer, testPool, uniqueRoomId } from './support.js';
+import {
+  admitToRoom,
+  Client,
+  httpCreateRoom,
+  startTestServer,
+  testPool,
+  uniqueRoomId,
+} from './support.js';
 import { MAX_ACTIONS_PER_TURN } from '../src/agent.js';
 import { RoomBus } from '../src/bus.js';
 import { createRoom } from '../src/events.js';
@@ -131,6 +138,7 @@ describe('S2.1a Phase 1 — the channel: an emitted action reaches the evaluator
     });
     const roomId = room('s21a-route');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -174,6 +182,7 @@ describe('S2.1a Phase 1 — the channel: an emitted action reaches the evaluator
     });
     const roomId = room('s21a-allow');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -209,6 +218,7 @@ describe('S2.1a Phase 1 — the cap: one turn may not emit unboundedly', () => {
     });
     const roomId = room('s21a-cap');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -253,6 +263,7 @@ describe("S2.1a Phase 2 — the three verdicts, against claude-main's real manda
     });
     const roomId = room('s21a-v-allow');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -285,6 +296,7 @@ describe("S2.1a Phase 2 — the three verdicts, against claude-main's real manda
     });
     const roomId = room('s21a-v-cosign');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -346,6 +358,7 @@ describe("S2.1a Phase 2 — the three verdicts, against claude-main's real manda
     });
     const roomId = room('s21a-v-block');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -395,6 +408,7 @@ describe('S2.1a Phase 3 — adversarial: model output is untrusted input', () =>
     });
     const roomId = room('s21a-unknown');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -433,6 +447,7 @@ describe('S2.1a Phase 3 — adversarial: model output is untrusted input', () =>
     });
     const roomId = room('s21a-subjpin');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -457,6 +472,7 @@ describe('S2.1a Phase 3 — adversarial: model output is untrusted input', () =>
     // decision event and this does not, exactly the refused-vs-misconfigured distinction the rules ask for.
     const roomId = room('s21a-wrongsubj');
     await createRoom(pool, roomId, roomId, 'prince');
+    await admitToRoom(roomId, 'claude-main');
     const bus = new RoomBus();
     const deps: CommandDeps = {
       pool,
@@ -497,6 +513,7 @@ describe('S2.1a Phase 3 — adversarial: model output is untrusted input', () =>
     });
     const roomId = room('s21a-malformed');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();
@@ -533,6 +550,7 @@ describe('S2.1a Phase 3 — adversarial: model output is untrusted input', () =>
     });
     const roomId = room('s21a-burst');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     const c = new Client(`${server.wsBase}/rooms/${roomId}/ws`, server.token);
     try {
       await c.open();

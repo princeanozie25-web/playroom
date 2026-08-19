@@ -5,6 +5,7 @@ import { RoomBus } from '../src/bus.js';
 import {
   appendAgentEvent,
   appendMessage,
+  admitMember,
   appendRoomSummary,
   appendSummon,
   createRoom,
@@ -81,6 +82,10 @@ async function newRoom(prefix: string): Promise<string> {
   const id = uniqueRoomId(prefix);
   rooms.push(id);
   await createRoom(pool, id, id, 'prince');
+  // The order's trigger (sol) and action (claude-main) members must be in the room: creation enrols only the
+  // creator now (ADR-009), and their roster_only mandates require membership to act.
+  await admitMember(pool, id, 'sol');
+  await admitMember(pool, id, 'claude-main');
   return id;
 }
 

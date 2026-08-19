@@ -9,6 +9,7 @@ import {
   testPool,
   uniqueRoomId,
   httpCreateRoom,
+  admitToRoom,
   type TestServer,
 } from './support.js';
 import { issueCredential } from '../src/credentials.js';
@@ -86,6 +87,7 @@ describe('SCC-2 Phase 1 — the mandate: three verdicts against the real claude-
     const server = await startTestServer();
     const roomId = room('scc2-allow');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       const r = await jsonBody(
@@ -103,6 +105,7 @@ describe('SCC-2 Phase 1 — the mandate: three verdicts against the real claude-
     const server = await startTestServer();
     const roomId = room('scc2-cosign');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       const r = await jsonBody(
@@ -121,6 +124,7 @@ describe('SCC-2 Phase 1 — the mandate: three verdicts against the real claude-
     const server = await startTestServer();
     const roomId = room('scc2-block');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       const r = await jsonBody(
@@ -192,6 +196,7 @@ describe('SCC-2 Phase 2 — read and speak, and the interrupt', () => {
     const server = await startTestServer();
     const roomId = room('scc2-read');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const codeToken = await cred('claude-code');
     try {
       // Prince pins a brief into the room; claude-code, a member, pulls it back through the read half.
@@ -215,6 +220,7 @@ describe('SCC-2 Phase 2 — read and speak, and the interrupt', () => {
     const server = await startTestServer();
     const roomId = room('scc2-speak');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const codeToken = await cred('claude-code');
     try {
       // The body tries to author as prince / claude-main. Both are ignored: the author is the CREDENTIAL's
@@ -244,6 +250,7 @@ describe('SCC-2 Phase 2 — read and speak, and the interrupt', () => {
     const server = await startTestServer({ loggerStream: stream, logLevel: 'info' });
     const roomId = room('scc2-interrupt');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const codeToken = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -303,6 +310,7 @@ describe('SCC-2 Phase 3 — one real cycle: pull, work, post, ask, WAIT', () => 
     const server = await startTestServer();
     const roomId = room('scc2-cycle');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const codeToken = await cred('claude-code');
     await resetInterruptBudget('claude-code');
     const workspace = join(tmpdir(), `scc2-workspace-${Date.now()}`);

@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ClientFrame } from '@playroom/shared';
 import {
+  admitToRoom,
   Client,
   httpCreateRoom,
   scriptedAdapter,
@@ -188,6 +189,7 @@ describe('and it holds against a client that tries', () => {
   it('REFUSES an invented turn-triggering frame — out loud, socket intact', async () => {
     const id = room('forge-turn');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
 
@@ -235,6 +237,7 @@ describe('and it holds against a client that tries', () => {
     // whole database, in summon-provenance.
     const id = room('handoff-no-turn');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@claude take a first look', 'h-1');
@@ -266,6 +269,7 @@ describe('and it holds against a client that tries', () => {
     // it. Derived from records in stamp.ts, so there is no field here a client could influence.
     const id = room('stamped-turn');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
     await c.open();
     c.send('@sol please take a look', 's-1');

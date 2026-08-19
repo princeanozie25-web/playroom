@@ -4,7 +4,13 @@ import { resolve } from 'node:path';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { dropRoomQuiesced, testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { appendAgentEvent, appendMessage, appendSummon, createRoom } from '../src/events.js';
+import {
+  admitMember,
+  appendAgentEvent,
+  appendMessage,
+  appendSummon,
+  createRoom,
+} from '../src/events.js';
 import { ensureTask } from '../src/tasks.js';
 import { budgetFor, raiseInterrupt } from '../src/interrupts.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
@@ -61,6 +67,11 @@ async function newRoom(prefix: string): Promise<string> {
   const id = uniqueRoomId(prefix);
   rooms.push(id);
   await createRoom(pool, id, id, 'prince');
+  // ADR-009: createRoom enrols only the creator; admit the agents the order wires together and the
+  // cycle summons (trigger `sol`, action `claude-main` = ACTION_MEMBER) so createOrder passes its
+  // member check and a live cycle's roster_only summon is not blocked.
+  await admitMember(pool, id, 'sol');
+  await admitMember(pool, id, ACTION_MEMBER);
   return id;
 }
 

@@ -9,6 +9,7 @@ import {
   testPool,
   uniqueRoomId,
   httpCreateRoom,
+  admitToRoom,
   type TestServer,
 } from './support.js';
 import { issueCredential } from '../src/credentials.js';
@@ -156,6 +157,7 @@ describe('SCC-3 Phase 1 — the raised hand: a standalone interrupt that is not 
     const server = await startTestServer();
     const roomId = room('scc3-blocker');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -191,6 +193,7 @@ describe('SCC-3 Phase 1 — the raised hand: a standalone interrupt that is not 
     const server = await startTestServer();
     const roomId = room('scc3-fyi');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -216,6 +219,7 @@ describe('SCC-3 Phase 1 — the raised hand: a standalone interrupt that is not 
     const server = await startTestServer({ loggerStream: stream, logLevel: 'info' });
     const roomId = room('scc3-budget');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -254,6 +258,7 @@ describe('SCC-3 Phase 1 — the raised hand: a standalone interrupt that is not 
     const server = await startTestServer();
     const roomId = room('scc3-idem');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -329,6 +334,7 @@ describe('SCC-3 Phase 2 — waiting well: an honest backoff hint, never a callba
     const server = await startTestServer();
     const roomId = room('scc3-hint');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -356,6 +362,7 @@ describe('SCC-3 Phase 2 — waiting well: an honest backoff hint, never a callba
     const server = await startTestServer();
     const roomId = room('scc3-poll');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -471,6 +478,7 @@ describe('SCC-3 Phase 3 — adversarial: the hand cannot become a decision, a de
     const server = await startTestServer();
     const roomId = room('scc3-spam');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -504,6 +512,7 @@ describe('SCC-3 Phase 3 — adversarial: the hand cannot become a decision, a de
     const server = await startTestServer();
     const roomId = room('scc3-cross');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -536,6 +545,7 @@ describe('SCC-3 Phase 3 — adversarial: the hand cannot become a decision, a de
     const server = await startTestServer();
     const roomId = room('scc3-hostile');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -565,6 +575,7 @@ describe('SCC-3 Phase 3 — adversarial: the hand cannot become a decision, a de
     const server = await startTestServer();
     const roomId = room('scc3-refund');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');
@@ -616,6 +627,7 @@ describe('SCC-3 Phase 3 — adversarial: the hand cannot become a decision, a de
     const server = await startTestServer();
     const roomId = room('scc3-distinct');
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const token = await cred('claude-code');
     try {
       await resetInterruptBudget('claude-code');

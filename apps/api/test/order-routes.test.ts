@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   httpCreateRoom,
   issueTestCredential,
   startTestServer,
@@ -25,6 +26,10 @@ const roomId = uniqueRoomId('order-routes');
 beforeAll(async () => {
   server = await startTestServer();
   expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+  // ADR-009: createRoom enrols only the creator; admit the agents the order wires together
+  // (trigger `sol`, action `claude-main`) so the POST create passes its member check. The outsider
+  // case below removes and restores `sol` itself, so this admission does not affect it.
+  await admitToRoom(roomId, 'sol', 'claude-main');
 });
 
 afterAll(async () => {

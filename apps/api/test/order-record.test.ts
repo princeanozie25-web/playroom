@@ -9,7 +9,7 @@ import {
 } from '@playroom/shared';
 import { testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { createRoom } from '../src/events.js';
+import { admitMember, createRoom } from '../src/events.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 
 /**
@@ -62,6 +62,11 @@ async function room(prefix: string): Promise<string> {
   const roomId = uniqueRoomId(prefix);
   rooms.push(roomId);
   await createRoom(pool, roomId, roomId, 'prince');
+  // createRoom now enrols only the creator (ADR-009); admit the default order's trigger and action
+  // agents so member validation passes to the checks these cases actually assert. 'nobody-real' is
+  // deliberately left absent for the member-unknown case.
+  await admitMember(pool, roomId, 'sol');
+  await admitMember(pool, roomId, 'claude-main');
   return roomId;
 }
 

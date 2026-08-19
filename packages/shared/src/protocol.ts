@@ -1186,6 +1186,23 @@ export const ERROR_BRIEFING_TOO_LARGE = 'briefing_too_large';
 export const ERROR_BRIEFING_ABSENT = 'briefing_absent';
 
 /**
+ * THE ADMIT REFUSALS (ADR-009, the room door).
+ *
+ * Scoped room admission: a new room now enrols only its creator, and every other member is let in by a
+ * deliberate act. The load-bearing rule is the same one the briefing shares — an AGENT may not admit. Who
+ * is in a room is an authority boundary (membership is what makes a member addressable and what the reads
+ * are scoped by), so an agent talking itself into widening the room is the fabric routing around itself.
+ * Checked against the authenticated member's kind, before ownership, so an agent-owner is stopped by kind.
+ */
+export const ERROR_ADMIT_NOT_HUMAN = 'admit_not_human';
+/** A human who is not the room's owner tried to admit a member. Names the owner-only rule out loud. */
+export const ERROR_ADMIT_NOT_OWNER = 'admit_not_owner';
+/** The room predates owner records (`created_by` is NULL), so no one can admit to it. Fail-closed. */
+export const ERROR_ADMIT_NO_ROOM_OWNER = 'admit_no_room_owner';
+/** The named member does not exist. A named refusal instead of a foreign-key violation from the DB. */
+export const ERROR_ADMIT_NO_SUCH_MEMBER = 'admit_no_such_member';
+
+/**
  * THE PUSH REFUSALS (S-PUSH).
  *
  * A notification is a claim on a PERSON's attention delivered outside the room, so the first rule is

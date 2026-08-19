@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
-import { dropRoomQuiesced, testPool, uniqueRoomId } from './support.js';
+import { admitToRoom, dropRoomQuiesced, testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
 import { createRoom } from '../src/events.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
@@ -72,6 +72,7 @@ async function newRoom(prefix: string): Promise<string> {
   const id = uniqueRoomId(prefix);
   rooms.push(id);
   await createRoom(pool, id, id, 'prince');
+  await admitToRoom(id, 'claude-main', 'sol');
   return id;
 }
 

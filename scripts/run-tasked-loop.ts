@@ -27,7 +27,7 @@ import { createAdapter } from '@playroom/adapters';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
 import { RoomBus } from '../apps/api/src/bus.js';
-import { createRoom } from '../apps/api/src/events.js';
+import { admitMember, createRoom } from '../apps/api/src/events.js';
 import { setBriefing } from '../apps/api/src/briefings.js';
 import { executeCommand, type CommandDeps } from '../apps/api/src/commands/index.js';
 
@@ -90,6 +90,10 @@ async function waitForTurn(pool: Pool, roomId: string, member: string, ms = 9000
 
 async function seed(deps: CommandDeps, pool: Pool, roomId: string, task: string): Promise<string> {
   await createRoom(pool, roomId, roomId, 'prince');
+  // ADR-009 (the room door): createRoom now enrols only the creator, so admit the loop's agents
+  // explicitly — sol (trigger) and claude-main (cycle) are summoned, and summon requires membership.
+  await admitMember(pool, roomId, 'claude-main');
+  await admitMember(pool, roomId, 'sol');
   await setBriefing(pool, {
     roomId,
     content: BRIEFING,

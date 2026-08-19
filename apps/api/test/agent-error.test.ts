@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   Client,
   expectEvent,
   factoryFor,
@@ -22,6 +23,7 @@ describe('agent error handling', () => {
       adapterFactory: factoryFor(throwingAdapter('claude-main', 'provider exploded')),
     });
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
   });
 
   afterAll(async () => {

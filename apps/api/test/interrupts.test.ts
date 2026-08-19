@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   Client,
   delegateTask,
   httpCreateRoom,
@@ -75,6 +76,7 @@ describe('the three urgencies differ in behaviour', () => {
     // and the state S1.3 already reaches through §6.2 — reused rather than invented.
     const id = room('int-blocker');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     const taskId = await delegateTask(pool, id, 'claude-main');
     await clearSpend();
 
@@ -99,6 +101,7 @@ describe('the three urgencies differ in behaviour', () => {
   it('DECISION queues — it claims attention and stops nothing', async () => {
     const id = room('int-decision');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     const taskId = await delegateTask(pool, id, 'claude-main');
     await clearSpend();
 
@@ -121,6 +124,7 @@ describe('the three urgencies differ in behaviour', () => {
   it('FYI never interrupts, and never costs anything', async () => {
     const id = room('int-fyi');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     const taskId = await delegateTask(pool, id, 'claude-main');
     await clearSpend();
 
@@ -151,6 +155,7 @@ describe('the three urgencies differ in behaviour', () => {
     // and lose the error class that explains it.
     const id = room('int-held');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     const taskId = await delegateTask(pool, id, 'claude-main');
     await pool.query("UPDATE tasks SET state = 'held' WHERE id = $1", [taskId]);
     await clearSpend();
@@ -178,6 +183,7 @@ describe('a co-sign raises a DECISION interrupt through the same record', () => 
     // one nobody budgeted.
     const id = room('int-cosign');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     await delegateTask(pool, id, 'claude-main');
     await clearSpend();
 
@@ -221,6 +227,7 @@ describe('a co-sign raises a DECISION interrupt through the same record', () => 
     // person's attention twice for one decision — the same discipline the summon has.
     const id = room('int-once');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     const taskId = await delegateTask(pool, id, 'claude-main');
     await clearSpend();
 
@@ -246,6 +253,7 @@ describe('the log is the source of truth', () => {
   it('an interrupt rebuilds to its row urgency from its events alone', async () => {
     const id = room('int-rebuild');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     const taskId = await delegateTask(pool, id, 'claude-main');
     await clearSpend();
 
@@ -274,6 +282,7 @@ describe('the log is the source of truth', () => {
     // that runs a whole turn without claiming anyone's attention leaves the budget where it was.
     const id = room('int-silence');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     await clearSpend();
     const before = await budgetFor(pool, 'claude-main');
 
@@ -295,6 +304,7 @@ describe('interrupts_per_day stops being decorative (S1.4)', () => {
     // by NOTHING. `claude-main` is allowed six interrupts a day; the seventh is refused.
     const id = room('int-budget');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     await clearSpend();
 
     const limit = (await budgetFor(pool, 'claude-main')).limit;
@@ -344,6 +354,7 @@ describe('interrupts_per_day stops being decorative (S1.4)', () => {
     // exists to encourage.
     const id = room('int-fyi-free');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     await clearSpend();
     for (let i = 0; i < 6; i += 1) {
       await raiseInterrupt(pool, {
@@ -380,6 +391,7 @@ describe('interrupts_per_day stops being decorative (S1.4)', () => {
   it('the raise carries what was LEFT, so the room can show it without asking', async () => {
     const id = room('int-ambient');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     await clearSpend();
     const raised = await raiseInterrupt(pool, {
       roomId: id,
@@ -404,6 +416,7 @@ describe('one tap lowers the claim, and the raiser pays for it', () => {
     // once when the person says it was not worth making. That is what makes a downgrade a SIGNAL.
     const id = room('int-downgrade');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     const taskId = await delegateTask(pool, id, 'claude-main');
     await clearSpend();
 
@@ -443,6 +456,7 @@ describe('one tap lowers the claim, and the raiser pays for it', () => {
     // on someone else's behalf what deserves their attention.
     const id = room('int-notyours');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     await clearSpend();
     const raised = await raiseInterrupt(pool, {
       roomId: id,
@@ -472,6 +486,7 @@ describe('one tap lowers the claim, and the raiser pays for it', () => {
     // the event rather than polling, so the chip's budget drops as the tap lands.
     const id = room('int-visible');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     await clearSpend();
     const raised = await raiseInterrupt(pool, {
       roomId: id,
@@ -502,6 +517,7 @@ describe('one tap lowers the claim, and the raiser pays for it', () => {
   it('over the wire: the recipient taps, the room sees it, a stranger cannot', async () => {
     const id = room('int-wire');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main');
     await clearSpend();
     const raised = await raiseInterrupt(pool, {
       roomId: id,

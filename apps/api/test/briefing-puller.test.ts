@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   httpCreateRoom,
   issueTestCredential,
   startTestServer,
@@ -74,6 +75,7 @@ describe('the puller reads the briefing from GET /history — the second deliver
     rooms.push(roomId);
     // Owner is prince (the token's member); claude-code is the PULLER — a member with a credential.
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-code');
     const puller = await issueTestCredential('claude-code', 'brief-puller');
 
     // ABSENT → null, and the feed is unaffected.
@@ -119,6 +121,7 @@ describe('a briefing confers no authority', () => {
     const roomId = uniqueRoomId('brief-auth');
     rooms.push(roomId);
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'claude-main');
     // claude-main self-requests a governed action through the door — whatever its mandate rules, the
     // ruling must not move because a briefing was set.
     const cm = await issueTestCredential('claude-main', 'brief-authority');

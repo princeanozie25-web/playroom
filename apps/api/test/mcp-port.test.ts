@@ -5,7 +5,7 @@ import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { RoomMcpError } from '@playroom/hosts';
 import { testPool, uniqueRoomId, startTestServer } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { createRoom } from '../src/events.js';
+import { admitMember, createRoom } from '../src/events.js';
 import { chainCommitmentEvents } from '../src/audit.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
 import { roomMcpPortFor } from '../src/mcp.js';
@@ -45,19 +45,21 @@ const claudeMain = () =>
   roomMcpPortFor({ memberId: 'claude-main', principalId: 'principal:prince' }, deps());
 
 /**
- * A fresh room. Creation BLANKET-ENROLS every seeded member today (a scoped Room Door is ADR-009, not yet
- * built), so all of claude-main/sol/prince start as members. Tests that need a genuine NON-member call
- * `deEnrol` to remove one — which is exactly the state the gate and the scoping query must handle, and the
- * state every room will be in once the Door lands.
+ * A fresh room with the members these tests act as. The scoped Room Door landed (ADR-009): creation enrols
+ * only the creator, so claude-main and sol are ADMITTED here explicitly — the same rows the `admit` command or
+ * a room code would write. Tests that need a genuine NON-member call `deEnrol` to remove one, which is exactly
+ * the state the gate and the scoping query must handle.
  */
 async function room(): Promise<string> {
   const roomId = uniqueRoomId('mcp');
   rooms.push(roomId);
   await createRoom(pool, roomId, roomId, 'prince');
+  await admitMember(pool, roomId, 'claude-main');
+  await admitMember(pool, roomId, 'sol');
   return roomId;
 }
 
-/** Remove one member from a room's roster — manufacturing the non-member state blanket-enrolment hides. */
+/** Remove one member from a room's roster — manufacturing the non-member state an admission would fill. */
 async function deEnrol(roomId: string, member: string): Promise<void> {
   await pool.query('DELETE FROM room_members WHERE room_id = $1 AND member_id = $2', [
     roomId,

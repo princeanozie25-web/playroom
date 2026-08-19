@@ -63,14 +63,20 @@ function rowToServerEvent(row: EventRow): ServerEvent {
  * exactly that: a room nobody could enter and nobody could delete through the product.
  *
  * The creator is enrolled EXPLICITLY rather than as a consequence of being in `members`. That
- * matters the day rooms stop enrolling everyone: the line that keeps a creator out of their own
- * room would otherwise be a deletion nobody notices, and the failure would be a room that opens
- * for the whole roster except its author.
+ * matters now that rooms have stopped enrolling everyone: the line that keeps a creator out of their
+ * own room would otherwise be a deletion nobody notices, and the failure would be a room that opens
+ * for nobody, including its author.
  *
- * A NEW ROOM STILL GETS EVERY CURRENT MEMBER. Not a policy choice — it is what already happens,
- * written down (S1.1b). Narrowing it needs a way to express exceptions, which is invites, which
- * needs an authenticated inviter; that arrived in S1.2 and the invite surface has not. What is
- * new here is only that the creator's own row is guaranteed rather than incidental.
+ * ── A NEW ROOM ENROLS ONLY ITS CREATOR (ADR-009, the room door) ──
+ *
+ * The eventual design the S1.1b comment named has arrived. Creation used to blanket-enrol every
+ * non-guest member — "what already happens, written down" — and that made membership a non-decision:
+ * every member was in every room, so "who is in this room" carried no information and the reads scoped
+ * by it protected nothing new. The room now starts with exactly one member, and everyone else is let in
+ * by a deliberate act: a guest via a room code (`redeemRoomCode`), or any member via `admitMember` — the
+ * governed `admit` command (owner-only, human-only). Membership becomes the authority boundary it was
+ * always meant to be, and cross-owner collaboration becomes expressible (my worker + yours in one room,
+ * without merging private context) because a room no longer silently contains the whole roster.
  */
 export async function createRoom(
   pool: Pool,
@@ -82,38 +88,17 @@ export async function createRoom(
   try {
     await client.query('BEGIN');
     // `created_by` is the creator, stored so the room has an OWNER (S1.7) — the one member who may set
-    // its briefing. On a repeated POST of an existing id the ON CONFLICT DO NOTHING keeps the original
-    // owner, so ownership never silently changes hands on a re-create.
+    // its briefing and admit others. On a repeated POST of an existing id the ON CONFLICT DO NOTHING keeps
+    // the original owner, so ownership never silently changes hands on a re-create.
     const inserted = await client.query<RoomRow>(
       `INSERT INTO rooms (id, title, created_by) VALUES ($1, $2, $3)
        ON CONFLICT (id) DO NOTHING
        RETURNING id, title, created_at, created_by`,
       [id, title, creator],
     );
-    await client.query(
-      // EVERY MEMBER EXCEPT A GUEST'S. The blanket enrolment is unchanged for the members that
-      // have always been here; what is excluded is any member acting for a principal flagged
-      // `guest` in migration 017.
-      //
-      // Because the alternative is an open door with a lock painted on it. A guest slot is
-      // redeemed by a stranger with a room code, and the code's entire job is to enrol them —
-      // if creation enrolled them anyway, they would be a member of every room created after
-      // they redeemed, and the code would be decoration. So a guest gets in exactly one way:
-      // a redemption that writes the row deliberately.
-      //
-      // Narrowing this for EVERYONE is the right eventual design and a bigger change than this
-      // slice should make: `seed-room.ts` and the film's room both rely on the agents being
-      // enrolled by creation, and take 13 is the asset.
-      `INSERT INTO room_members (room_id, member_id)
-       SELECT $1, m.id
-         FROM members AS m
-         JOIN principals AS p ON p.id = m.principal_id
-        WHERE p.guest = false
-       ON CONFLICT DO NOTHING`,
-      [id],
-    );
-    // THE CREATOR, NAMED. Redundant while every member is enrolled above, and it is the one row
-    // whose absence would make the room unopenable by the person who asked for it.
+    // THE CREATOR, AND ONLY THE CREATOR. This is the whole of the room's initial membership now (ADR-009).
+    // A room with no members is unopenable by anyone including its author, so this row is not optional; and
+    // it is the ceiling too — no blanket enrol follows it. Everyone else arrives through an explicit admit.
     await client.query(
       `INSERT INTO room_members (room_id, member_id) VALUES ($1, $2)
        ON CONFLICT DO NOTHING`,
@@ -135,6 +120,30 @@ export async function createRoom(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Admit a member to a room (ADR-009, the room door) — the enrol primitive every explicit admission shares.
+ *
+ * Idempotent by the primary key: re-admitting an already-present member is a no-op, so a caller need not
+ * check first. The `room_members` PK is (room_id, member_id) and member_id FKs `members(id)`, so admitting a
+ * member that does not exist fails at the database — the governed `admit` command names that refusal before
+ * it ever reaches here, but a script or seed calling the primitive directly inherits the FK as its backstop.
+ *
+ * Low-level and UNGOVERNED on purpose: the authority question (who may admit whom) lives in the `admit`
+ * command; this is only the write, which that command, `redeemRoomCode`, and the seeds all funnel through.
+ * Accepts a pool or a transaction client so a caller enrolling inside a larger transaction can share it.
+ */
+export async function admitMember(
+  db: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>,
+  roomId: string,
+  memberId: string,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO room_members (room_id, member_id) VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    [roomId, memberId],
+  );
 }
 
 export async function getRoom(pool: Pool, id: string): Promise<RoomRow | null> {

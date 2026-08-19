@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  admitToRoom,
   Client,
   httpCreateRoom,
   issueTestCredential,
@@ -40,6 +41,7 @@ async function roomWithTask(
 ): Promise<{ id: string; c: Client; taskId: string }> {
   const id = room(prefix);
   expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+  await admitToRoom(id, 'claude-main', 'sol');
   const c = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, server.token);
   await c.open();
   c.send(tag, `seed-${id}`);
@@ -356,6 +358,7 @@ describe('S12-N2 is closed: the subject must be justified by a record', () => {
     // request that never needed a record.
     const id = room('subj-self');
     expect((await httpCreateRoom(server.httpBase, id, server.token)).status).toBe(201);
+    await admitToRoom(id, 'claude-main', 'sol');
     const solToken = await issueTestCredential('sol', 'handoff-test-self');
     const sol = new Client(`${server.wsBase}/rooms/${id}/ws?after=0`, solToken);
     await sol.open();

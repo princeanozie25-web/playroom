@@ -13,6 +13,7 @@ import { loadRootEnv } from '../src/env.js';
 import { buildServer } from '../src/server.js';
 import { makePool } from '../src/db.js';
 import { issueCredential } from '../src/credentials.js';
+import { admitMember } from '../src/events.js';
 import { ensureTask, taskCreatedEvent } from '../src/tasks.js';
 
 loadRootEnv();
@@ -206,6 +207,25 @@ export async function httpCreateRoom(
     },
     body: JSON.stringify({ id, title: id }),
   });
+}
+
+/**
+ * Admit members to a room (ADR-009, the room door). Creation now enrols ONLY the creator, so a test that
+ * summons an agent or connects a second member must first put them in the room — the same rows a room code
+ * (`redeemRoomCode`) or the `admit` command would write. Idempotent; a member already in the room is a no-op.
+ *
+ * Opens and ends its own pool so a caller need not thread one, matching `issueTestCredential` next door.
+ * This is deliberately the LOW-LEVEL enrol (`admitMember`), not the governed `admit` command: a test setting
+ * up its fixtures is not exercising the owner gate, it is establishing who is in the room, so it writes the
+ * membership directly the way redemption does. The gate itself is exercised by `admit`'s own suite.
+ */
+export async function admitToRoom(roomId: string, ...memberIds: string[]): Promise<void> {
+  const pool = testPool();
+  try {
+    for (const id of memberIds) await admitMember(pool, roomId, id);
+  } finally {
+    await pool.end();
+  }
 }
 
 /**

@@ -27,7 +27,7 @@ import type { AgentAdapter, AgentTurnChunk } from '@playroom/shared';
 import { loadRootEnv } from '../apps/api/src/env.js';
 import { makePool } from '../apps/api/src/db.js';
 import { RoomBus } from '../apps/api/src/bus.js';
-import { createRoom } from '../apps/api/src/events.js';
+import { createRoom, admitMember } from '../apps/api/src/events.js';
 import { executeCommand, type CommandDeps } from '../apps/api/src/commands/index.js';
 
 loadRootEnv();
@@ -82,6 +82,9 @@ async function main(): Promise<void> {
   const noop: number[] = [];
   try {
     await createRoom(pool, roomId, roomId, 'prince');
+    // ADR-009: createRoom now enrols only the creator, so admit the order's trigger and action members.
+    await admitMember(pool, roomId, 'claude-main');
+    await admitMember(pool, roomId, 'sol');
     // The order under test: sol's completion fires a summon of claude-main. A high unattended budget
     // so the attendance dial does not pause it mid-measurement (that path is proved in the tests).
     const created = await executeCommand(

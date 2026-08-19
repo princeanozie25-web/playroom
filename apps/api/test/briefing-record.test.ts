@@ -8,6 +8,7 @@ import {
   ERROR_BRIEFING_TOO_LARGE,
 } from '@playroom/shared';
 import {
+  admitToRoom,
   Client,
   httpCreateRoom,
   issueTestCredential,
@@ -298,6 +299,7 @@ describe('the transport: owner sets over the socket; a non-owner is refused ther
     const roomId = uniqueRoomId('brief-ws-deny');
     rooms.push(roomId);
     expect((await httpCreateRoom(server.httpBase, roomId, server.token)).status).toBe(201);
+    await admitToRoom(roomId, 'jerry');
 
     // Jerry is a human member of the room (creation enrols him) but not its owner.
     const jerryToken = await issueTestCredential('jerry', 'brief-nonowner');
