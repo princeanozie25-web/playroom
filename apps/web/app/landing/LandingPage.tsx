@@ -255,7 +255,9 @@ export function LandingPage() {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const timer = window.setInterval(() => {
       setDemonstrationStage((stage) => (stage + 1) % demonstrationStages.length);
-    }, 1800);
+      // 3.6s, not 1.8s: a stage carries a heading + a sentence, and the old cadence flipped it before it
+      // could be read. Slower default; the pause control and Replay are there for anyone who wants them.
+    }, 3600);
     return () => window.clearInterval(timer);
   }, [demoPaused]);
 

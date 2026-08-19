@@ -75,8 +75,8 @@ export function Welcome({
         name the person whose signature it would need — including when that person is you.
       </p>
       <p className="welcome-line welcome-optional">
-        <strong>Room tools</strong>, under the header, let you set a briefing everyone reads or hand
-        the room a document — shared context every assistant can see.
+        <strong>Room tools</strong>, above the message box, let you set a briefing everyone reads or
+        hand the room a document — shared context every assistant can see.
       </p>
       <button
         className="welcome-dismiss"
