@@ -15,6 +15,22 @@ grounded in `docs/audits/2026-08-fable-contract-map.md` and the current code. Le
 
 **The only gates are technical dependencies** — no revenue gate (dropped 18 Aug).
 
+## Shipped in the 19 Aug autonomous run (5 slices, all on main, CI green)
+
+| Slice           | Commit    | What landed                                                                              |
+| --------------- | --------- | ---------------------------------------------------------------------------------------- |
+| **A1**          | `31b4c87` | Signed the mandates (Ed25519). Invariant #3 is cryptographic; the authority root exists. |
+| **B1**          | `2a28642` | Remote MCP server — a Claude subscription drives a room over Streamable HTTP.            |
+| **B3**          | `60436d9` | `list_pending_tags` — a connected member discovers when it was @-mentioned.              |
+| **A3**          | `24b7bc6` | Tamper-evident audit chain (`audit_chain`) — the moat's cryptographic bar.               |
+| **get_receipt** | `1efaaa8` | The 8th MCP tool — a subscription fetches a commitment's receipt. Tool set complete.     |
+
+Each was adversarially reviewed and its findings fixed before commit. **B2 (OAuth) is DEFERRED** pending
+Prince's auth-model decision — it is the external authentication front door (Playroom has no human login/
+consent system today) and needs a consent surface in Codex's web lane. The remaining tracks (C1 Execution
+Gate, the Door, A2 delegation, the fabric-completion track) are larger behaviour changes or need a decision;
+they are the next session's picks, not unsupervised autonomous ones.
+
 ## The dependency spine — why this order
 
 ```
@@ -126,8 +142,13 @@ The report is explicit (§18.12): **only after verification semantics are trustw
 
 ## The immediate next three (grounded, ordered)
 
-1. **A1 — sign the mandates.** Ready to build in one pass; the authority root everything external depends on.
-2. **B1 — remote MCP server** over the command layer. The visible wedge; safe the moment A1 lands.
-3. **C1 — Execution Gate.** Closes the one invariant the repo openly does not hold (#7).
+1. ~~**A1 — sign the mandates.**~~ **DONE** `31b4c87`. The authority root everything external depends on.
+2. ~~**B1 — remote MCP server**~~ **DONE** `2a28642` (+ B3 `60436d9`, A3 `24b7bc6`, get_receipt `1efaaa8`).
+3. **C1 — Execution Gate.** Closes the one invariant the repo openly does not hold (#7). **Next up** — but a
+   larger, cross-component change (the gate sits in front of `claude-code`'s out-of-fabric host workspace),
+   so it wants a focused session, not the tail of an autonomous run.
 
-Everything else sequences behind these three. Related: [[playroom-roadmap-status-and-mcp]], [[playroom-s21a-tool-call-channel]], [[playroom-s21-mandate-signing-design]].
+**Also queued, needing a decision or their own session:** B2 OAuth (auth-model decision + consent UI, Codex's
+lane — DEFERRED); the Room Door (ADR-009, scoped admission — a behaviour change with wide test blast radius);
+A2 delegation-chain narrowing; the fabric-completion track (screening L1 / egress DLP / Door) that gates
+opening to a non-Prince user. Related: [[playroom-roadmap-status-and-mcp]], [[playroom-s21a-tool-call-channel]], [[playroom-s21-mandate-signing-design]].
