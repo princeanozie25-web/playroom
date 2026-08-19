@@ -70,4 +70,41 @@ That residual is RT-005 (`docs/security/red-team-log.md`), and SCC-2 does not cl
 every surface rendering this member must honour, per ADR-004: **participation and requests governed;
 work bridged.** A posted closeout is a message, not a receipt.
 
+## `host_scope` / `host_protected` — the Execution Gate's grants (C1, ADR-012)
+
+Two OPTIONAL fields let a mandate govern HOST operations (`fs.*` / `git.*` / `shell.*`) the way `scope`
+governs abstract ones — except they match the action's **resource**, not just its type. Each is a list of
+`{ "action": "...", "resource": "<glob>" }`, where the glob is `**` (any run of characters, including `/`)
+and `*` (within a single path segment). `evaluate` resolves a host op against them: a type granted nowhere
+is BLOCK (`OUT_OF_SCOPE`); a `host_protected` match is CO_SIGN (signer = `co_sign.by`) and outranks an
+allow; a `host_scope` match is ALLOW; an unmatched resource under a granted type is BLOCK
+(`RESOURCE_OUT_OF_SCOPE`) for `fs.*`/`git.*` but CO_SIGN (`SHELL_NOT_ALLOWLISTED`) for `shell.*` —
+allowlist + co-sign the rest, never a raw shell.
+
+**The gate DECIDES; it never executes (ADR-012, RT-005).** A Local Node (C2) runs an op only on an ALLOW,
+under a revocable lease. Omitting both fields grants NO host op — which is why every existing mandate,
+carrying neither, is unchanged (and `canonicalise` drops undefined fields, so no signature moved).
+
+**TO ACTIVATE for `claude-code` in production (a re-sign step, not a code change):** add the block below to
+`claude-code.json` and re-sign with `PLAYROOM_MANDATE_SIGNING_KEY=<key> pnpm tsx scripts/sign-mandates.ts`.
+Until then C1's capability ships INERT for prod — the shipped mandate carries no host policy, so every host
+op claude-code asks for is refused `OUT_OF_SCOPE`, asserted in `apps/api/test/execution-gate.test.ts`.
+
+```json
+"host_scope": [
+  { "action": "fs.read",   "resource": "**" },
+  { "action": "fs.write",  "resource": "workspace/**" },
+  { "action": "git.commit","resource": "**" },
+  { "action": "git.push",  "resource": "refs/heads/feature/*" },
+  { "action": "shell.exec","resource": "npm test" },
+  { "action": "shell.exec","resource": "npm run **" },
+  { "action": "shell.exec","resource": "git status" }
+],
+"host_protected": [
+  { "action": "git.push", "resource": "refs/heads/main" }
+]
+```
+
+Tune the block to the real workspace before signing — it is the literal policy the gate will enforce.
+
 Changes ship under a `feat/mandate` prefix (Bible §9.5).

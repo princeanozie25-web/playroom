@@ -1,4 +1,4 @@
-import type { LoadedMandate } from './mandate.js';
+import type { LoadedMandate, Mandate } from './mandate.js';
 
 // Mandate evaluation. Bible §9.2, minus the branches whose inputs do not exist yet.
 //
@@ -16,8 +16,9 @@ export type Decision = 'ALLOW' | 'CO_SIGN' | 'BLOCK';
  * An OPEN string on the wire (see CONTRIBUTING: closed unions for what you dispatch
  * on, open strings for what will grow) — but a closed union HERE, inside the
  * evaluator, because this is precisely the place that dispatches on it and controls
- * both ends. S2.1 adds `SIGNATURE_INVALID` (now present, below); `REPLAY` and
- * `LIMIT_EXCEEDED` stay reserved for replay protection and S2.7 limits.
+ * both ends. S2.1 adds `SIGNATURE_INVALID` (now present, below); C1 adds the two host-gate codes
+ * (`RESOURCE_OUT_OF_SCOPE`, `SHELL_NOT_ALLOWLISTED`); `REPLAY` and `LIMIT_EXCEEDED` stay reserved for
+ * replay protection and S2.7 limits.
  */
 export type ReasonCode =
   | 'ALLOWED_IN_SCOPE'
@@ -26,12 +27,21 @@ export type ReasonCode =
   | 'MANDATE_EXPIRED'
   | 'OUT_OF_SCOPE'
   | 'ROSTER_VIOLATION'
-  | 'PROTECTED_ACTION';
+  | 'PROTECTED_ACTION'
+  // C1 — the execution gate. A host op whose TYPE the mandate grants, but whose RESOURCE matched no
+  // allowed pattern: a write outside the workspace, a push to an ungranted ref. BLOCK (fs/git confinement).
+  | 'RESOURCE_OUT_OF_SCOPE'
+  // C1 — a `shell.*` command the mandate grants the member to run, but which matched no allowlist pattern.
+  // CO_SIGN, not BLOCK: allowlist + co-sign the rest (Prince's ruling) — never a raw shell, but not a wall.
+  | 'SHELL_NOT_ALLOWLISTED';
 
 export interface ActionRequest {
-  /** Action type, e.g. `pr.review`, `pr.merge`. Matched against scope exactly. */
+  /** Action type. An ABSTRACT action (`pr.review`, `pr.merge`) matched against `scope` by type; OR a HOST op
+   *  (`fs.*` / `git.*` / `shell.*`) routed to the execution gate and matched against the mandate's host policy. */
   type: string;
-  /** What the action is against, e.g. `repo:playroom/playroom#pr-41`. */
+  /** What the action is against. For an abstract action, an opaque resource like `repo:...#pr-41` (matched by
+   *  nothing today). For a HOST op, the target the gate globs against the mandate's host policy: a
+   *  workspace-relative POSIX path (`fs.*`), a git ref (`git.*`), or the exact command line (`shell.*`). */
   resource: string;
 }
 
@@ -83,6 +93,97 @@ export interface Verdict {
  *   `counterparties` branch cannot be evaluated and is SKIPPED — see the branch for why
  *   that is not a hole.
  */
+// ── THE EXECUTION GATE (C1, ADR-012) ────────────────────────────────────────────────────────────
+//
+// A host operation lives in a fixed namespace — `fs.*`, `git.*`, `shell.*` — so it is recognisable from
+// its type alone, without a registry. An abstract action (`pr.merge`, `deploy`, `summon.initiate`) is
+// none of these and takes the type-level `scope` path unchanged.
+const HOST_ACTION_PREFIXES = ['fs.', 'git.', 'shell.'] as const;
+function isHostAction(type: string): boolean {
+  return HOST_ACTION_PREFIXES.some((p) => type.startsWith(p));
+}
+
+/**
+ * Glob-match a host resource against a mandate pattern. `**` matches any run of characters INCLUDING `/`;
+ * `*` matches within a single path segment (never `/`); every other character is literal. Anchored — the
+ * whole resource must match. Pure, and compiled per call: a mandate carries a handful of patterns, so this
+ * stays microseconds, inside the §11 budget. The resource conventions (workspace-relative paths, git refs,
+ * exact command lines) are the caller's contract; the evaluator only matches strings.
+ */
+function matchResourceGlob(resource: string, pattern: string): boolean {
+  let re = '';
+  for (let i = 0; i < pattern.length; i += 1) {
+    const c = pattern[i];
+    if (c === '*') {
+      if (pattern[i + 1] === '*') {
+        re += '.*';
+        i += 1;
+      } else {
+        re += '[^/]*';
+      }
+    } else if ('\\^$.|?+()[]{}'.includes(c)) {
+      re += `\\${c}`; // escape a regex metacharacter so it matches literally
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`).test(resource);
+}
+
+/**
+ * Resolve a host op against the mandate's resource-scoped policy — the whole of C1's new authority logic.
+ * Standing (authenticity, expiry, roster) is already established by the caller; this answers only *what
+ * does this particular host op need*. Deny-by-default holds at the host layer exactly as at the abstract
+ * one: a type the mandate grants NOWHERE is OUT_OF_SCOPE. A protected pattern outranks an allowed one (a
+ * member may push, but a push to `main` still pauses). An unmatched resource under a granted type is
+ * BLOCKED for `fs.*`/`git.*` (confinement) but ESCALATED to a human for `shell.*` (Prince's ruling:
+ * allowlist + co-sign the rest). The gate DECIDES; it never runs anything (RT-005 preserved — a Local
+ * Node executes only on ALLOW).
+ */
+function evaluateHostOp(
+  action: ActionRequest,
+  m: Mandate,
+  base: { effective_mandate_hash: string | null; policy_version: string | null },
+): Verdict {
+  const signer = m.co_sign.by === 'principal' ? m.principal : m.co_sign.by;
+  const grants = (m.host_scope ?? []).filter((g) => g.action === action.type);
+  const protectedGrants = (m.host_protected ?? []).filter((g) => g.action === action.type);
+
+  // Deny-by-default: the mandate grants this host action nowhere. An unlisted power is not a granted one.
+  if (grants.length === 0 && protectedGrants.length === 0) {
+    return { decision: 'BLOCK', reason_code: 'OUT_OF_SCOPE', required_signer: null, ...base };
+  }
+  // Protected resource wins over an allowed one — checked first, so a push to a protected ref co-signs even
+  // when a broader `host_scope` pattern would also have matched it.
+  if (protectedGrants.some((g) => matchResourceGlob(action.resource, g.resource))) {
+    return {
+      decision: 'CO_SIGN',
+      reason_code: 'PROTECTED_ACTION',
+      required_signer: signer,
+      ...base,
+    };
+  }
+  if (grants.some((g) => matchResourceGlob(action.resource, g.resource))) {
+    return { decision: 'ALLOW', reason_code: 'ALLOWED_IN_SCOPE', required_signer: null, ...base };
+  }
+  // Granted type, unmatched resource. A shell command off the allowlist goes to a human rather than being
+  // refused outright; anything else (a write, a push) confined to its patterns is blocked outside them.
+  if (action.type.startsWith('shell.')) {
+    return {
+      decision: 'CO_SIGN',
+      reason_code: 'SHELL_NOT_ALLOWLISTED',
+      required_signer: signer,
+      ...base,
+    };
+  }
+  return {
+    decision: 'BLOCK',
+    reason_code: 'RESOURCE_OUT_OF_SCOPE',
+    required_signer: null,
+    ...base,
+  };
+}
+
 export function evaluate(
   action: ActionRequest,
   member: string,
@@ -135,7 +236,13 @@ export function evaluate(
   // action is denied, never granted by omission (Bible §10). Note this is checked
   // BEFORE protected_actions, so a protected action absent from scope is a BLOCK and
   // not a CO_SIGN — the order matters and it is the Bible's.
-  if (!m.scope.includes(action.type)) {
+  //
+  // HOST OPS SKIP THIS LINE (C1): `fs.*`/`git.*`/`shell.*` are not granted through the type-level `scope`
+  // array but through the resource-scoped host policy, resolved at branch 2b below. Their own
+  // deny-by-default (a type granted nowhere in `host_scope`/`host_protected`) lives there, so an unlisted
+  // host op is refused just as firmly — the guard here only routes it to the branch that can judge its
+  // resource, never past a check.
+  if (!isHostAction(action.type) && !m.scope.includes(action.type)) {
     return { decision: 'BLOCK', reason_code: 'OUT_OF_SCOPE', required_signer: null, ...base };
   }
 
@@ -163,6 +270,16 @@ export function evaluate(
     if (!roomRoster.includes(member)) {
       return { decision: 'BLOCK', reason_code: 'ROSTER_VIOLATION', required_signer: null, ...base };
     }
+  }
+
+  // 2b. THE EXECUTION GATE (C1, ADR-012). A host file/git/shell op is resource-scoped: it matches
+  //     `action.resource` against the mandate's host policy rather than its `type` against `scope`. Placed
+  //     AFTER standing (authenticity §0, expiry §1, roster §3) so RA-007 holds — a member not in the room,
+  //     or under a forged or expired mandate, is refused before we ever ask what a host op would need. The
+  //     gate only decides; nothing here executes (RT-005), which is why closing invariant #7 end-to-end
+  //     also needs the Local Node (C2) that runs an op only on this ALLOW and holds its revocable lease.
+  if (isHostAction(action.type)) {
+    return evaluateHostOp(action, m, base);
   }
 
   // 4. (S2.1) replay protection — `if replayed(nonce, resource_hash) return BLOCK`.

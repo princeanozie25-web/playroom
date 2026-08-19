@@ -70,6 +70,31 @@ export const Mandate = z
     scope: z.array(z.string().min(1)),
     protected_actions: z.array(z.string().min(1)),
     co_sign: z.object({ actions: z.array(z.string().min(1)), by: z.string().min(1) }),
+    /**
+     * THE EXECUTION GATE'S RESOURCE-SCOPED HOST GRANTS (C1, ADR-012). OPTIONAL, and its absence is
+     * load-bearing: a mandate with no host policy grants NO host operation — every `fs.*`/`git.*`/`shell.*`
+     * action BLOCKs by default (deny-by-default at the host layer). Because `canonicalise` drops undefined
+     * fields, omitting these two leaves every existing mandate's canonical bytes — and therefore its
+     * signature — completely unchanged, which is why host policy can be added to the schema without
+     * re-signing a single shipped mandate.
+     *
+     * Each entry pairs a host action `type` with a RESOURCE GLOB. Unlike `scope`, which matches the action
+     * TYPE only, the gate matches `action.resource` against these patterns (`**` = any run of characters
+     * including `/`; `*` = within a single path segment): `fs.write` is confined to the paths it lists,
+     * `git.push` to the refs it lists, `shell.exec` to the commands it lists. A member with no matching
+     * pattern under a granted type is refused (fs/git) or escalated to a human (shell — see the evaluator).
+     */
+    host_scope: z
+      .array(z.object({ action: z.string().min(1), resource: z.string().min(1) }).strict())
+      .optional(),
+    /**
+     * The host grants that require a human co-signature EVEN WHEN allowed — e.g. a push to `main`. A
+     * resource matching a `host_protected` pattern is CO_SIGN (signer = `co_sign.by`), taking precedence
+     * over any `host_scope` match. The host-op counterpart of `protected_actions`.
+     */
+    host_protected: z
+      .array(z.object({ action: z.string().min(1), resource: z.string().min(1) }).strict())
+      .optional(),
     limits: z.record(z.number()),
     counterparties: z.string().min(1),
     policy_version: z.string().min(1),

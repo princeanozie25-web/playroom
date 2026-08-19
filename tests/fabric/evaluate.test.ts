@@ -704,3 +704,316 @@ describe('counterparties — roster_only', () => {
     expect(evaluate(review, 'claude-main', m, NOW, ['sol']).decision).toBe('ALLOW');
   });
 });
+
+// ── THE EXECUTION GATE — resource-scoped host operations (C1, ADR-012) ───────────────────────────
+//
+// The one FALSE invariant (#7) is that host file/git/shell access is not mediated. C1 makes it
+// mediatable: a host op is an ActionRequest whose RESOURCE — inert for every abstract action — is now
+// matched against the mandate's host policy. The gate DECIDES (ALLOW/CO_SIGN/BLOCK); it never runs
+// anything (RT-005 preserved — a Local Node executes only on ALLOW). Prince's rulings, both asserted
+// below: (1) decide-only; (2) shell = allowlist + CO_SIGN the rest, never a raw shell.
+//
+// Every case asserts the decision AND its reason code, the same discipline as the table above — a test
+// that only checked "the write was refused" would pass whether the gate confined it or the whole branch
+// were deleted.
+const HOST_POLICY = {
+  host_scope: [
+    { action: 'fs.read', resource: '**' },
+    { action: 'fs.write', resource: 'workspace/**' },
+    { action: 'git.commit', resource: '**' },
+    { action: 'git.push', resource: 'refs/heads/feature/*' },
+    { action: 'shell.exec', resource: 'npm test' },
+    { action: 'shell.exec', resource: 'npm run **' },
+    { action: 'shell.exec', resource: 'config.json' }, // a literal pattern, to prove metachars are escaped
+  ],
+  host_protected: [{ action: 'git.push', resource: 'refs/heads/main' }],
+};
+const hostM = (extra: Partial<Mandate> = {}, sigValid = true) =>
+  loaded({ ...HOST_POLICY, ...extra }, sigValid);
+
+interface HostCase {
+  name: string;
+  action: string;
+  resource: string;
+  member: string;
+  mandate: LoadedMandate | undefined;
+  roster?: readonly string[];
+  decision: Decision;
+  reason: ReasonCode;
+  signer?: string | null;
+}
+
+const HOST_CASES: HostCase[] = [
+  // --- ALLOW: the resource matches an allowed pattern -----------------------------------------
+  {
+    name: 'H1. fs.read of anything — `**` allows any path',
+    action: 'fs.read',
+    resource: 'src/secrets/keys.ts',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'ALLOW',
+    reason: 'ALLOWED_IN_SCOPE',
+    signer: null,
+  },
+  {
+    name: 'H2. fs.write inside the workspace — confined and allowed',
+    action: 'fs.write',
+    resource: 'workspace/src/foo.ts',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'ALLOW',
+    reason: 'ALLOWED_IN_SCOPE',
+    signer: null,
+  },
+  {
+    name: 'H3. fs.write nested deep — `**` crosses `/`',
+    action: 'fs.write',
+    resource: 'workspace/a/b/c/d.ts',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'ALLOW',
+    reason: 'ALLOWED_IN_SCOPE',
+    signer: null,
+  },
+  {
+    name: 'H4. git.push a feature branch — allowed',
+    action: 'git.push',
+    resource: 'refs/heads/feature/room-door',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'ALLOW',
+    reason: 'ALLOWED_IN_SCOPE',
+    signer: null,
+  },
+  {
+    name: 'H5. git.commit anything — allowed by `**`',
+    action: 'git.commit',
+    resource: 'HEAD',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'ALLOW',
+    reason: 'ALLOWED_IN_SCOPE',
+    signer: null,
+  },
+  {
+    name: 'H6. shell.exec an allowlisted command (exact) — allowed',
+    action: 'shell.exec',
+    resource: 'npm test',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'ALLOW',
+    reason: 'ALLOWED_IN_SCOPE',
+    signer: null,
+  },
+  {
+    name: 'H7. shell.exec an allowlisted command (glob args) — `npm run **` allows the arguments',
+    action: 'shell.exec',
+    resource: 'npm run build --workspace apps/api',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'ALLOW',
+    reason: 'ALLOWED_IN_SCOPE',
+    signer: null,
+  },
+
+  // --- CONFINEMENT: fs/git resource outside the allowed patterns is BLOCKED -------------------
+  {
+    name: 'H8. fs.write OUTSIDE the workspace — RESOURCE_OUT_OF_SCOPE, not a silent pass',
+    action: 'fs.write',
+    resource: '/etc/passwd',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'BLOCK',
+    reason: 'RESOURCE_OUT_OF_SCOPE',
+  },
+  {
+    name: 'H9. fs.write to a sibling of the workspace — `workspace/**` is anchored, `workspacex/` does not match',
+    action: 'fs.write',
+    resource: 'workspacex/foo.ts',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'BLOCK',
+    reason: 'RESOURCE_OUT_OF_SCOPE',
+  },
+  {
+    name: 'H10. git.push an ungranted branch — feature/* and main are the only grants',
+    action: 'git.push',
+    resource: 'refs/heads/release/9',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'BLOCK',
+    reason: 'RESOURCE_OUT_OF_SCOPE',
+  },
+  {
+    name: 'H11. git.push a NESTED feature ref — `*` does not cross `/`, so feature/a/b is not feature/*',
+    action: 'git.push',
+    resource: 'refs/heads/feature/a/b',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'BLOCK',
+    reason: 'RESOURCE_OUT_OF_SCOPE',
+  },
+
+  // --- PROTECTED: an allowed resource that also matches host_protected pauses for a human ------
+  {
+    name: 'H12. git.push to main — protected, so CO_SIGN and name the principal',
+    action: 'git.push',
+    resource: 'refs/heads/main',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'CO_SIGN',
+    reason: 'PROTECTED_ACTION',
+    signer: 'principal:prince',
+  },
+  {
+    name: 'H13. protected outranks allow — even with a broad feature grant, main still co-signs',
+    action: 'git.push',
+    resource: 'refs/heads/main',
+    member: 'claude-main',
+    mandate: hostM({
+      host_scope: [...HOST_POLICY.host_scope, { action: 'git.push', resource: 'refs/heads/**' }],
+    }),
+    decision: 'CO_SIGN',
+    reason: 'PROTECTED_ACTION',
+    signer: 'principal:prince',
+  },
+
+  // --- SHELL: allowlist + CO_SIGN the rest (never a raw shell, never a silent block) -----------
+  {
+    name: 'H14. shell.exec off the allowlist — CO_SIGN (a human approves the exact command), not BLOCK',
+    action: 'shell.exec',
+    resource: 'rm -rf /',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'CO_SIGN',
+    reason: 'SHELL_NOT_ALLOWLISTED',
+    signer: 'principal:prince',
+  },
+  {
+    name: 'H15. shell.exec close-but-not-listed — `npm testx` is not `npm test`, so CO_SIGN',
+    action: 'shell.exec',
+    resource: 'npm testx',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'CO_SIGN',
+    reason: 'SHELL_NOT_ALLOWLISTED',
+    signer: 'principal:prince',
+  },
+  {
+    name: 'H16. shell allowlist metacharacters are LITERAL — `config.json` matches, `configXjson` does not',
+    action: 'shell.exec',
+    resource: 'configXjson',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'CO_SIGN', // the `.` in the pattern is escaped, so this is an unmatched shell command
+    reason: 'SHELL_NOT_ALLOWLISTED',
+    signer: 'principal:prince',
+  },
+
+  // --- DENY-BY-DEFAULT at the host layer ------------------------------------------------------
+  {
+    name: 'H17. a host TYPE the mandate grants nowhere — OUT_OF_SCOPE (fs.delete is not listed)',
+    action: 'fs.delete',
+    resource: 'workspace/foo.ts',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'BLOCK',
+    reason: 'OUT_OF_SCOPE',
+  },
+  {
+    name: 'H18. shell with NO shell grant at all is BLOCK, not CO_SIGN — co-sign-the-rest needs a grant first',
+    action: 'shell.exec',
+    resource: 'npm test',
+    member: 'claude-main',
+    // A host policy with fs grants but NO shell.exec entry anywhere.
+    mandate: hostM({ host_scope: [{ action: 'fs.read', resource: '**' }], host_protected: [] }),
+    decision: 'BLOCK',
+    reason: 'OUT_OF_SCOPE',
+  },
+  {
+    name: 'H19. a mandate with NO host policy grants NO host op — every existing mandate is unaffected',
+    action: 'fs.write',
+    resource: 'workspace/foo.ts',
+    member: 'claude-main',
+    mandate: loaded(), // the default mandate: no host_scope, no host_protected
+    decision: 'BLOCK',
+    reason: 'OUT_OF_SCOPE',
+  },
+
+  // --- STANDING PRECEDES THE HOST OP (authenticity, expiry, roster, mandate presence) ---------
+  {
+    name: 'H20. a forged mandate never reaches the gate — SIGNATURE_INVALID outranks even an allowed write',
+    action: 'fs.write',
+    resource: 'workspace/foo.ts',
+    member: 'claude-main',
+    mandate: hostM({}, false), // sig invalid
+    decision: 'BLOCK',
+    reason: 'SIGNATURE_INVALID',
+  },
+  {
+    name: 'H21. an expired mandate does not gate a host op — MANDATE_EXPIRED, not ALLOW',
+    action: 'fs.write',
+    resource: 'workspace/foo.ts',
+    member: 'claude-main',
+    mandate: hostM({ expires: '2026-07-25T00:00:00Z' }),
+    decision: 'BLOCK',
+    reason: 'MANDATE_EXPIRED',
+  },
+  {
+    name: 'H22. a host op from a member NOT in the room — ROSTER_VIOLATION, before the gate asks what it needs',
+    action: 'fs.write',
+    resource: 'workspace/foo.ts',
+    member: 'claude-main',
+    mandate: hostM(),
+    roster: ['sol', 'prince'], // claude-main is not here
+    decision: 'BLOCK',
+    reason: 'ROSTER_VIOLATION',
+  },
+  {
+    name: 'H23. no mandate at all — a host op is BLOCK/NO_MANDATE like any other action',
+    action: 'shell.exec',
+    resource: 'npm test',
+    member: 'nobody',
+    mandate: undefined,
+    decision: 'BLOCK',
+    reason: 'NO_MANDATE',
+  },
+
+  // --- the gate does not disturb abstract actions ---------------------------------------------
+  {
+    name: 'H24. an abstract action on a mandate WITH host policy still takes the type-level scope path',
+    action: 'pr.review',
+    resource: 'repo:playroom/playroom#pr-1',
+    member: 'claude-main',
+    mandate: hostM(),
+    decision: 'ALLOW',
+    reason: 'ALLOWED_IN_SCOPE',
+    signer: null,
+  },
+];
+
+describe('the execution gate — host operations (C1, ADR-012)', () => {
+  it(`covers the host-op decision surface (has ${HOST_CASES.length})`, () => {
+    expect(HOST_CASES.length).toBeGreaterThanOrEqual(24);
+  });
+
+  for (const c of HOST_CASES) {
+    it(c.name, () => {
+      const v = evaluate(
+        { type: c.action, resource: c.resource },
+        c.member,
+        c.mandate,
+        NOW,
+        c.roster,
+      );
+      expect(v.decision).toBe(c.decision);
+      expect(v.reason_code).toBe(c.reason);
+      if (c.signer !== undefined) expect(v.required_signer).toBe(c.signer);
+      // The CO_SIGN/signer pairing invariant holds for host ops too — a co-sign with no signer is unactionable.
+      if (v.decision === 'CO_SIGN') expect(v.required_signer).toBeTruthy();
+      if (v.decision !== 'CO_SIGN') expect(v.required_signer).toBeNull();
+      if (c.mandate) expect(v.effective_mandate_hash).toBe(c.mandate.hash);
+      else expect(v.effective_mandate_hash).toBeNull();
+    });
+  }
+});
