@@ -14,6 +14,9 @@
       "path": "./packages/hosts"
     },
     {
+      "path": "./packages/x-read"
+    },
+    {
       "path": "./apps/api"
     },
     {
