@@ -64,6 +64,15 @@ import {
 import { warmUp } from './warmup.js';
 import { makeScrubStream } from './scrub.js';
 import { authenticate, diagnoseCredential, type AuthFailure } from './credentials.js';
+import {
+  issueLease,
+  verifyLease,
+  heartbeatLease,
+  revokeLease,
+  listMemberLeases,
+  leaseAllows,
+  isLeaseToken,
+} from './leases.js';
 import { downgradeInterrupt } from './interrupts.js';
 import { activeBriefing } from './briefings.js';
 import { activeDocuments } from './documents.js';
@@ -995,6 +1004,223 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         resolution: resolved ? resolved.resolution : null,
         signed_by: resolved ? resolved.signed_by : null,
         poll_after_ms: stillOpen ? DECISION_POLL_HINT_MS : null,
+      };
+    });
+
+    // ── C2: THE LOCAL NODE LEASE (ADR-013) ───────────────────────────────────────────────────────
+    //
+    // C1's gate decides; it never executes (RT-005). C2 is the trusted bridge a node holds while it does
+    // the real work: a LEASE, issued from a member credential, presented on every host op, and REVOCABLE.
+    // A host op is authorised for execution ONLY under a live lease (POST /rooms/:id/node-ops below), so
+    // revoking the lease refuses the node's next op — invariant #7 becomes unbypassable in the sanctioned
+    // path. The lease gates THIS door, not the evaluator, so C1 and every other surface are untouched.
+    //
+    // Default capabilities are conservative — files and git, NOT shell: shell.* is the sensitive host op,
+    // so a lease must ASK for it. The gate still evaluates every op, so a capability is only ever a
+    // NARROWING on top of the mandate (least privilege per session), never a widening.
+    const LEASE_DEFAULT_CAPABILITIES = ['fs.', 'git.'];
+    const HOST_OP_PREFIXES = ['fs.', 'git.', 'shell.']; // the C1 host namespace; a node-op must be one of these
+
+    // POST /leases → issue a lease for the authenticated member. Returns the plaintext token ONCE.
+    fastify.post('/leases', async (req, reply) => {
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        reply.code(401).send(credentialRefusal(auth.failure, undefined));
+        return;
+      }
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      // Capabilities: an optional string[] of host action types/prefixes (≤20, each ≤64), default files+git.
+      let capabilities = LEASE_DEFAULT_CAPABILITIES;
+      if (b.capabilities !== undefined) {
+        if (
+          !Array.isArray(b.capabilities) ||
+          b.capabilities.length > 20 ||
+          !b.capabilities.every((c) => typeof c === 'string' && c.length >= 1 && c.length <= 64)
+        ) {
+          reply.code(400);
+          return {
+            type: 'error',
+            code: 'lease_malformed',
+            message: 'capabilities must be an array of ≤20 strings (each ≤64 chars)',
+          };
+        }
+        capabilities = b.capabilities as string[];
+      }
+      const workspace =
+        typeof b.workspace === 'string' && b.workspace.length <= 128 ? b.workspace : 'unspecified';
+      const lease = await issueLease(db(), {
+        memberId: auth.auth.member_id,
+        principalId: auth.auth.principal_id,
+        credentialId: auth.auth.credential_id, // the granting credential — revoking it cascades to this lease
+        capabilities,
+        workspace,
+      });
+      app.log.info(
+        { member: auth.auth.member_id, lease: lease.lease_id, capabilities, workspace },
+        'lease issued',
+      );
+      reply.code(201);
+      return {
+        lease_token: lease.token, // returned ONCE — the node stores it, we never do
+        lease_id: lease.lease_id,
+        expires_at: lease.expires_at,
+        heartbeat_deadline: lease.heartbeat_deadline,
+        capabilities: lease.capabilities,
+      };
+    });
+
+    // GET /leases → the authenticated member's leases (live and dead), so an owner can see and stop its nodes.
+    fastify.get('/leases', async (req, reply) => {
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        reply.code(401).send(credentialRefusal(auth.failure, undefined));
+        return;
+      }
+      reply.code(200);
+      return { leases: await listMemberLeases(db(), auth.auth.member_id) };
+    });
+
+    // POST /leases/heartbeat → the node keeps its lease alive (authenticated by the LEASE TOKEN it holds).
+    // A heartbeat within the absolute expiry revives a lease whose deadline lapsed (reconnect grace); a
+    // revoked one can never be revived.
+    fastify.post('/leases/heartbeat', async (req, reply) => {
+      const token = bearerToken(req);
+      if (!token || !isLeaseToken(token)) {
+        reply.code(401);
+        return { type: 'error', code: 'lease_required', message: 'a lease token is required' };
+      }
+      const beat = await heartbeatLease(db(), token);
+      if (!beat) {
+        // Unknown, revoked, or absolutely-expired — collapsed to one code, like a refused credential.
+        reply.code(401);
+        return { type: 'error', code: 'lease_invalid', message: 'lease is not live' };
+      }
+      reply.code(200);
+      return {
+        lease_id: beat.lease_id,
+        heartbeat_deadline: beat.heartbeat_deadline,
+        expires_at: beat.expires_at,
+      };
+    });
+
+    // POST /leases/:leaseId/revoke → the owner stops a node (authenticated by the MEMBER credential). This
+    // is the "stop local work mid-flight" control: the next node-op under this lease fails at verifyLease.
+    fastify.post('/leases/:leaseId/revoke', async (req, reply) => {
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        reply.code(401).send(credentialRefusal(auth.failure, undefined));
+        return;
+      }
+      const { leaseId } = req.params as { leaseId: string };
+      const revoked = await revokeLease(db(), leaseId, auth.auth.member_id);
+      // Idempotent + non-leaky: revoking an unknown, already-revoked, or another member's lease all answer
+      // the same `revoked:false` — never confirming whether that lease id exists or whose it is.
+      app.log.info(
+        { member: auth.auth.member_id, lease: leaseId, revoked },
+        'lease revoke requested',
+      );
+      reply.code(200);
+      return { lease_id: leaseId, revoked };
+    });
+
+    // POST /rooms/:id/node-ops → THE GATED HOST-OP DOOR. The node presents its LEASE TOKEN; a host op is
+    // authorised for execution only while that lease is live. Verify live → capability check → the SAME
+    // requestAction gateway C1 built → a verdict. The node runs the op itself, on ALLOW, off the fabric.
+    fastify.post('/rooms/:id/node-ops', async (req, reply) => {
+      const roomId = (req.params as { id: string }).id;
+      const token = bearerToken(req);
+      if (!token || !isLeaseToken(token)) {
+        reply.code(401);
+        return { type: 'error', code: 'lease_required', message: 'a lease token is required' };
+      }
+      const lease = await verifyLease(db(), token);
+      if (!lease) {
+        // A revoked/expired/stale/unknown lease all refuse here, identically — this is where a revoked lease
+        // stops the node's next op.
+        reply.code(401);
+        return { type: 'error', code: 'lease_invalid', message: 'lease is not live' };
+      }
+      // Bound the node's op rate on its LEASE (denial-of-wallet from a runaway node), same window as the door.
+      if (actionThrottled(`lease:${lease.lease_id}`)) {
+        reply.code(429);
+        return {
+          type: 'error',
+          code: 'action_throttled',
+          message: 'too many requests — slow down',
+        };
+      }
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const action = b.action;
+      const resource = b.resource;
+      if (
+        typeof action !== 'string' ||
+        action.length < 1 ||
+        action.length > 64 ||
+        typeof resource !== 'string' ||
+        resource.length < 1 ||
+        resource.length > 512
+      ) {
+        reply.code(400);
+        return {
+          type: 'error',
+          code: 'action_malformed',
+          message: 'action and resource are required strings (action ≤64, resource ≤512 chars)',
+        };
+      }
+      // A node-op is a HOST op by definition — fs.*/git.*/shell.*. An abstract action does not belong on this
+      // door (it has no executor and needs no lease); it is refused so the door's purpose stays legible.
+      if (!HOST_OP_PREFIXES.some((p) => action.startsWith(p))) {
+        reply.code(422);
+        return {
+          type: 'error',
+          code: 'not_a_host_op',
+          message: 'the node-op door is for host operations (fs.*, git.*, shell.*)',
+        };
+      }
+      // CAPABILITY SCOPE: the lease may be narrower than the mandate. Refused BEFORE the gate — least
+      // privilege per session, and a cheaper, earlier refusal than an evaluation.
+      if (!leaseAllows(lease.capabilities, action)) {
+        app.log.warn(
+          { room_id: roomId, lease: lease.lease_id, action },
+          'node-op outside lease scope',
+        );
+        reply.code(403);
+        return {
+          type: 'error',
+          code: 'lease_out_of_scope',
+          message: 'this lease does not allow that host action',
+        };
+      }
+      if (!(await getRoom(db(), roomId))) {
+        reply.code(404).send(roomNotFound(roomId));
+        return;
+      }
+      const clientMsgId =
+        typeof b.client_msg_id === 'string' && b.client_msg_id.length <= 128
+          ? b.client_msg_id
+          : `node-${randomUUID()}`;
+      // mode 'bridged' (ADR-004, first live use): this request originates from a Local Node bridged to a
+      // machine, distinct from the 'connected' door. Identity is the lease's member; the body says only what,
+      // never who. requestAction stays the sole decision constructor and still executes nothing.
+      const decided = await executeCommand(
+        { actorId: lease.member_id, principalId: lease.principal_id, mode: 'bridged' },
+        { kind: 'requestAction', roomId, clientMsgId, subject: lease.member_id, action, resource },
+        deps,
+      );
+      if (!decided.ok) {
+        reply.code(422);
+        return { type: 'error', code: decided.refusal.code, message: decided.refusal.message };
+      }
+      reply.code(200);
+      return {
+        lease_id: lease.lease_id,
+        decision: decided.verdict.decision,
+        reason_code: decided.verdict.reason_code,
+        required_signer: decided.verdict.required_signer,
+        effective_mandate_hash: decided.verdict.effective_mandate_hash,
+        decision_id: decided.decisionId,
+        // The node runs the op only on ALLOW; a CO_SIGN is polled at /rooms/:id/decisions/:id like any other.
+        poll_after_ms: decided.decisionId ? DECISION_POLL_HINT_MS : null,
       };
     });
 
