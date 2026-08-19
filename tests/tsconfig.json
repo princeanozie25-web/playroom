@@ -8,7 +8,7 @@
     "rootDir": "."
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist-test"],
+  "exclude": ["node_modules", "dist-test", "e2e"],
   "references": [
     {
       "path": "../packages/shared"

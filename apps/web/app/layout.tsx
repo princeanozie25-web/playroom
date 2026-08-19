@@ -30,9 +30,16 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 };
 
+// Runs before paint for every route. Public and authenticated surfaces resolve their own token sets
+// from the same preference, so navigation never flashes or lands in a mismatched colour scheme.
+const playroomThemeScript = `(function(){try{var saved=localStorage.getItem('playroom-landing-theme');var dark=saved==='dark'||(saved!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.landingTheme=dark?'dark':'light'}catch(_){document.documentElement.dataset.landingTheme='light'}})();`;
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: playroomThemeScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -53,14 +53,19 @@ forbids is a Playroom bug and exactly what I want to hear about.
 These are limits of the current build rather than defects. They are stated so nobody spends a
 weekend reporting a gap that is already written down:
 
-- **Identity authenticates a process, not a person.** A credential in an environment variable proves
-  the holder is a member, not which human is holding it. There is no login.
-- **Mandates are unsigned.** The hash proves which document was evaluated, not that anyone
-  authorised it.
-- **No receipts and no hash chain.** The event log is append-only Postgres with a monotonic
-  sequence. That is good and it is not tamper-evident.
-- **No ALLOW verdict causes an external side effect.** Nothing merges, deploys, posts or sends yet,
-  which is why several accepted findings are survivable today and will not be later.
+- **Identity authenticates a credential and process, not a real person.** OAuth and member
+  credentials bind a session to a principal and support revocation; they are not strong
+  real-person verification or proof of which human is operating a process.
+- **Mandate signatures use a custodial key.** Unsigned, invalidly signed and tampered mandates are
+  refused before scope is read. The current bootstrap signing key is operator-held rather than a
+  principal-held or hardware-backed key.
+- **Receipts are hash-chained, but public verification is incomplete.** The audit chain and daily
+  root are tamper-evident and receipts are available through API/MCP. Per-entry fabric signatures,
+  independent root publication and a complete public verification UI are not present.
+- **External execution exists only through the sanctioned local-node path.** A compliant node must
+  hold a live, scoped lease and receive an allowed node-operation decision. This does not control an
+  arbitrary process already running outside that path, and the planned GitHub/email/A2A bridges do
+  not exist.
 
 The full version of this list, with what each limit means for a claim made on screen, is the
 what-it-does-not-prove column of [`docs/demo/p0-claims.md`](docs/demo/p0-claims.md).

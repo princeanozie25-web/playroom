@@ -39,12 +39,25 @@ function setKeys(on: boolean): void {
   resetVapidForTests();
 }
 
-beforeEach(() => {
+async function clearAgentSpend(): Promise<void> {
+  await pool.query(
+    `DELETE FROM events
+      WHERE event_type IN ('interrupt.raised', 'interrupt.downgraded')
+        AND payload ->> 'raised_by' = 'claude-code'
+        AND ts >= date_trunc('day', now() AT TIME ZONE 'UTC')`,
+  );
+}
+
+beforeEach(async () => {
   envBefore = {
     pub: process.env.PLAYROOM_VAPID_PUBLIC_KEY,
     priv: process.env.PLAYROOM_VAPID_PRIVATE_KEY,
     origins: process.env.PLAYROOM_PUSH_ALLOWED_ORIGINS,
   };
+  // The mandate budget is member-wide and daily rather than room-scoped. The integration suite
+  // deliberately shares one test database, so this file must establish the same pristine budget
+  // precondition as the other interrupt suites instead of depending on their execution order.
+  await clearAgentSpend();
 });
 afterEach(async () => {
   for (const [k, v] of [
@@ -65,6 +78,7 @@ afterEach(async () => {
   }
   rooms.length = 0;
   await pool.query("DELETE FROM push_subscriptions WHERE endpoint LIKE '%sp3-test%'");
+  await clearAgentSpend();
 });
 afterAll(async () => {
   await pool.end();

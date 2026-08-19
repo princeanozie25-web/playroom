@@ -165,11 +165,17 @@ step(4, 'Minting a credential for the browser');
 // MINTED LOCALLY, NEVER COMMITTED. `issue-credential.ts` prints the plaintext once and stores
 // only its sha256 — so this file scrapes the printed value and writes it to the two ignored env
 // files. A credential in the repository would be a credential in everyone's clone.
-const webToken = envValue(resolve(ROOT, 'apps/web/.env.local'), 'PLAYROOM_WEB_TOKEN');
-let token = webToken;
-if (token) {
-  say('apps/web/.env.local already has one — keeping it');
+const checked = tryRun('pnpm', ['tsx', 'scripts/issue-credential.ts', '--check-web']);
+let token = envValue(resolve(ROOT, 'apps/web/.env.local'), 'PLAYROOM_WEB_TOKEN');
+if (checked.ok) {
+  say('apps/web/.env.local has a live owner credential — keeping it');
 } else {
+  // A token can be present and still be unusable: the database may have been replaced, or the row
+  // may have expired or been revoked. The API must keep failing closed; local bootstrap repairs the
+  // configuration by issuing a new credential instead of teaching the API to trust stale callers.
+  say(
+    token ? 'existing web credential is stale — replacing it' : 'no web credential — creating it',
+  );
   const issued = tryRun('pnpm', ['tsx', 'scripts/issue-credential.ts', 'prince', 'browser (dev)']);
   if (!issued.ok) {
     console.error(issued.out);

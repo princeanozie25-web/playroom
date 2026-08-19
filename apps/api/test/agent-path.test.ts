@@ -48,13 +48,18 @@ function code(relPath: string): string {
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
-/** Every .ts file under src, recursively, relative to src. */
+/** Every implementation .ts file under src, recursively, relative to src. */
 function srcFiles(dir = '.'): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(resolve(SRC, dir), { withFileTypes: true })) {
     const rel = dir === '.' ? entry.name : `${dir}/${entry.name}`;
     if (entry.isDirectory()) out.push(...srcFiles(rel));
-    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) out.push(rel);
+    else if (
+      entry.name.endsWith('.ts') &&
+      !entry.name.endsWith('.d.ts') &&
+      !entry.name.endsWith('.test.ts')
+    )
+      out.push(rel);
   }
   return out;
 }

@@ -128,7 +128,12 @@ const PRODUCT = [
   'mandates/',
 ];
 const productSource = source.filter(
-  (f) => PRODUCT.some((p) => f.startsWith(p)) && !f.includes('.test.'),
+  (f) =>
+    PRODUCT.some((p) => f.startsWith(p)) &&
+    !f.includes('.test.') &&
+    // The public front door must be able to name planned host projections honestly. The invariant
+    // applies to the room, authority engine and data model—not roadmap copy outside the app shell.
+    !f.startsWith('apps/web/app/landing/'),
 );
 
 describe('the corpus is searchable (the failure that hid the rest)', () => {

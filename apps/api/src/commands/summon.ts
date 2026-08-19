@@ -12,7 +12,13 @@ import { listRoomMembers, matchRoomAgent } from '../members.js';
 import { selectRoute } from '../routes.js';
 import { ensureTask, taskCreatedEvent, transitionTask } from '../tasks.js';
 import { raiseDecisionInterrupts, writeCoSignDecision } from './coSign.js';
-import type { CommandContext, CommandDeps, SummonChain, TurnSpans } from './context.js';
+import {
+  deferCommandWork,
+  type CommandContext,
+  type CommandDeps,
+  type SummonChain,
+  type TurnSpans,
+} from './context.js';
 
 /**
  * THE ONLY PLACE A SUMMON IS BUILT.
@@ -389,8 +395,8 @@ export async function fireSummon(deps: CommandDeps, input: FireSummonInput): Pro
     ),
   );
 
-  void deps
-    .execute(
+  deferCommandWork(deps, 'agent turn', () =>
+    deps.execute(
       { actorId: input.member, mode: 'hosted' },
       {
         kind: 'triggerAgentTurn',
@@ -416,8 +422,8 @@ export async function fireSummon(deps: CommandDeps, input: FireSummonInput): Pro
           orderId: input.orderId,
         },
       },
-    )
-    .catch(() => {}); // runAgentTurn writes its own error event; this guards the fire-and-forget
+    ),
+  );
 }
 
 /**

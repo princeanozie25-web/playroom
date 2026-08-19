@@ -6,6 +6,12 @@ dist-test/
 .next-dev/
 .next-prod/
 coverage/
+playwright-report/
+test-results/
+# Declaration artifacts occasionally emitted beside API sources by ad-hoc TypeScript invocations.
+# The API's real build output belongs in apps/api/dist or apps/api/dist-test.
+apps/api/src/**/*.d.ts
+apps/api/src/**/*.d.ts.map
 *.tsbuildinfo
 next-env.d.ts
 

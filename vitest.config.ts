@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
@@ -27,5 +27,8 @@ export default defineConfig({
      * the signal beats the clock in a suite whose job is to be believed.
      */
     fileParallelism: false,
+    // Browser journeys are owned by Playwright. Without this explicit boundary Vitest tries to
+    // collect Playwright's serial suite and fails before either runner can provide a useful result.
+    exclude: [...configDefaults.exclude, 'tests/e2e/**'],
   },
 });

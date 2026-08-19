@@ -86,6 +86,8 @@ export type Command =
       subject: string;
       action: string;
       resource: string;
+      // C3: facts assembled from history, so a host grant's `requires` can be met. Optional; absent = none.
+      facts?: readonly string[];
     }
   // Raise a bare hand (SCC-3): a connected member surfaces a standalone BLOCKER/FYI — a claim on a
   // human's attention that is NOT a decision. Mints no decision event; charged to the raiser's daily
@@ -208,6 +210,25 @@ export interface CommandDeps {
   log: CommandLogger;
   adapterFactory: (id: string) => AgentAdapter;
   execute: (ctx: CommandContext, command: Command) => Promise<unknown>;
+  /**
+   * Own work intentionally kept off the foreground latency path. A server supplies this so shutdown
+   * can drain it before closing Postgres. Direct command tests may omit it and keep the legacy local
+   * fallback, but production request paths never discard a promise.
+   */
+  defer?: (label: string, task: () => Promise<unknown>) => boolean;
+}
+
+/** Schedule background work through its server owner, with a safe fallback for isolated commands. */
+export function deferCommandWork(
+  deps: CommandDeps,
+  label: string,
+  task: () => Promise<unknown>,
+): void {
+  if (deps.defer) {
+    deps.defer(label, task);
+    return;
+  }
+  void task().catch((error) => deps.log.error({ err: error }, `${label} failed`));
 }
 
 export class CommandError extends Error {

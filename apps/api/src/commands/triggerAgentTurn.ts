@@ -26,6 +26,7 @@ export function triggerAgentTurnCommand(
     // The command entry, so the turn can dispatch an EMITTED summon back through the single
     // constructor (S1.8). And the chain the turn carries, so that summon extends it.
     execute: deps.execute,
+    defer: deps.defer,
     chain: input.chain,
     // The cycle this turn IS, when it is one (S-CYCLE) — carried beside the chain rather than in it,
     // because the chain is inherited by emitted summons and a cycle is counted once.

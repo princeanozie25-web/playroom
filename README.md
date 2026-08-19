@@ -197,16 +197,13 @@ The agent could not speak, and the governance still worked.
                       └───────────────────┬────────────────────────────┘
                                           │  every governed action, no exceptions
                       ┌───────────────────▼────────────────────────────┐
-                      │  THE FABRIC   packages/fabric                  │
+                      │  THE FABRIC — AUTHORITY ENGINE                │
+                      │  packages/fabric                              │
                       │                                                │
-                      │   1. IDENTITY   who is this member, and which  │
-                      │                 principal do they speak for    │
-                      │   2. CONTEXT    what may be assembled —        │
-                      │                 never across principals        │
-                      │   3. MANDATE    ALLOW · CO_SIGN · BLOCK,       │
+                      │   MANDATE       ALLOW · CO_SIGN · BLOCK,       │
                       │                 deny by default, <10 ms        │
-                      │   4. RECEIPT    record what was decided        │
-                      │                 (hash chain: not yet, PR-11)   │
+                      │   FACTS         history-derived conditions     │
+                      │                 are caller-assembled           │
                       └───────────────────┬────────────────────────────┘
                                           │  only after a verdict
                       ┌───────────────────▼────────────────────────────┐
@@ -246,9 +243,10 @@ slice closes with a report naming what was built, what was measured, and what wa
 **No telemetry.** Playroom sends nothing anywhere. The only outbound calls are to the model providers
 you configure keys for, from `packages/adapters` and nowhere else.
 
-**Credentials are dev-only and local.** `pnpm bootstrap` mints one and writes it to gitignored env
-files; nothing is ever committed. The browser never holds it — it receives a single-use,
-thirty-second socket ticket instead.
+**Local bootstrap credentials stay local.** `pnpm bootstrap` validates or mints the local owner's
+credential and writes it to gitignored env files; nothing is ever committed. A redeemed member's
+credential is held only in an `httpOnly` cookie, outside client JavaScript. WebSocket connections use
+a separate single-use, thirty-second ticket. OAuth credentials are short-lived and revocable.
 
 **Localhost by default.** No deployment, no public instance, no shared database. Several accepted
 findings in the ledger are survivable precisely because of that, and the ledger names the condition

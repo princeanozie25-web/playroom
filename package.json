@@ -10,6 +10,7 @@
     "dev": "concurrently -n api,web \"pnpm --filter @playroom/api dev\" \"pnpm --filter @playroom/web dev\"",
     "bootstrap": "node scripts/bootstrap.mjs",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "typecheck": "tsc -b",
     "format": "prettier --check .",
     "verify": "pnpm format && pnpm typecheck && pnpm boot-check && pnpm test",
@@ -17,6 +18,8 @@
     "boot-check": "tsx scripts/esm-boot-check.ts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.10.0",
     "concurrently": "^9.1.0",
     "pg": "^8.13.0",

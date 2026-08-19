@@ -20,7 +20,11 @@ import { resolve } from 'node:path';
 // one it names). What this cannot see: a browser actually applying the media query. What it proves:
 // the one stylesheet ships motion, and ships exactly one mechanism that suppresses all of it.
 
-const css = readFileSync(resolve(import.meta.dirname, 'globals.css'), 'utf8');
+const allCss = readFileSync(resolve(import.meta.dirname, 'globals.css'), 'utf8');
+// The authenticated shell's original denominator remains independently enforceable. The public
+// Front Door deliberately adds its own motion vocabulary below this named boundary; it is tested
+// against its own requirements rather than silently changing SHELL-B2's six/four contract.
+const css = allCss.split('/* ── PUBLIC LANDING')[0] ?? allCss;
 
 // The reduce block, extracted once. Everything outside it is "the motion set".
 const REDUCE_RE = /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/;

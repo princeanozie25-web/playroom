@@ -16,6 +16,9 @@
 // transformed to CJS, where top-level await does not compile.
 import { Client } from 'pg';
 import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 try {
   process.loadEnvFile();
@@ -47,6 +50,43 @@ async function main(): Promise<void> {
   await client.connect();
 
   try {
+    if (args.includes('--check-web')) {
+      // BOOTSTRAP CONTINUITY CHECK. Presence in .env.local is not proof that a credential still
+      // belongs to this database: a database can be replaced, or the row can expire or be revoked.
+      // Read the ignored file here (after dependencies exist), compare only its hash, and print no
+      // credential material. Exit 2 means bootstrap should mint a replacement; every other database
+      // failure remains a real failure and exits 1 through main().catch below.
+      const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+      const webEnv = resolve(root, 'apps/web/.env.local');
+      const line = existsSync(webEnv)
+        ? readFileSync(webEnv, 'utf8')
+            .split(/\r?\n/)
+            .map((value) => value.trim())
+            .find((value) => value.startsWith('PLAYROOM_WEB_TOKEN='))
+        : undefined;
+      const token = line?.slice('PLAYROOM_WEB_TOKEN='.length).trim();
+      if (!token) {
+        console.log('web credential: missing');
+        process.exitCode = 2;
+        return;
+      }
+      const { rows } = await client.query<{ member_id: string }>(
+        `SELECT member_id
+           FROM member_credentials
+          WHERE token_hash = $1
+            AND revoked_at IS NULL
+            AND (expires_at IS NULL OR expires_at > now())`,
+        [createHash('sha256').update(token).digest('hex')],
+      );
+      if (rows.length === 1 && rows[0].member_id === 'prince') {
+        console.log('web credential: valid for local owner');
+        return;
+      }
+      console.log('web credential: invalid for this database');
+      process.exitCode = 2;
+      return;
+    }
+
     if (args.includes('--list')) {
       const { rows } = await client.query(
         `SELECT id, member_id, label, created_at::date AS issued, revoked_at::date AS revoked

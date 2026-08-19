@@ -13,7 +13,6 @@ import { DisabledControl } from './DisabledControl';
 const APP = resolve(import.meta.dirname);
 const primitive = readFileSync(resolve(APP, 'DisabledControl.tsx'), 'utf8');
 const mandate = readFileSync(resolve(APP, 'MandateSurface.tsx'), 'utf8');
-const decision = readFileSync(resolve(APP, 'DecisionCard.tsx'), 'utf8');
 
 describe('DisabledControl — the reason is required by construction, not by validation', () => {
   it('does not typecheck without a reason (the type refuses the lie)', () => {
@@ -38,9 +37,8 @@ describe('DisabledControl — the reason is required by construction, not by val
   });
 });
 
-describe('each call site supplies its own true reason, and the two differ', () => {
+describe('the read-only mandate call site supplies its true reason', () => {
   const mandateReason = /reason="([^"]+)"/.exec(mandate)?.[1] ?? null;
-  const decisionReasonExpr = /reason=\{([^}]+)\}/.exec(decision)?.[1] ?? null;
 
   it('the mandate switch is inert because the surface is read-only', () => {
     expect(mandate, 'MandateSurface must construct a DisabledControl').toContain(
@@ -48,23 +46,5 @@ describe('each call site supplies its own true reason, and the two differ', () =
     );
     expect(mandateReason, 'a literal reason string was expected').not.toBeNull();
     expect(mandateReason).toMatch(/read-only/i);
-    // and it does NOT borrow the decision card's rule
-    expect(mandateReason).not.toMatch(/awaiting/i);
-  });
-
-  it('the decision buttons are inert because the viewer is not the required signer', () => {
-    expect(decision, 'DecisionCard must construct a DisabledControl').toContain('<DisabledControl');
-    expect(decisionReasonExpr, 'a reason expression was expected').toContain('pendingReason');
-    // pendingReason is SOURCED FROM the required signer, not a constant, and says who is awaited
-    expect(decision).toMatch(/const pendingReason\s*=\s*signer\s*\?/);
-    expect(decision).toMatch(/Awaiting \$\{signer\.display_name\}/);
-    // and it does NOT borrow the mandate surface's rule
-    expect(decision.slice(decision.indexOf('const pendingReason'))).not.toMatch(/read-only/i);
-  });
-
-  it('the two reasons are not the same — three honest refusals, not one grey blur', () => {
-    // A literal read-only sentence vs a signer-derived "Awaiting …" expression: different text, from
-    // different rules. A primitive that rendered one reason for both would fail here.
-    expect(mandateReason).not.toEqual(decisionReasonExpr);
   });
 });

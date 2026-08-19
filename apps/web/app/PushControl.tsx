@@ -168,10 +168,16 @@ export function PushControl() {
     }
   }, []);
 
-  if (state.kind === 'checking') return null;
+  if (state.kind === 'checking') {
+    return (
+      <div className="push-control" role="status" {...pr(HOOK.pushControl)}>
+        <span className="push-state">Checking notification support…</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="push-control" {...pr(HOOK.pushControl)}>
+    <div className="push-control" aria-live="polite" {...pr(HOOK.pushControl)}>
       {state.kind === 'unsupported' && (
         <span className="push-state">this browser cannot receive notifications</span>
       )}
@@ -192,16 +198,16 @@ export function PushControl() {
       {state.kind === 'error' && <span className="push-state">notifications: {state.message}</span>}
       {state.kind === 'off' && (
         <button type="button" disabled={busy} onClick={turnOn} {...pr(HOOK.pushToggle)}>
-          notify me when something needs me
+          {busy ? 'Turning on…' : 'Notify me when something needs me'}
         </button>
       )}
       {state.kind === 'on' && (
         <>
           <span className="push-state" {...pr(HOOK.pushState)}>
-            on · {state.devices} {state.devices === 1 ? 'device' : 'devices'}
+            On · {state.devices} {state.devices === 1 ? 'device' : 'devices'}
           </span>
           <button type="button" disabled={busy} onClick={turnOff} {...pr(HOOK.pushToggle)}>
-            turn off
+            {busy ? 'Turning off…' : 'Turn off'}
           </button>
         </>
       )}

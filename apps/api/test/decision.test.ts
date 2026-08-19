@@ -74,7 +74,8 @@ function capture(): { lines: string[]; stream: Writable } {
 
 describe('mandate v0 — the producer', () => {
   it('pr.merge produces a CO_SIGN decision event naming the required signer', async () => {
-    const server = await startTestServer();
+    const { lines, stream } = capture();
+    const server = await startTestServer({ loggerStream: stream, logLevel: 'info' });
     const roomId = room('decision-cosign');
     try {
       await httpCreateRoom(server.httpBase, roomId, server.token);
@@ -115,6 +116,7 @@ describe('mandate v0 — the producer', () => {
     } finally {
       await server.close();
     }
+    expect(lines.join('')).not.toContain('Cannot use a pool after calling end on the pool');
   });
 
   it('an unknown action type is BLOCKed — deny by default, asserted by reason code', async () => {

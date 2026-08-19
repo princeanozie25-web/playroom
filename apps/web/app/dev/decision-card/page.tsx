@@ -1,7 +1,9 @@
 import { notFound } from 'next/navigation';
 import { DecisionEvent } from '@playroom/shared';
 import { DecisionCard } from '../../DecisionCard';
-import { loadPrincipals, loadRoster } from '../../roster';
+import type { Principal, RosterMember } from '../../roster';
+import { AppBrand } from '../../AppBrand';
+import { ThemeToggle } from '../../ThemeToggle';
 
 // DEV-ONLY FIXTURE. Not part of the product and NEVER filmed.
 //
@@ -43,27 +45,74 @@ const FIXTURE = DecisionEvent.parse({
   },
 });
 
+// A fixture must be self-contained. Fetching `/rooms/dev-fixture/members` made this development
+// route depend on a real room and deployment credential, so it failed with the same 401 as a stale
+// local setup. These values are presentation inputs only; the governance object above remains parsed
+// through the real event schema, and the production guard below still makes the route a 404.
+const FIXTURE_ROSTER: RosterMember[] = [
+  {
+    id: 'prince',
+    kind: 'human',
+    display_name: 'Prince',
+    principal: 'principal:prince',
+    scope: null,
+    protected_actions: null,
+    principal_name: null,
+    accent: null,
+    co_sign: null,
+    limits: null,
+    policy_version: null,
+    expires: null,
+    mandate_hash: null,
+  },
+  {
+    id: 'claude-main',
+    kind: 'agent',
+    display_name: 'Claude',
+    principal: 'principal:prince',
+    scope: ['pr.review', 'pr.comment', 'pr.merge'],
+    protected_actions: ['pr.merge'],
+    principal_name: 'Prince',
+    accent: 0,
+    co_sign: { actions: ['pr.merge'], by: 'principal:prince' },
+    limits: {},
+    policy_version: 'playroom-policy/1.0',
+    expires: null,
+    mandate_hash: 'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+  },
+];
+
+const FIXTURE_PRINCIPALS: Principal[] = [
+  { id: 'principal:prince', display_name: 'Prince', accent: 0 },
+];
+
 export default async function DecisionCardFixture() {
   if (process.env.NODE_ENV === 'production') notFound();
 
   return (
-    <main className="home">
-      <h1>DECISION card — fixture</h1>
-      <p>
-        Dev-only. This card is built from a fixture in this route, not from a room. A room renders
-        one only from a <code>decision</code> event in its log, and nothing emits those yet (S2.1
-        decides, S2.2 signs). Never film this page.
-      </p>
-      <div style={{ marginTop: 'var(--s-5)' }}>
+    <main className="dev-fixture">
+      <header className="dev-fixture__topbar">
+        <AppBrand />
+        <ThemeToggle showLabel={false} />
+      </header>
+      <section className="dev-fixture__intro">
+        <p>Development fixture</p>
+        <h1>Co-sign decision card</h1>
+        <span>
+          Parsed through the real event schema. Production rooms render this surface only from a
+          recorded decision event.
+        </span>
+      </section>
+      <section className="dev-fixture__stage" aria-label="Decision card fixture">
         <DecisionCard
           event={FIXTURE}
           resolution={null}
           signedBy={null}
-          roster={await loadRoster(FIXTURE.room_id)}
-          principals={await loadPrincipals(FIXTURE.room_id)}
+          roster={FIXTURE_ROSTER}
+          principals={FIXTURE_PRINCIPALS}
           viewer="prince"
         />
-      </div>
+      </section>
     </main>
   );
 }

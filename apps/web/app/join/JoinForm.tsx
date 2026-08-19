@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { HOOK, pr } from '../hooks';
 
 // THE FIRST SCREEN A TESTER SEES, AND THE ONLY ONE BEFORE THE ROOM.
@@ -48,7 +49,12 @@ export function JoinForm() {
   }
 
   return (
-    <form className="join" onSubmit={submit} {...pr(HOOK.join)}>
+    <form
+      className="join"
+      onSubmit={submit}
+      aria-describedby={error === null ? undefined : 'join-error'}
+      {...pr(HOOK.join)}
+    >
       <h1 className="join-title">Join the room</h1>
       <p className="join-lede">
         Someone sent you a short code. Enter it below with your first name, and you are in.
@@ -101,10 +107,14 @@ export function JoinForm() {
       </button>
 
       {error !== null && (
-        <p className="join-error" {...pr(HOOK.joinError)} role="alert">
+        <p id="join-error" className="join-error" {...pr(HOOK.joinError)} role="alert">
           {error}
         </p>
       )}
+
+      <p className="entry-alternative">
+        Need a new room? <Link href="/start">Create one</Link>.
+      </p>
     </form>
   );
 }

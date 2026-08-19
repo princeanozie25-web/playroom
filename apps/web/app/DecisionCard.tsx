@@ -3,7 +3,6 @@
 import type { DecisionEvent } from '@playroom/shared';
 import { MemberName } from './MemberChip';
 import { Panel } from './Panel';
-import { DisabledControl } from './DisabledControl';
 import type { Principal, RosterMember } from './roster';
 import { HOOK, pr } from './hooks';
 
@@ -30,7 +29,7 @@ import { HOOK, pr } from './hooks';
 // label instead. A wording change was the whole fix, and it belonged in a slice about wording.
 //
 // Approve / deny are LIVE now (S2.2), but only for the REQUIRED SIGNER — the human bound to the
-// decision's required principal. Everyone else sees them inert, with the signer named; an agent never
+// decision's required principal. Everyone else sees status only, with the signer named; an agent never
 // sees a live button. The affordance is a courtesy, not the authority: even a forged frame is refused
 // server-side (commands/signDecision.ts), so showing the button to the right person is UX, and the
 // check is elsewhere. Once answered, the card shows the OUTCOME in place of the buttons — the same
@@ -50,6 +49,7 @@ const REASONS: Record<string, string> = {
   OUT_OF_SCOPE: 'The mandate does not grant this action.',
   MANDATE_EXPIRED: 'The mandate this was checked against has expired.',
   NO_MANDATE: 'There is no mandate for this member, so there is no authority to act under.',
+  CONDITION_UNMET: 'A condition required by the mandate has not been established yet.',
 };
 
 const FALLBACK_REASON = 'This was refused.';
@@ -98,10 +98,14 @@ export function DecisionCard({
   // Why the inert Approve/Deny are inert: a claim on a specific person. Sourced from the required
   // signer — the same source the visible "Awaiting …" line reads — so the control and the sentence
   // beside it cannot disagree about who the room is waiting on.
-  const pendingReason = signer ? `Awaiting ${signer.display_name}` : 'Awaiting the named principal';
 
   return (
-    <Panel as="section" className="decision" hook={HOOK.decision} aria-label="decision required">
+    <Panel
+      as="section"
+      className="decision"
+      hook={HOOK.decision}
+      aria-label={`${resolution === 'APPROVED' ? 'Approved decision' : resolution === 'DENIED' ? 'Denied decision' : 'Decision required'}: ${p.action} (${p.decision_id})`}
+    >
       <div className="decision-kicker">
         Decision · <span {...pr(HOOK.decisionVerdict)}>{p.decision}</span>
       </div>
@@ -173,23 +177,34 @@ export function DecisionCard({
           // LIVE, and only for the required signer (S2.2). The frame carries no identity claim — who
           // is signing is the socket's authenticated member, which the server reads for itself.
           <>
-            <button type="button" onClick={() => onSign?.(p.decision_id, 'APPROVED')}>
+            <button
+              className="decision-approve"
+              type="button"
+              onClick={() => onSign?.(p.decision_id, 'APPROVED')}
+            >
               Approve
             </button>
-            <button type="button" onClick={() => onSign?.(p.decision_id, 'DENIED')}>
+            <button
+              className="decision-deny"
+              type="button"
+              onClick={() => onSign?.(p.decision_id, 'DENIED')}
+            >
               Deny
             </button>
           </>
         ) : (
-          // INERT for everyone else, and the signer is NAMED — a claim on someone specific, so the
-          // room says who rather than dangling a button that would be refused.
-          <>
-            <DisabledControl reason={pendingReason}>Approve</DisabledControl>
-            <DisabledControl reason={pendingReason}>Deny</DisabledControl>
-            <span className="decision-pending">
-              {signer ? <>Awaiting {signer.display_name}</> : <>Awaiting the named principal</>}
-            </span>
-          </>
+          // STATUS ONLY for everyone else. Disabled action buttons looked like broken controls and
+          // implied that this viewer almost had authority. The signer is named; no unavailable act
+          // is presented as a control.
+          <span className="decision-pending">
+            {signer ? (
+              <>
+                Awaiting {signer.display_name} to approve or deny {p.action}
+              </>
+            ) : (
+              <>Awaiting the named principal to approve or deny {p.action}</>
+            )}
+          </span>
         )}
       </div>
     </Panel>

@@ -137,6 +137,7 @@ export function MemberChip({ member, name }: { member?: RosterMember; name: stri
   return (
     <span
       className={['chip', agent ? 'chip-agent' : 'chip-human'].join(' ')}
+      role="listitem"
       {...pr(HOOK.rosterMember)}
       data-pr-member={member ? member.id : name}
       {...accentAttr(member)}

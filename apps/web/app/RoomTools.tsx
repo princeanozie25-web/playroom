@@ -34,6 +34,12 @@ export function RoomTools({
 }) {
   const [brief, setBrief] = useState({ content: '', purpose: '' });
   const [doc, setDoc] = useState({ title: '', purpose: '', provenance: '', content: '' });
+  const canSetBriefing = brief.content.trim() !== '' && brief.purpose.trim() !== '';
+  const canGiveDocument =
+    doc.title.trim() !== '' &&
+    doc.purpose.trim() !== '' &&
+    doc.provenance.trim() !== '' &&
+    doc.content.trim() !== '';
 
   const submitBriefing = (e: FormEvent): void => {
     e.preventDefault();
@@ -64,7 +70,10 @@ export function RoomTools({
 
   return (
     <details className="room-tools" {...pr(HOOK.roomTools)}>
-      <summary>Room tools — set a briefing, give a document</summary>
+      <summary>
+        <span className="room-tools-summary__title">Room tools</span>
+        <span className="room-tools-summary__meta">Briefing and documents</span>
+      </summary>
 
       {refusal ? (
         <p role="alert" className="room-tools-error" {...pr(HOOK.roomToolsError)}>
@@ -72,53 +81,100 @@ export function RoomTools({
         </p>
       ) : null}
 
-      <form className="room-tools-briefing" onSubmit={submitBriefing}>
-        <textarea
-          className="what"
-          placeholder="Room briefing — how work is done here"
-          value={brief.content}
-          onChange={(e) => setBrief({ ...brief, content: e.target.value })}
-        />
-        <input
-          className="why"
-          placeholder="Why (purpose)"
-          value={brief.purpose}
-          onChange={(e) => setBrief({ ...brief, purpose: e.target.value })}
-        />
-        <button type="submit" {...pr(HOOK.briefingSetSubmit)}>
-          set briefing
-        </button>
-      </form>
+      <div className="room-tools-panel">
+        <section className="room-tool-section" aria-labelledby="briefing-tool-title">
+          <div className="room-tool-section__head">
+            <p className="room-tool-kicker">Common ground</p>
+            <h2 id="briefing-tool-title">Set the room briefing</h2>
+            <p>Give every member the same standing frame for future work.</p>
+          </div>
+          <form className="room-tools-briefing" onSubmit={submitBriefing}>
+            <label htmlFor="room-briefing-content">Briefing</label>
+            <textarea
+              id="room-briefing-content"
+              className="what"
+              rows={4}
+              required
+              placeholder="How work should be done in this room"
+              value={brief.content}
+              onChange={(e) => setBrief({ ...brief, content: e.target.value })}
+            />
+            <label htmlFor="room-briefing-purpose">Purpose</label>
+            <input
+              id="room-briefing-purpose"
+              className="why"
+              required
+              placeholder="Why this framing is needed"
+              value={brief.purpose}
+              onChange={(e) => setBrief({ ...brief, purpose: e.target.value })}
+            />
+            <button type="submit" disabled={!canSetBriefing} {...pr(HOOK.briefingSetSubmit)}>
+              Set briefing
+            </button>
+          </form>
+        </section>
 
-      <form className="room-tools-document" onSubmit={submitDocument}>
-        <input
-          className="title"
-          placeholder="Title"
-          value={doc.title}
-          onChange={(e) => setDoc({ ...doc, title: e.target.value })}
-        />
-        <input
-          className="why"
-          placeholder="Why (purpose)"
-          value={doc.purpose}
-          onChange={(e) => setDoc({ ...doc, purpose: e.target.value })}
-        />
-        <input
-          className="provenance"
-          placeholder="Filename (provenance), e.g. handoff.md"
-          value={doc.provenance}
-          onChange={(e) => setDoc({ ...doc, provenance: e.target.value })}
-        />
-        <textarea
-          className="what"
-          placeholder="The document text — .txt or .md, 8000 chars or fewer"
-          value={doc.content}
-          onChange={(e) => setDoc({ ...doc, content: e.target.value })}
-        />
-        <button type="submit" {...pr(HOOK.docUploadSubmit)}>
-          give document
-        </button>
-      </form>
+        <section className="room-tool-section" aria-labelledby="document-tool-title">
+          <div className="room-tool-section__head">
+            <p className="room-tool-kicker">Room document</p>
+            <h2 id="document-tool-title">Give a document</h2>
+            <p>Attach bounded text with an explicit purpose and provenance.</p>
+          </div>
+          <form className="room-tools-document" onSubmit={submitDocument}>
+            <div className="room-tool-field-row">
+              <div>
+                <label htmlFor="room-document-title">Title</label>
+                <input
+                  id="room-document-title"
+                  className="title"
+                  required
+                  placeholder="Replay guard review"
+                  value={doc.title}
+                  onChange={(e) => setDoc({ ...doc, title: e.target.value })}
+                />
+              </div>
+              <div>
+                <label htmlFor="room-document-provenance">Filename</label>
+                <input
+                  id="room-document-provenance"
+                  className="provenance"
+                  required
+                  placeholder="handoff.md"
+                  value={doc.provenance}
+                  onChange={(e) => setDoc({ ...doc, provenance: e.target.value })}
+                />
+              </div>
+            </div>
+            <label htmlFor="room-document-purpose">Purpose</label>
+            <input
+              id="room-document-purpose"
+              className="why"
+              required
+              placeholder="What this document should help the room decide"
+              value={doc.purpose}
+              onChange={(e) => setDoc({ ...doc, purpose: e.target.value })}
+            />
+            <label htmlFor="room-document-content">Document text</label>
+            <textarea
+              id="room-document-content"
+              className="what"
+              rows={4}
+              required
+              maxLength={8000}
+              aria-describedby="room-document-limit"
+              placeholder="Plain text or Markdown, rendered as text"
+              value={doc.content}
+              onChange={(e) => setDoc({ ...doc, content: e.target.value })}
+            />
+            <p id="room-document-limit" className="room-tool-limit">
+              {doc.content.length.toLocaleString()} / 8,000 characters
+            </p>
+            <button type="submit" disabled={!canGiveDocument} {...pr(HOOK.docUploadSubmit)}>
+              Give document
+            </button>
+          </form>
+        </section>
+      </div>
     </details>
   );
 }

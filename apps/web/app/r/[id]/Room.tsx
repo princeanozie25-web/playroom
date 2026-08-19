@@ -36,6 +36,8 @@ import { PanelPresence } from '../../Panel';
 import { HOOK, pr } from '../../hooks';
 import { PushControl } from '../../PushControl';
 import { RoomTools } from '../../RoomTools';
+import { AppBrand } from '../../AppBrand';
+import { ThemeToggle } from '../../ThemeToggle';
 import { isCommandRefusal } from '../../refusals';
 import type { Principal, RosterMember } from '../../roster';
 
@@ -397,16 +399,6 @@ export function Room({
   roomId: string;
   roster: RosterMember[];
   principals: Principal[];
-  /**
-   * The member credential this browser connects as (S1.2).
-   *
-   * IT REACHES THE BROWSER, and that is a real limitation rather than an oversight. It is a
-   * member credential held by a process, and a browser page is a process the viewer can read:
-   * anyone with the page can connect as that member. What it buys is that the WIRE can no
-   * longer name its author — the claim is gone from the protocol, which is the part that five
-   * findings rested on. What it does not buy is a person. A per-human credential needs a login,
-   * which is a product; see S12-N1 in the red-team log.
-   */
 }) {
   const [events, setEvents] = useState<ServerEvent[]>([]);
   const [status, setStatus] = useState<Status>('connecting');
@@ -429,14 +421,19 @@ export function Room({
   // as loading rather than a freeze.
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
   // THE WELCOME SCREEN SHOWS ONCE, and only for somebody who arrived through redemption — the join
   // route redirects with `?welcome=1`. Read from the URL rather than from storage so it cannot
   // reappear on a later visit, and so my own browser and the capture harness never see it: take 13
   // is the asset and a panel over the room would have changed the film.
-  const [showWelcome, setShowWelcome] = useState(
-    () =>
-      typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('welcome'),
-  );
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  // URL state is browser-owned. Reading it in the state initializer made the client's first tree
+  // differ from the server tree on `/r/:id?welcome=1`, which forced React to discard the hydrated
+  // room. Reveal the panel only after the stable server/client tree has hydrated.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('welcome')) setShowWelcome(true);
+  }, []);
 
   // Agent ids, for deciding which summons render — only agent-initiated ones (S1.8). From the roster
   // prop, so it is available before `items` is built.
@@ -500,7 +497,7 @@ export function Room({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef<boolean>(false);
   const pendingRef = useRef<string>(''); // last body sent, restored if it is refused
-  const tailRef = useRef<HTMLDivElement | null>(null);
+  const tailRef = useRef<HTMLLIElement | null>(null);
   // Set when a page of OLDER history is prepended, so the "keep the newest in frame" effect below
   // does NOT yank the reader to the bottom on a load-older — the one items change that must not scroll.
   const prependingRef = useRef<boolean>(false);
@@ -672,6 +669,7 @@ export function Room({
     stoppedRef.current = false;
     setEvents([]);
     setHasOlder(false);
+    setLoadingHistory(true);
     void (async (): Promise<void> => {
       try {
         const { events: recent, has_older } = await fetchHistory(roomId);
@@ -690,7 +688,10 @@ export function Room({
       }
       // THEN the live tail, resuming from where the window ended (lastSeqRef). Not after=0 on a loaded
       // window — the socket replays only the gap since the fetch, not the whole room.
-      if (!stoppedRef.current) connect();
+      if (!stoppedRef.current) {
+        setLoadingHistory(false);
+        connect();
+      }
     })();
     return () => {
       stoppedRef.current = true;
@@ -738,15 +739,29 @@ export function Room({
 
   // Draw the owner tools only for a human viewer — convenience, not the gate: the server refuses a
   // non-human by kind and a non-owner briefing by identity regardless of what is drawn.
-  const viewerIsHuman = roster.find((m) => m.id === viewer)?.kind === 'human';
+  const viewerMember = roster.find((m) => m.id === viewer);
+  const viewerIsHuman = viewerMember?.kind === 'human';
 
   return (
     <main className="room" {...pr(HOOK.room)}>
       <header className="room-header">
-        <h1 className="room-title">
-          <span>
-            room <span className="room-id">/ {roomId}</span>
-          </span>
+        <div className="room-topbar">
+          <AppBrand />
+          <nav className="room-nav" aria-label="Room navigation">
+            <a className="loops-link" href={`/r/${roomId}/loops`} {...pr(HOOK.loopsLink)}>
+              Standing orders
+            </a>
+            <ThemeToggle showLabel={false} />
+          </nav>
+        </div>
+
+        <div className="room-heading-row">
+          <div>
+            <p className="room-eyebrow">Canonical collaboration room</p>
+            <h1 className="room-title">
+              <span className="room-id">{roomId}</span>
+            </h1>
+          </div>
           {/* `data-pr-state` carries the state as DATA. The harness read a `title`
               attribute here once and the attribute was removed by a redesign, matching
               nothing — a hook is a contract, a class name is not (S06-N1). */}
@@ -754,8 +769,9 @@ export function Room({
             <span className="dot" />
             {conn}
           </span>
-        </h1>
-        <div className="roster" {...pr(HOOK.roster)}>
+        </div>
+
+        <div className="roster" role="list" aria-label="Room members" {...pr(HOOK.roster)}>
           {agents.map((m) => (
             <MemberChip key={m.id} member={m} name={m.id} />
           ))}
@@ -767,16 +783,16 @@ export function Room({
             before they hit the ceiling, but it never nags. Shown only once there is spend to show,
             so a fresh room carries nothing. It reads "this room" to stay distinct from the daily
             ceiling, which is a different number on a different surface (the refusal, when hit). */}
-        {roomSpent > 0 && (
-          <div className="room-meter" {...pr(HOOK.roomSpend)}>
-            this room · ${roomSpent.toFixed(4)}
-          </div>
-        )}
-        {/* TO THE LOOPS SCREEN (S-UI3) — set up and steer standing orders from a form, not a bash
-            script. A plain link: the screen is its own route, read server-side. */}
-        <a className="loops-link" href={`/r/${roomId}/loops`} {...pr(HOOK.loopsLink)}>
-          standing orders →
-        </a>
+        <div className="room-ambient">
+          {roomSpent > 0 && (
+            <div className="room-meter" {...pr(HOOK.roomSpend)}>
+              This room · ${roomSpent.toFixed(4)}
+            </div>
+          )}
+          {/* S-PUSH: the notification control lives in the room's header because the room is the
+              thing being notified ABOUT. It asks; it never springs a prompt on load. */}
+          <PushControl />
+        </div>
         {/* INSIDE THE HEADER, not as a fourth child of `.room`. The room is a three-row grid
             (header / transcript / composer) and a fourth child takes `1fr` off the transcript and
             pushes the composer into an implicit row — the layout collapses rather than shifting,
@@ -797,12 +813,6 @@ export function Room({
             }}
           />
         </PanelPresence>
-
-        {/* S-PUSH: the notification control lives in the room's header because the room is the thing
-            being notified ABOUT, and because a control for "tell me when something needs me" belongs
-            next to the place that would otherwise have to stay open. It asks; it never springs a
-            prompt on load. */}
-        <PushControl />
       </header>
 
       {refusal && (
@@ -816,6 +826,28 @@ export function Room({
       {/* aria-live="polite": design.md's A11y line promises streaming text announces politely —
           a screen reader hears a turn arrive without it interrupting the current utterance. */}
       <ul className="transcript" {...pr(HOOK.transcript)} aria-live="polite">
+        {loadingHistory && (
+          <li className="history-loading" role="status">
+            <span className="route-loading__mark" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+              <i />
+            </span>
+            <span>loading recent room history…</span>
+          </li>
+        )}
+        {!loadingHistory && items.length === 0 && (
+          <li className="transcript-empty">
+            <span className="transcript-empty__mark" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+            <strong>The room is ready.</strong>
+            <span>Send a message or mention an agent to begin the shared record.</span>
+          </li>
+        )}
         {/* LOAD EARLIER — the top of a WINDOW, not the top of the room (S16b). It appears only when
             history exists below what is loaded, and reaching it is one request, never a lost message.
             An explicit control rather than scroll-detection: loading behaviour, no new UI look. */}
@@ -913,13 +945,13 @@ export function Room({
               <div className="turn-body" {...pr(HOOK.body)}>
                 {it.text}
                 {it.streaming && (
-                  <span className="caret" {...pr(HOOK.caret)}>
+                  <span className="caret" aria-hidden="true" {...pr(HOOK.caret)}>
                     {'▌'}
                   </span>
                 )}
               </div>
               {!it.streaming && it.success === false && (
-                <div className="turn-error">⚠ the turn failed</div>
+                <div className="turn-error">Turn failed.</div>
               )}
               {!it.streaming && (it.tokens_in != null || it.cost_usd != null) && (
                 <div className="meter" {...pr(HOOK.spend)}>
@@ -932,36 +964,44 @@ export function Room({
             </li>
           ),
         )}
-        <div ref={tailRef} />
+        <li ref={tailRef} className="transcript-tail" aria-hidden="true" />
       </ul>
 
-      {viewerIsHuman && (
-        <RoomTools
-          send={sendFrame}
-          refusal={commandRefusal}
-          onClear={() => setCommandRefusal(null)}
-        />
-      )}
-      <form className="composer" onSubmit={onSubmit} {...pr(HOOK.composer)}>
-        {/* THE `you` INPUT IS GONE. It let a sender type their own name, which the server
+      <footer className="room-dock">
+        {viewerIsHuman && (
+          <RoomTools
+            send={sendFrame}
+            refusal={commandRefusal}
+            onClear={() => setCommandRefusal(null)}
+          />
+        )}
+        {viewerMember && (
+          <div className="room-dock__identity">
+            <span>Posting as</span>
+            <MemberName member={viewerMember} name={viewerMember.id} />
+          </div>
+        )}
+        <form className="composer" onSubmit={onSubmit} {...pr(HOOK.composer)}>
+          {/* THE `you` INPUT IS GONE. It let a sender type their own name, which the server
             wrote down — the claim S1.2 exists to delete. Identity now comes from the
             credential on the socket, so a box labelled "you" would control nothing, and a
-            control that changes nothing is a UI telling a lie about itself. Showing WHO you
-            are authenticated as is a real need and a design decision; it belongs to the shell
-            slice, not here. */}
-        <input
-          className="what"
-          // design.md "The composer" copy, verbatim: the placeholder is the one persistent surface
-          // that can teach the @-convention, and "message" taught nothing (SHELL-B1; the full
-          // composer with its @-popover remains the shell slice's).
-          placeholder="Message the room — @ to bring someone in"
-          value={body}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setBody(e.target.value)}
-        />
-        <button type="submit" disabled={conn === 'refused'}>
-          send
-        </button>
-      </form>
+            control that changes nothing is a UI telling a lie about itself. */}
+          <label className="sr-only" htmlFor="room-message">
+            Message the room
+          </label>
+          {/* The placeholder teaches the @-convention without adding a persistent instruction row. */}
+          <input
+            id="room-message"
+            className="what"
+            placeholder="Message the room — @ to bring someone in"
+            value={body}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setBody(e.target.value)}
+          />
+          <button type="submit" disabled={conn === 'refused' || body.trim() === ''}>
+            Send
+          </button>
+        </form>
+      </footer>
     </main>
   );
 }

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "@playwright/test"]
+  },
+  "include": ["*.ts"],
+  "references": [
+    {
+      "path": "../../apps/api"
+    }
+  ]
+}

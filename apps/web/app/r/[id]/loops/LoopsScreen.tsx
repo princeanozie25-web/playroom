@@ -9,6 +9,8 @@ import { MemberName } from '../../../MemberChip';
 import { Panel, PanelPresence } from '../../../Panel';
 import { HOOK, pr } from '../../../hooks';
 import { ORDER_TASK_MAX_CHARS } from '@playroom/shared';
+import { AppBrand } from '../../../AppBrand';
+import { ThemeToggle } from '../../../ThemeToggle';
 
 // THE LOOPS SCREEN (S-UI3) — standing orders as a form, not a bash script.
 //
@@ -70,23 +72,36 @@ export function LoopsScreen({
       }
       setEditing(null);
       router.refresh(); // re-read the server component so the list reflects the record
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The request could not be completed.');
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="loops" {...pr(HOOK.loops)}>
+    <main className="loops" {...pr(HOOK.loops)} aria-busy={busy}>
       <header className="loops-head">
-        <Link className="loops-back" href={`/r/${roomId}`} {...pr(HOOK.loopsBack)}>
-          ← back to the room
-        </Link>
-        <h1>Standing orders</h1>
-        <p className="loops-sub">
-          Recurring work you authorise: when an agent finishes a turn, summon another. Set how often
-          it checks in and when it stops. It causes; it does not grant — every turn it fires is
-          still governed.
-        </p>
+        <div className="loops-topbar">
+          <AppBrand />
+          <div className="loops-topbar__actions">
+            <Link className="loops-back" href={`/r/${roomId}`} {...pr(HOOK.loopsBack)}>
+              Back to room
+            </Link>
+            <ThemeToggle showLabel={false} />
+          </div>
+        </div>
+        <div className="loops-hero">
+          <div>
+            <p className="loops-eyebrow">Room / {roomId}</p>
+            <h1>Standing orders</h1>
+          </div>
+          <p className="loops-sub">
+            Recurring work you authorise: when an agent finishes a turn, summon another. Set how
+            often it checks in and when it stops. It causes; it does not grant—every turn remains
+            governed.
+          </p>
+        </div>
       </header>
 
       {error && (
@@ -95,148 +110,172 @@ export function LoopsScreen({
         </p>
       )}
 
-      {/* THE LIST — rendered from records and events, one row per order. */}
-      {orders.length === 0 ? (
-        <p className="loops-empty" {...pr(HOOK.loopsEmpty)}>
-          No standing orders yet. Create one below to set up a loop.
+      {busy && (
+        <p className="loops-working" role="status">
+          Updating the canonical order record…
         </p>
-      ) : (
-        <ul className="loop-list">
-          {orders.map((o) => {
-            const mine = isHuman && viewer.member_id === o.creator_member_id;
-            const terminal = ['REVOKED', 'EXPIRED', 'LIMIT_REACHED'].includes(o.status);
-            return (
-              <Panel
-                as="li"
-                className="loop-row"
-                key={o.id}
-                hook={HOOK.loopRow}
-                data-pr-status={o.status}
-              >
-                <div className="loop-row-head">
-                  <span className="loop-status" {...pr(HOOK.loopStatus)}>
-                    {STATUS_WORDS[o.status] ?? o.status}
-                  </span>
-                  <span className="loop-wire">
-                    when{' '}
-                    <MemberName
-                      member={rosterMap.get(o.trigger_member_id)}
-                      name={o.trigger_member_id}
-                    />{' '}
-                    finishes, summon{' '}
-                    <MemberName
-                      member={rosterMap.get(o.action_member_id)}
-                      name={o.action_member_id}
-                    />
-                  </span>
-                </div>
-                {/* WHAT IT IS FOR (S-TASK) — the objective every cycle is handed. Shown as the
+      )}
+
+      <div className="loops-workspace">
+        <section className="loops-orders" aria-labelledby="orders-title">
+          <div className="loops-section-head">
+            <h2 id="orders-title">Orders</h2>
+            <span>{orders.length}</span>
+          </div>
+          {/* THE LIST — rendered from records and events, one row per order. */}
+          {orders.length === 0 ? (
+            <div className="loops-empty" {...pr(HOOK.loopsEmpty)}>
+              <span className="loops-empty__mark" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+              <strong>No standing orders yet.</strong>
+              <span>Create one to make bounded work recur.</span>
+            </div>
+          ) : (
+            <ul className="loop-list">
+              {orders.map((o) => {
+                const mine = isHuman && viewer.member_id === o.creator_member_id;
+                const terminal = ['REVOKED', 'EXPIRED', 'LIMIT_REACHED'].includes(o.status);
+                return (
+                  <Panel
+                    as="li"
+                    className="loop-row"
+                    key={o.id}
+                    hook={HOOK.loopRow}
+                    data-pr-status={o.status}
+                  >
+                    <div className="loop-row-head">
+                      <span className="loop-status" {...pr(HOOK.loopStatus)}>
+                        {STATUS_WORDS[o.status] ?? o.status}
+                      </span>
+                      <span className="loop-wire">
+                        when{' '}
+                        <MemberName
+                          member={rosterMap.get(o.trigger_member_id)}
+                          name={o.trigger_member_id}
+                        />{' '}
+                        finishes, summon{' '}
+                        <MemberName
+                          member={rosterMap.get(o.action_member_id)}
+                          name={o.action_member_id}
+                        />
+                      </span>
+                    </div>
+                    {/* WHAT IT IS FOR (S-TASK) — the objective every cycle is handed. Shown as the
                     order's own line rather than folded into the terms, because it is the thing a
                     person is actually authorising. An order created before S-TASK has none, and
                     says so plainly: it will refuse to fire, and there is no editing one in. */}
-                {o.task ? (
-                  <p className="loop-task" {...pr(HOOK.loopTask)}>
-                    {o.task}
-                  </p>
-                ) : (
-                  <p className="loop-task loop-task-missing" {...pr(HOOK.loopTask)}>
-                    no task — this order predates them and will not fire; create a new one
-                  </p>
-                )}
-                <div className="loop-row-meta">
-                  <span className="loop-cycles" {...pr(HOOK.loopCycles)}>
-                    {o.cycle_count} cycle{o.cycle_count === 1 ? '' : 's'}
-                  </span>
-                  <span className="loop-terms">
-                    dial {o.max_unattended_cycles}
-                    {o.max_cycles !== null ? ` · cap ${o.max_cycles}` : ''}
-                    {o.expires_at
-                      ? ` · expires ${new Date(o.expires_at).toLocaleDateString()}`
-                      : ''}
-                  </span>
-                  <span className="loop-fired" {...pr(HOOK.loopFired)}>
-                    {fired(o.last_fired)}
-                  </span>
-                </div>
-                {o.pause_reason && o.status !== 'ACTIVE' && (
-                  <p className="loop-reason" {...pr(HOOK.loopReason)}>
-                    {o.pause_reason}
-                  </p>
-                )}
+                    {o.task ? (
+                      <p className="loop-task" {...pr(HOOK.loopTask)}>
+                        {o.task}
+                      </p>
+                    ) : (
+                      <p className="loop-task loop-task-missing" {...pr(HOOK.loopTask)}>
+                        no task — this order predates them and will not fire; create a new one
+                      </p>
+                    )}
+                    <div className="loop-row-meta">
+                      <span className="loop-cycles" {...pr(HOOK.loopCycles)}>
+                        {o.cycle_count} cycle{o.cycle_count === 1 ? '' : 's'}
+                      </span>
+                      <span className="loop-terms">
+                        dial {o.max_unattended_cycles}
+                        {o.max_cycles !== null ? ` · cap ${o.max_cycles}` : ''}
+                        {o.expires_at
+                          ? ` · expires ${new Date(o.expires_at).toLocaleDateString()}`
+                          : ''}
+                      </span>
+                      <span className="loop-fired" {...pr(HOOK.loopFired)}>
+                        {fired(o.last_fired)}
+                      </span>
+                    </div>
+                    {o.pause_reason && o.status !== 'ACTIVE' && (
+                      <p className="loop-reason" {...pr(HOOK.loopReason)}>
+                        {o.pause_reason}
+                      </p>
+                    )}
 
-                {/* CONTROLS AS VISIBLE TRUTH. Pause: any human, on an active order. Resume/revoke/edit:
+                    {/* CONTROLS AS VISIBLE TRUTH. Pause: any human, on an active order. Resume/revoke/edit:
                     the creator only — a non-creator simply does not see them. An agent sees none. */}
-                {isHuman && (
-                  <div className="loop-controls">
-                    {o.status === 'ACTIVE' && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        {...pr(HOOK.loopPause)}
-                        onClick={() =>
-                          mutate(`/api/rooms/${roomId}/orders/${o.id}/control`, 'POST', {
-                            op: 'pause',
-                          })
-                        }
-                      >
-                        pause
-                      </button>
+                    {isHuman && (
+                      <div className="loop-controls">
+                        {o.status === 'ACTIVE' && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            {...pr(HOOK.loopPause)}
+                            onClick={() =>
+                              mutate(`/api/rooms/${roomId}/orders/${o.id}/control`, 'POST', {
+                                op: 'pause',
+                              })
+                            }
+                          >
+                            Pause
+                          </button>
+                        )}
+                        {mine && o.status === 'PAUSED' && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            {...pr(HOOK.loopResume)}
+                            onClick={() =>
+                              mutate(`/api/rooms/${roomId}/orders/${o.id}/control`, 'POST', {
+                                op: 'resume',
+                              })
+                            }
+                          >
+                            Resume
+                          </button>
+                        )}
+                        {mine && !terminal && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            {...pr(HOOK.loopRevoke)}
+                            onClick={() =>
+                              mutate(`/api/rooms/${roomId}/orders/${o.id}/control`, 'POST', {
+                                op: 'revoke',
+                              })
+                            }
+                          >
+                            Revoke
+                          </button>
+                        )}
+                        {mine && !terminal && (
+                          <button
+                            type="button"
+                            {...pr(HOOK.loopEdit)}
+                            onClick={() => setEditing(editing === o.id ? null : o.id)}
+                          >
+                            {editing === o.id ? 'Cancel' : 'Edit'}
+                          </button>
+                        )}
+                      </div>
                     )}
-                    {mine && o.status === 'PAUSED' && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        {...pr(HOOK.loopResume)}
-                        onClick={() =>
-                          mutate(`/api/rooms/${roomId}/orders/${o.id}/control`, 'POST', {
-                            op: 'resume',
-                          })
-                        }
-                      >
-                        resume
-                      </button>
-                    )}
-                    {mine && !terminal && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        {...pr(HOOK.loopRevoke)}
-                        onClick={() =>
-                          mutate(`/api/rooms/${roomId}/orders/${o.id}/control`, 'POST', {
-                            op: 'revoke',
-                          })
-                        }
-                      >
-                        revoke
-                      </button>
-                    )}
-                    {mine && !terminal && (
-                      <button
-                        type="button"
-                        {...pr(HOOK.loopEdit)}
-                        onClick={() => setEditing(editing === o.id ? null : o.id)}
-                      >
-                        {editing === o.id ? 'cancel' : 'edit'}
-                      </button>
-                    )}
-                  </div>
-                )}
 
-                {/* PanelPresence (SHELL-B3): the edit form is the loops screen's one unmounting
+                    {/* PanelPresence (SHELL-B3): the edit form is the loops screen's one unmounting
                     Panel — its enter/exit play here, and the row's own layout animation eases the
                     height the form takes and vacates. */}
-                <PanelPresence show={editing === o.id && mine && !terminal}>
-                  <EditForm roomId={roomId} order={o} busy={busy} onSave={mutate} />
-                </PanelPresence>
-              </Panel>
-            );
-          })}
-        </ul>
-      )}
+                    <PanelPresence show={editing === o.id && mine && !terminal}>
+                      <EditForm roomId={roomId} order={o} busy={busy} onSave={mutate} />
+                    </PanelPresence>
+                  </Panel>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
-      {/* THE CREATE FORM — any human may author an order; the server enforces human-only, this adds none. */}
-      {isHuman && <CreateForm roomId={roomId} agents={agents} busy={busy} onCreate={mutate} />}
-    </div>
+        {/* THE CREATE FORM — any human may author an order; the server enforces human-only. */}
+        {isHuman && (
+          <aside className="loops-create-shell" aria-label="Create a standing order">
+            <CreateForm roomId={roomId} agents={agents} busy={busy} onCreate={mutate} />
+          </aside>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -259,6 +298,7 @@ function CreateForm({
   const [dial, setDial] = useState(3);
   const [cap, setCap] = useState('');
   const [expiry, setExpiry] = useState('');
+  const hasRequiredEndBound = dial === 1 || cap.trim() !== '' || expiry.trim() !== '';
 
   return (
     <Panel
@@ -279,13 +319,22 @@ function CreateForm({
       }}
     >
       <h2>New standing order</h2>
+      <p className="loop-create-intro">
+        Define the objective first, then choose how the work recurs and where it stops.
+      </p>
+      {agents.length === 0 && (
+        <p className="loop-agent-empty" role="status">
+          This room has no agent members available for a standing order.
+        </p>
+      )}
       {/* THE OBJECTIVE, FIRST AND REQUIRED (S-TASK). It is above the wiring because it is the
           decision: the members are how the work recurs, this is what recurs. `required` and the
           disabled button are courtesy — the server refuses a blank one by name, and the form adds
           no enforcement it does not already have. It cannot be edited later, and the label says so
           rather than letting someone discover it. */}
       <label>
-        what each cycle is for — set once, and it cannot be edited later
+        Objective for every cycle
+        <span>Set once; it cannot be edited later.</span>
         <textarea
           value={task}
           rows={3}
@@ -297,7 +346,8 @@ function CreateForm({
         />
       </label>
       <label>
-        when this agent finishes a turn
+        Trigger agent
+        <span>Run after this agent finishes a turn.</span>
         <select
           value={trigger}
           onChange={(e) => setTrigger(e.target.value)}
@@ -311,7 +361,7 @@ function CreateForm({
         </select>
       </label>
       <label>
-        summon this agent
+        Agent to summon
         <select
           value={action}
           onChange={(e) => setAction(e.target.value)}
@@ -325,17 +375,22 @@ function CreateForm({
         </select>
       </label>
       <label>
-        check in after this many cycles (the attendance dial)
+        Attendance dial
+        <span id="loop-dial-bound-help">
+          Require a human check-in after this many unattended cycles. Above 1, add a cycle cap or
+          expiry so the order has an end.
+        </span>
         <input
           type="number"
           min={1}
           value={dial}
           onChange={(e) => setDial(Number(e.target.value))}
+          aria-describedby="loop-dial-bound-help"
           {...pr(HOOK.loopDial)}
         />
       </label>
       <label>
-        stop after this many cycles (optional)
+        Cycle cap <span>Optional</span>
         <input
           type="number"
           min={1}
@@ -346,7 +401,7 @@ function CreateForm({
         />
       </label>
       <label>
-        expires (optional)
+        Expiry <span>Optional</span>
         <input
           type="datetime-local"
           value={expiry}
@@ -356,10 +411,10 @@ function CreateForm({
       </label>
       <button
         type="submit"
-        disabled={busy || !trigger || !action || task.trim() === ''}
+        disabled={busy || !trigger || !action || task.trim() === '' || !hasRequiredEndBound}
         {...pr(HOOK.loopSubmit)}
       >
-        create standing order
+        {busy ? 'Creating…' : 'Create standing order'}
       </button>
     </Panel>
   );
@@ -394,7 +449,7 @@ function EditForm({
       }}
     >
       <label>
-        dial
+        Attendance dial
         <input
           type="number"
           min={1}
@@ -403,7 +458,7 @@ function EditForm({
         />
       </label>
       <label>
-        cap
+        Cycle cap
         <input
           type="number"
           min={1}
@@ -413,7 +468,7 @@ function EditForm({
         />
       </label>
       <button type="submit" disabled={busy} {...pr(HOOK.loopEditSave)}>
-        save — effective next cycle
+        {busy ? 'Saving…' : 'Save — effective next cycle'}
       </button>
     </Panel>
   );

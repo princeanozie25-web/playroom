@@ -441,6 +441,8 @@ export interface AgentTurnDeps {
   // (S1.8) — the same path a human tag uses, not a parallel one. Present because a turn can now
   // dispatch a summon of its own.
   execute: (ctx: CommandContext, command: Command) => Promise<unknown>;
+  /** Server-owned background scheduler, so nested post-turn work drains before PostgreSQL closes. */
+  defer?: (label: string, task: () => Promise<unknown>) => boolean;
   // The summon this turn answers. Required, so a turn cannot exist without one.
   summon: SummonRef;
   // The task this turn is work on. Required for the same reason (S1.3): the turn is what
@@ -490,6 +492,15 @@ async function moveTask(
 export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
   const { pool, bus, roomId, adapterId, adapterFactory, execute, spans, summon, task } = deps;
   const publish = (ev: ServerEvent): void => bus.publish(roomId, ev);
+  const defer = (label: string, task: () => Promise<unknown>): void => {
+    if (deps.defer) {
+      deps.defer(label, task);
+      return;
+    }
+    void task().catch(() => {
+      /* the invoked command records its own refusal/failure in the room */
+    });
+  };
 
   // STRUCTURED SUMMONS this turn emitted, collected during the stream and dispatched AFTER it
   // completes (S1.8) — so the emitting turn's own events (started/deltas/completed) are written
@@ -788,17 +799,19 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
         );
       } else {
         for (const target of new Set(emittedSummons)) {
-          void execute(
-            { actorId: adapterId, mode: 'hosted' },
-            {
-              kind: 'summon',
-              roomId,
-              member: target,
-              causeSeq: startedSeq,
-              intent: `${adapterId} summoned ${target}`,
-              chain,
-            },
-          ).catch(() => {}); // the summon path logs its own refusals; this guards the fire-and-forget
+          defer('agent-emitted summon', () =>
+            execute(
+              { actorId: adapterId, mode: 'hosted' },
+              {
+                kind: 'summon',
+                roomId,
+                member: target,
+                causeSeq: startedSeq,
+                intent: `${adapterId} summoned ${target}`,
+                chain,
+              },
+            ),
+          );
         }
       }
     }
@@ -877,17 +890,19 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     // forget under `system`: it is the room running its own orders, not this member. `completedEvent.seq`
     // is the fired cycle's cause and idempotency key; `deps.chain?.orderId` names the order this turn
     // belonged to, so an error terminal pauses the right one.
-    void execute(
-      { actorId: 'system', mode: 'system' },
-      {
-        kind: 'runOrders',
-        roomId,
-        member: adapterId,
-        completedSeq: completedEvent.seq,
-        success: true,
-        orderId: deps.chain?.orderId,
-      },
-    ).catch(() => {});
+    defer('standing-order continuation', () =>
+      execute(
+        { actorId: 'system', mode: 'system' },
+        {
+          kind: 'runOrders',
+          roomId,
+          member: adapterId,
+          completedSeq: completedEvent.seq,
+          success: true,
+          orderId: deps.chain?.orderId,
+        },
+      ),
+    );
   } catch (err) {
     // A SUMMON MAY START AT MOST ONE TURN (migration 006). This turn lost the race for
     // the `agent.turn.started` row, so another turn already answers this summon.
@@ -939,21 +954,23 @@ export async function runAgentTurn(deps: AgentTurnDeps): Promise<void> {
     // THE LOOP RUNNER, on an ERROR terminal (S-LOOP): a turn that failed does not cycle. If this turn
     // belonged to a standing order's cycle, the runner PAUSES that order out loud rather than firing
     // the next — surfacing the failure instead of looping on it.
-    void execute(
-      { actorId: 'system', mode: 'system' },
-      {
-        kind: 'runOrders',
-        roomId,
-        member: adapterId,
-        completedSeq: failedEvent.seq,
-        success: false,
-        orderId: deps.chain?.orderId,
-        // THE REASON THE LOOP STOPPED, NAMED. Without it the pause sentence is the same words for a
-        // provider outage and for a refusal the fabric itself made, and S17-N1 spent a slice looking
-        // like the former while being the latter.
-        errorClass,
-      },
-    ).catch(() => {});
+    defer('standing-order failure handling', () =>
+      execute(
+        { actorId: 'system', mode: 'system' },
+        {
+          kind: 'runOrders',
+          roomId,
+          member: adapterId,
+          completedSeq: failedEvent.seq,
+          success: false,
+          orderId: deps.chain?.orderId,
+          // THE REASON THE LOOP STOPPED, NAMED. Without it the pause sentence is the same words for a
+          // provider outage and for a refusal the fabric itself made, and S17-N1 spent a slice looking
+          // like the former while being the latter.
+          errorClass,
+        },
+      ),
+    );
 
     // §14: THE WORK IS HELD, NOT FINISHED AND NOT REFUSED.
     //

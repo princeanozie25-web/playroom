@@ -85,6 +85,14 @@ allowlist + co-sign the rest, never a raw shell.
 under a revocable lease. Omitting both fields grants NO host op — which is why every existing mandate,
 carrying neither, is unchanged (and `canonicalise` drops undefined fields, so no signature moved).
 
+**`requires` — a temporal condition (C3, ADR-014).** A grant entry may carry `"requires": ["tests_passed"]`:
+a list of fact keys that must ALL hold for the grant to apply. The caller assembles the facts from history
+(the node-op door reads `room_checks` — a check named `tests` that most recently passed yields the fact
+`tests_passed`) and passes them to the pure evaluator. A grant whose resource matches but whose facts are
+unmet is BLOCKed with `CONDITION_UNMET` ("not yet"), resolving to its underlying verdict once the fact holds.
+This is how "no push to `main` until tests pass" is expressed — e.g. adding `"requires": ["tests_passed"]` to
+the `host_protected` `git.push refs/heads/main` entry below.
+
 **TO ACTIVATE for `claude-code` in production (a re-sign step, not a code change):** add the block below to
 `claude-code.json` and re-sign with `PLAYROOM_MANDATE_SIGNING_KEY=<key> pnpm tsx scripts/sign-mandates.ts`.
 Until then C1's capability ships INERT for prod — the shipped mandate carries no host policy, so every host

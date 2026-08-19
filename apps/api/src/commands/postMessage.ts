@@ -4,7 +4,7 @@ import { appendMessage } from '../events.js';
 import { summonRuling } from '../agent.js';
 import { loadRoomTokens } from '../members.js';
 import { resetUnattended } from '../orders.js';
-import type { CommandContext, CommandDeps } from './context.js';
+import { deferCommandWork, type CommandContext, type CommandDeps } from './context.js';
 
 // Persist a message, fan it out, and dispatch a summon for each member it named — each
 // as its own command through the same entry (ADR-004).
@@ -123,23 +123,21 @@ export async function postMessageCommand(
   // goes through `appendMessage` directly, not here), so every send is real attention. Fire-and-forget
   // with its own guard: one indexed write that usually touches nothing must never sit on the send
   // path (§7, ADR-008), and if it is ever lost to a crash, resuming the order is the backstop reset.
-  void resetUnattended(deps.pool, input.roomId).catch(() => {
-    /* advisory; the streak is also cleared on resume */
-  });
+  deferCommandWork(deps, 'reset unattended order counters', () =>
+    resetUnattended(deps.pool, input.roomId),
+  );
 
   // MAINTAIN THE ROLLING SUMMARY, AHEAD OF THE NEXT SUMMON (S1.6). This message just grew the room;
   // folding its older messages into the summary is a background model call, and it must sit on
   // neither this send's path nor the next summon's first token (§7, ADR-008). Fire-and-forget, with
   // its OWN `system` context — the room maintaining itself, not an act attributed to the sender.
   // Cheap and idempotent when the tail is still short, which is every message in a young room.
-  void deps
-    .execute(
+  deferCommandWork(deps, 'room summary maintenance', () =>
+    deps.execute(
       { actorId: 'system', mode: 'system' },
       { kind: 'maintainSummary', roomId: input.roomId },
-    )
-    .catch(() => {
-      /* maintainRoomSummary logs its own failure; this only guards the fire-and-forget */
-    });
+    ),
+  );
 
   return event;
 }
