@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { XMention, XReadCursor, XReadSource, XThread } from '@playroom/x-read';
+import type { XMention, XPost, XReadCursor, XReadSource, XThread } from '@playroom/x-read';
 
 // ═══ THE GOVERNED GROKBOT CYCLE (ADR-015) ═══════════════════════════════════════════════════════════
 //
@@ -95,51 +95,79 @@ export function replyResource(mention: XMention, draft: string): string {
   return `${mention.url}#reply-${commitment}`;
 }
 
+export interface GrokbotCycleResult {
+  proposed: ProposedReply[];
+  seen: Set<string>;
+  /** Mentions whose handling threw (a read, draft, or propose failure). They are NOT marked seen, so a
+   *  later run retries them — the failure is surfaced here rather than swallowed or crashing the cycle. */
+  errors: { mentionId: string; error: unknown }[];
+}
+
 /**
  * Run one grokbot cycle: drain the mentions of the watched handle, and for each one not already seen, read
- * its thread, draft a reply from the screened text, and PROPOSE that reply to the fabric. Returns the
- * proposed replies with their verdicts and the updated `seen` set — nothing is posted.
+ * its thread, draft a reply from the SCREENED mention and thread, and PROPOSE that reply to the fabric.
+ * Returns the proposed replies with their verdicts, the updated `seen` set, and any per-mention errors —
+ * nothing is posted.
  *
- * `seen` is the idempotency boundary: a mention wakes the cycle at most once across runs, so re-running
- * (a poll loop, a retry) never re-proposes the same reply. The caller persists `seen` between runs.
+ * `seen` is the idempotency boundary: a mention is marked seen only AFTER it is fully proposed, so a mention
+ * wakes the cycle at most once across runs and a retry (a poll loop, a transient failure) never re-proposes
+ * a reply already put to the fabric. A mention whose handling throws is left unseen and collected in
+ * `errors`, so a later run retries just that one; a single bad mention never blocks the rest of the batch.
+ * The caller persists `seen` between runs.
+ *
+ * EVERY external `.text` the draft step sees is screened — the mention AND every post in its thread — so an
+ * instruction smuggled into a thread reply is as inert as one in the mention itself. The raw mention is kept
+ * for the receipt and the resource (audit fidelity); only the copy handed to the model is neutralised.
  */
 export async function runGrokbotCycle(
   deps: GrokbotCycleDeps,
   opts: { seen?: Iterable<string>; maxResults?: number } = {},
-): Promise<{ proposed: ProposedReply[]; seen: Set<string> }> {
+): Promise<GrokbotCycleResult> {
   const seen = new Set(opts.seen ?? []);
   const screen = deps.screen ?? screenExternalText;
+  const screenPost = (p: XPost): XPost => ({ ...p, text: screen(p.text) });
   const cursor: XReadCursor | undefined =
     opts.maxResults !== undefined ? { maxResults: opts.maxResults } : undefined;
 
   const mentions = await deps.source.getMentions(deps.watchedHandle, cursor);
   const proposed: ProposedReply[] = [];
+  const errors: { mentionId: string; error: unknown }[] = [];
 
   for (const mention of mentions) {
     if (seen.has(mention.id)) continue;
-    seen.add(mention.id);
 
-    const thread = await deps.source.getThread(mention.id);
-    const screenedText = screen(mention.text);
-    const draft = await deps.draftReply({ mention, thread, screenedText });
-    const resource = replyResource(mention, draft);
-    const verdict = await deps.propose({
-      clientMsgId: `grok-${mention.id}`,
-      action: GROKBOT_REPLY_ACTION,
-      resource,
-    });
+    try {
+      const thread = await deps.source.getThread(mention.id);
+      const screenedText = screen(mention.text);
+      const draft = await deps.draftReply({
+        // A screened COPY reaches the model — the mention and every thread post neutralised.
+        mention: { ...mention, text: screenedText },
+        thread: { root: screenPost(thread.root), replies: thread.replies.map(screenPost) },
+        screenedText,
+      });
+      const resource = replyResource(mention, draft);
+      const verdict = await deps.propose({
+        clientMsgId: `grok-${mention.id}`,
+        action: GROKBOT_REPLY_ACTION,
+        resource,
+      });
 
-    proposed.push({
-      mention,
-      threadSize: thread.replies.length + 1,
-      draft,
-      resource,
-      decision: verdict.decision,
-      reasonCode: verdict.reasonCode,
-      decisionId: verdict.decisionId,
-      posted: false,
-    });
+      proposed.push({
+        mention,
+        threadSize: thread.replies.length + 1,
+        draft,
+        resource,
+        decision: verdict.decision,
+        reasonCode: verdict.reasonCode,
+        decisionId: verdict.decisionId,
+        posted: false,
+      });
+      // ONLY here, after a full, successful propose: an unhandled mention stays retryable.
+      seen.add(mention.id);
+    } catch (error) {
+      errors.push({ mentionId: mention.id, error });
+    }
   }
 
-  return { proposed, seen };
+  return { proposed, seen, errors };
 }
