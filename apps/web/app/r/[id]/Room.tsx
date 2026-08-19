@@ -442,6 +442,19 @@ export function Room({
     [roster],
   );
   const items = useMemo<Item[]>(() => buildItems(events, agentIdSet), [events, agentIdSet]);
+  // A SINGLE, discrete announcement for a screen reader — "X is responding" when a turn starts,
+  // "X responded" when it finishes. The transcript <ul> is NOT a live region: a turn streams token
+  // by token (agent.turn.delta concatenates onto `text`), and a polite live region wrapping the whole
+  // list floods or garbles as that subtree mutates, and re-announces on history prepend. This value
+  // changes only at the two milestones a reader actually needs, so those are all it announces.
+  const liveMessage = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const it = items[i];
+      if (it.kind === 'agent')
+        return it.streaming ? `${it.adapter_id} is responding` : `${it.adapter_id} responded`;
+    }
+    return '';
+  }, [items]);
   const conn: Conn = refusal ? 'refused' : status === 'open' ? 'connected' : 'reconnecting';
 
   // WHAT THIS ROOM HAS SPENT: the authoritative baseline plus every completed turn and summary the
@@ -823,9 +836,14 @@ export function Room({
         </p>
       )}
 
-      {/* aria-live="polite": design.md's A11y line promises streaming text announces politely —
-          a screen reader hears a turn arrive without it interrupting the current utterance. */}
-      <ul className="transcript" {...pr(HOOK.transcript)} aria-live="polite">
+      {/* design.md's A11y line promises streaming text announces politely — but a live region must be
+          a DEDICATED, discrete announcer, not the whole scrolling transcript (which would announce
+          every token and re-announce on history prepend). So the transcript carries no aria-live; a
+          visually-hidden status region below announces the two milestones a reader needs. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {liveMessage}
+      </div>
+      <ul className="transcript" {...pr(HOOK.transcript)}>
         {loadingHistory && (
           <li className="history-loading" role="status">
             <span className="route-loading__mark" aria-hidden="true">
@@ -942,7 +960,9 @@ export function Room({
                   rendering model output as markup is an injection surface, while
                   preserving newlines is not. Do NOT "improve" this into a markdown
                   renderer — that needs a sanitisation story and an ADR first. */}
-              <div className="turn-body" {...pr(HOOK.body)}>
+              {/* aria-busy while streaming: a screen reader is told the body is mid-update and holds
+                  off reading the churning text, deferring to the discrete milestone announcer above. */}
+              <div className="turn-body" {...pr(HOOK.body)} aria-busy={it.streaming}>
                 {it.text}
                 {it.streaming && (
                   <span className="caret" aria-hidden="true" {...pr(HOOK.caret)}>

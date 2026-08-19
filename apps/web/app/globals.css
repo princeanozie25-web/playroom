@@ -354,6 +354,16 @@ body {
   border: 1.5px solid var(--ink-3);
 }
 
+@media (max-width: 700px) {
+  /* The mandate disclosure is the smallest interactive target in the roster and the easiest to miss
+     with a thumb; give its <summary> a ~40px hit area on touch widths (it was roughly 24px tall). */
+  .chip-mandate {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+}
+
 /* ── mandate on demand ──────────────────────────────────────────────────────
    The compact summary is the disclosure trigger. The panel overlays rather than
    pushing the roster around, so opening one does not move the transcript under it
@@ -1727,12 +1737,29 @@ html[data-landing-theme='dark'] .public-entry {
 .welcome-dismiss,
 .composer button,
 .join-submit,
+.start-form button,
+.room-tools button,
 .loop-submit,
 .loop-edit-save {
   transition:
     border-color var(--motion) var(--ease-out),
     background-color var(--motion) var(--ease-out),
     color var(--motion) var(--ease-out);
+}
+
+/* PRIMARY SUBMIT HOVER. The app's highest-frequency actions — Send, Enter the room, Create room, and
+   Room Tools' Set briefing / Give document — defined only base and :disabled states, so a pointer got
+   no feedback on the one button it most expects it from. Darken the fill on hover (eased by the
+   transition above), never on :disabled — an inert control must stay unmistakably inert (the same rule
+   the decision buttons rely on so a non-signer is never invited to press). Works in both themes: the
+   fill stays indigo / entry-blue in dark, only the text colour flips, so a darker fill still reads. */
+.composer button:hover:not(:disabled),
+.room-tools button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--indigo) 90%, #000);
+}
+.join-submit:hover:not(:disabled),
+.start-form button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--entry-blue) 88%, #000);
 }
 
 /* FIELD UPDATING — a state that changes in place (a task's dot, an interrupt's urgency rule, an
@@ -2099,32 +2126,6 @@ html[data-landing-theme='dark'] .landing a.landing-button--primary {
   font-size: 13px;
   line-height: 1.45;
 }
-.landing-decision {
-  width: 100%;
-  margin: 0;
-  border: 1px solid var(--landing-orange);
-  border-left-width: 4px;
-  background: var(--landing-orange-soft);
-}
-.landing-decision__topline {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 50px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--landing-orange);
-  color: var(--landing-ink);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.landing-decision__sequence {
-  margin-left: auto;
-  color: var(--landing-ink-muted);
-  white-space: nowrap;
-}
 .landing-status-dot {
   width: 9px;
   height: 9px;
@@ -2132,47 +2133,6 @@ html[data-landing-theme='dark'] .landing a.landing-button--primary {
 }
 .landing-status-dot--orange {
   background: var(--landing-orange);
-}
-.landing-decision__body {
-  padding: clamp(22px, 4vw, 34px);
-}
-.landing-decision__body p {
-  margin: 0;
-  color: var(--landing-ink);
-  font-size: clamp(19px, 2.3vw, 26px);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.25;
-}
-.landing-decision__body code {
-  padding: 2px 5px;
-  background: var(--landing-surface);
-  color: var(--landing-orange);
-  font-family: var(--mono);
-  font-size: 0.75em;
-}
-.landing-decision__body .landing-decision__reason {
-  margin-top: 16px;
-  color: var(--landing-ink-muted);
-  font-size: 15px;
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.55;
-}
-.landing-decision__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  margin-top: 26px;
-  color: var(--landing-ink-muted);
-  font-family: var(--mono);
-  font-size: 11px;
-}
-.landing-decision figcaption {
-  padding: 0 18px 16px;
-  color: var(--landing-ink-muted);
-  font-size: 12px;
-  line-height: 1.4;
 }
 .landing-section {
   padding-block: clamp(72px, 11vw, 144px);
@@ -2199,91 +2159,6 @@ html[data-landing-theme='dark'] .landing a.landing-button--primary {
   margin: 0;
   color: var(--landing-ink-muted);
   font-size: 16px;
-  line-height: 1.55;
-}
-.landing-flow {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0;
-  margin: clamp(36px, 6vw, 64px) 0 0;
-  padding: 0;
-  list-style: none;
-  border-top: 1px solid var(--landing-line);
-  border-left: 1px solid var(--landing-line);
-}
-.landing-flow li {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 14px;
-  min-height: 170px;
-  padding: 22px;
-  border-right: 1px solid var(--landing-line);
-  border-bottom: 1px solid var(--landing-line);
-  background: var(--landing-surface);
-}
-.landing-flow strong,
-.landing-feature-card__number {
-  color: var(--landing-blue);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-}
-.landing-flow b {
-  display: block;
-  color: var(--landing-ink);
-  font-size: 17px;
-  line-height: 1.25;
-}
-.landing-flow small {
-  display: block;
-  margin-top: 9px;
-  color: var(--landing-ink-muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-.landing-feature-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: clamp(36px, 6vw, 64px);
-}
-.landing-feature-card {
-  min-width: 0;
-  min-height: 260px;
-  padding: 24px;
-  border: 1px solid var(--landing-line);
-  border-top: 3px solid var(--landing-blue);
-  background: var(--landing-surface);
-}
-.landing-feature-card--orange {
-  border-top-color: var(--landing-orange);
-}
-.landing-feature-card--green {
-  border-top-color: var(--landing-green);
-}
-.landing-feature-card--purple {
-  border-top-color: var(--landing-purple);
-}
-.landing-feature-card--orange .landing-feature-card__number {
-  color: var(--landing-orange);
-}
-.landing-feature-card--green .landing-feature-card__number {
-  color: var(--landing-green);
-}
-.landing-feature-card--purple .landing-feature-card__number {
-  color: var(--landing-purple);
-}
-.landing-feature-card h3 {
-  margin: 46px 0 0;
-  color: var(--landing-ink);
-  font-size: 20px;
-  letter-spacing: -0.035em;
-  line-height: 1.05;
-}
-.landing-feature-card p {
-  margin: 16px 0 0;
-  color: var(--landing-ink-muted);
-  font-size: 14px;
   line-height: 1.55;
 }
 .landing-limits {
@@ -2383,14 +2258,6 @@ html[data-landing-theme='dark'] .landing a.landing-button--primary {
     transform: translateY(0);
   }
 }
-@media (max-width: 1024px) {
-  .landing-feature-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .landing-feature-card {
-    min-height: 220px;
-  }
-}
 @media (max-width: 768px) {
   .landing-hero {
     grid-template-columns: 1fr;
@@ -2402,9 +2269,6 @@ html[data-landing-theme='dark'] .landing a.landing-button--primary {
   }
   .landing-section-heading {
     gap: 20px;
-  }
-  .landing-flow {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .landing-final-cta__inner {
     align-items: start;
@@ -2461,25 +2325,12 @@ html[data-landing-theme='dark'] .landing a.landing-button--primary {
   .landing-hero h1 {
     font-size: clamp(40px, 13vw, 56px);
   }
-  .landing-flow,
-  .landing-feature-grid,
   .landing-roadmap-list {
     grid-template-columns: 1fr;
-  }
-  .landing-flow li {
-    min-height: auto;
-    padding: 20px;
   }
   .landing-limit-list div {
     grid-template-columns: 1fr;
     gap: 6px;
-  }
-  .landing-decision__topline {
-    flex-wrap: wrap;
-  }
-  .landing-decision__sequence {
-    width: 100%;
-    margin-left: 18px;
   }
   .landing-final-cta .landing-hero__actions {
     width: 100%;
@@ -2863,10 +2714,18 @@ html[data-landing-theme='dark'] .landing-product-demo__window {
   letter-spacing: 0.08em;
   text-align: right;
 }
-.landing-product-demo__replay {
+/* The demo's controls sit together, bottom-right of the frame — the wrapper carries the position so
+   the pause and replay buttons flow side by side instead of stacking on the same absolute corner. */
+.landing-product-demo__controls {
   position: absolute;
   right: 12px;
   bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.landing-product-demo__replay {
   display: inline-flex;
   min-height: 34px;
   align-items: center;
@@ -3366,10 +3225,8 @@ html[data-landing-theme='dark'] .landing-mandate-result[data-verdict='BLOCK'] st
 }
 
 @media (max-width: 1100px) {
-  .landing-nav__links a:nth-child(4),
-  .landing-nav__links a:nth-child(5) {
-    display: none;
-  }
+  /* Links 4 and 5 stay visible down to the 720px hamburger breakpoint below — hiding them here left a
+     720–1100px band where they were neither in the bar nor in a menu, i.e. unreachable. */
   .landing-question-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -4531,8 +4388,11 @@ html[data-landing-theme='dark'] .system-action--primary {
   .room-title {
     font-size: 23px;
   }
+  /* Drop the decorative "Canonical collaboration room" eyebrow on phones: the header already carries
+     brand, nav, room id, connection, roster, spend and the push control, and the room id below is the
+     real identity. One fewer line is the cheapest way to unstack a busy phone header. */
   .room-eyebrow {
-    max-width: 24ch;
+    display: none;
   }
   .room-ambient {
     align-items: flex-start;

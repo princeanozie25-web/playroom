@@ -215,6 +215,7 @@ export function LandingPage() {
   const [activeStage, setActiveStage] = useState(0);
   const [mandateAction, setMandateAction] = useState<keyof typeof mandateActions>('merge');
   const [demonstrationStage, setDemonstrationStage] = useState(0);
+  const [demoPaused, setDemoPaused] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -239,18 +240,24 @@ export function LandingPage() {
       revealNodes.forEach((node) => observer?.observe(node));
     }
 
-    const demonstrationTimer = reducedMotion
-      ? undefined
-      : window.setInterval(() => {
-          setDemonstrationStage((stage) => (stage + 1) % demonstrationStages.length);
-        }, 1800);
-
     return () => {
       window.cancelAnimationFrame(readyFrame);
       observer?.disconnect();
-      if (demonstrationTimer !== undefined) window.clearInterval(demonstrationTimer);
     };
   }, []);
+
+  // The product walkthrough auto-advances — but WCAG 2.2.2 (Pause, Stop, Hide) says any auto-moving
+  // content over 5s needs a control to stop it, and reduced-motion is not enough (it only covers
+  // people who set that preference). This timer lives in its own effect keyed on `demoPaused` so the
+  // pause button genuinely halts it, and it is skipped entirely under reduced motion.
+  useEffect(() => {
+    if (demoPaused) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const timer = window.setInterval(() => {
+      setDemonstrationStage((stage) => (stage + 1) % demonstrationStages.length);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [demoPaused]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -473,14 +480,27 @@ export function LandingPage() {
                   </div>
                 </div>
               </div>
-              <button
-                className="landing-product-demo__replay"
-                type="button"
-                onClick={() => setDemonstrationStage(0)}
-              >
-                <Icon name="history" size={14} />
-                Replay
-              </button>
+              <div className="landing-product-demo__controls">
+                <button
+                  className="landing-product-demo__replay"
+                  type="button"
+                  aria-pressed={demoPaused}
+                  onClick={() => setDemoPaused((paused) => !paused)}
+                >
+                  {demoPaused ? 'Play the walkthrough' : 'Pause the walkthrough'}
+                </button>
+                <button
+                  className="landing-product-demo__replay"
+                  type="button"
+                  onClick={() => {
+                    setDemonstrationStage(0);
+                    setDemoPaused(false);
+                  }}
+                >
+                  <Icon name="history" size={14} />
+                  Replay
+                </button>
+              </div>
             </div>
             <figcaption id="product-demo-caption">
               A locally animated explanation of the governed request loop. No backend request or

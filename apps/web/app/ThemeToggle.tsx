@@ -6,6 +6,14 @@ export type PlayroomTheme = 'light' | 'dark';
 
 export const PLAYROOM_THEME_STORAGE_KEY = 'playroom-landing-theme';
 
+// The pre-paint script in layout.tsx has already resolved the theme onto <html data-landing-theme>
+// by the time this runs on the client, so read it there. Guarded for the server render (no document),
+// where it falls back to 'light' — the same neutral value the server has always emitted.
+function readLandingTheme(): PlayroomTheme {
+  if (typeof document === 'undefined') return 'light';
+  return document.documentElement.dataset.landingTheme === 'dark' ? 'dark' : 'light';
+}
+
 export function ThemeToggle({
   className = 'app-theme-toggle',
   showLabel = true,
@@ -13,10 +21,15 @@ export function ThemeToggle({
   className?: string;
   showLabel?: boolean;
 }) {
-  const [theme, setTheme] = useState<PlayroomTheme>('light');
+  // Lazy initializer, not a hardcoded 'light': a dark-theme visitor used to see a mislabeled
+  // "Switch to dark theme" / aria-pressed=false control on first paint until a post-mount effect
+  // corrected it. Reading the resolved theme up front means the very first client render is correct.
+  const [theme, setTheme] = useState<PlayroomTheme>(readLandingTheme);
 
   useEffect(() => {
-    setTheme(document.documentElement.dataset.landingTheme === 'dark' ? 'dark' : 'light');
+    // Reconcile once after hydration in case the server's neutral 'light' differed from the theme the
+    // pre-paint script resolved on the client — without this the mismatch would persist as state.
+    setTheme(readLandingTheme());
   }, []);
 
   const nextTheme = theme === 'light' ? 'dark' : 'light';
@@ -25,6 +38,7 @@ export function ThemeToggle({
     <button
       className={`theme-toggle ${className}`}
       type="button"
+      suppressHydrationWarning
       aria-pressed={theme === 'dark'}
       aria-label={`Switch to ${nextTheme} theme`}
       onClick={() => {
