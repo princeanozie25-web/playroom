@@ -3,7 +3,8 @@
 _18 Aug 2026. Prince ratified the Fable report's **vision and forward half** as the north star, with the
 code keeping its own vocabulary (ADR-009/010/011 stand — `Door`/`Fabric`/`Worker` mean what they mean in
 the tree). This turns the report's nine ABSENT contracts + four PARTIALs into a sequenced build plan,
-grounded in `docs/audits/2026-08-fable-contract-map.md` and the current code. Left local; not committed._
+grounded in `docs/audits/2026-08-fable-contract-map.md` and the current code. Status columns updated 19 Aug as
+slices shipped — see the shipped table below and the per-track states._
 
 ## Two rails held as acceptance tests (from the report's own premortem)
 
@@ -15,21 +16,24 @@ grounded in `docs/audits/2026-08-fable-contract-map.md` and the current code. Le
 
 **The only gates are technical dependencies** — no revenue gate (dropped 18 Aug).
 
-## Shipped in the 19 Aug autonomous run (5 slices, all on main, CI green)
+## Shipped in the 19 Aug autonomous run (all on main, CI green, each adversarially reviewed)
 
-| Slice           | Commit    | What landed                                                                              |
-| --------------- | --------- | ---------------------------------------------------------------------------------------- |
-| **A1**          | `31b4c87` | Signed the mandates (Ed25519). Invariant #3 is cryptographic; the authority root exists. |
-| **B1**          | `2a28642` | Remote MCP server — a Claude subscription drives a room over Streamable HTTP.            |
-| **B3**          | `60436d9` | `list_pending_tags` — a connected member discovers when it was @-mentioned.              |
-| **A3**          | `24b7bc6` | Tamper-evident audit chain (`audit_chain`) — the moat's cryptographic bar.               |
-| **get_receipt** | `1efaaa8` | The 8th MCP tool — a subscription fetches a commitment's receipt. Tool set complete.     |
+| Slice         | Commit    | What landed                                                                                         |
+| ------------- | --------- | --------------------------------------------------------------------------------------------------- |
+| **A1**        | `31b4c87` | Signed the mandates (Ed25519). Invariant #3 is cryptographic; the authority root exists.            |
+| **B1**        | `2a28642` | Remote MCP server — a Claude subscription drives a room over Streamable HTTP (8 tools).             |
+| **B3**        | `60436d9` | `list_pending_tags` — a connected member discovers when it was @-mentioned.                         |
+| **A3**        | `24b7bc6` | Tamper-evident audit chain (`audit_chain`) + `get_receipt` (`1efaaa8`) — the moat's crypto bar.     |
+| **B2**        | `99cb097` | OAuth 2.1 per-subscription login (auth-code + PKCE, revocable tokens) — the MCP front door.         |
+| **Room Door** | `3a6dfd4` | Scoped admission (ADR-009): a room enrols only its creator; an owner-only `admit` lets others in.   |
+| **C1**        | `4c9621a` | Execution Gate (ADR-012): host `fs/git/shell` ops pass a resource-scoped policy check. Decide-only. |
+| **C2**        | `b3cebae` | Local Node (ADR-013): a revocable lease binds host execution — revoke stops the node's next op.     |
+| **x-read**    | `f6b33ad` | Provider-neutral X/Twitter READ seam (`@playroom/x-read`) — the grokbot-parity structure.           |
 
-Each was adversarially reviewed and its findings fixed before commit. **B2 (OAuth) is DEFERRED** pending
-Prince's auth-model decision — it is the external authentication front door (Playroom has no human login/
-consent system today) and needs a consent surface in Codex's web lane. The remaining tracks (C1 Execution
-Gate, the Door, A2 delegation, the fabric-completion track) are larger behaviour changes or need a decision;
-they are the next session's picks, not unsupervised autonomous ones.
+Invariant #7 — the one the repo openly did not hold — is now **closed in the sanctioned path** (C1 + C2).
+**Track A** is complete but for A2 (delegation narrowing); **Track B** is complete; **Track C** needs only C3
+(the temporal facts object). The remaining work is the downstream tracks (D Harbor, E verified experience,
+sequenced last) plus the fabric-completion gates (screening + egress DLP) that precede a non-Prince user.
 
 ## The dependency spine — why this order
 
@@ -55,17 +59,17 @@ verified Work History → Artifact → Experience Record → Network/Directory
 
 Nothing here is a rename. `Worker` = `member`+`adapter` (product word, ADR-011); the report's `Fabric`
 (visibility) is the repo's **§7.1 context-isolation / assembly layer**, distinct from `@playroom/fabric`
-the authority engine (ADR-010); `Door` (room admission) is the not-yet-built "room door" (ADR-009).
+the authority engine (ADR-010); `Door` (room admission) is the "room door" — scoped admission, now shipped (ADR-009).
 
 ---
 
 ## Track A — the authority root (unblocks everything external)
 
-| #      | Slice                                         | Delivers                                                                                                                                                                                                          | Builds on                                     | State                                                                                 |
-| ------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **A1** | **Sign the mandates (S2.1)**                  | Invariant #3 made cryptographic — authority attributable to a principal by a key, not a git file                                                                                                                  | `evaluate.ts`, `mandate.ts` (both reserve it) | **Designed + crypto-proven; one clean pass.** [[playroom-s21-mandate-signing-design]] |
-| **A2** | **Delegation Chain: monotonic narrowing**     | Complete the PARTIAL — authority that narrows across worker→worker hops with scope/expiry/evidence per hop (today a hop is re-evaluated against the emitter's own mandate, `SUMMON_DEPTH_CAP=1`, never inherited) | A1; `SummonChain` (`commands/context.ts`)     | Not started                                                                           |
-| **A3** | **Receipts + hash chain + daily root (S2.3)** | Tamper-evident audit (invariant #8 general form) — the moat's missing cryptographic bar and the prerequisite for verified Work History + Experience Records                                                       | append-only `events` (exists, not chained)    | Not started                                                                           |
+| #      | Slice                                         | Delivers                                                                                                                                                                                                          | Builds on                                     | State                                                                                                    |
+| ------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **A1** | **Sign the mandates (S2.1)**                  | Invariant #3 made cryptographic — authority attributable to a principal by a key, not a git file                                                                                                                  | `evaluate.ts`, `mandate.ts` (both reserve it) | **SHIPPED** `31b4c87`. Ed25519 + §0 enforcement; the signing key is a custodial bootstrap key.           |
+| **A2** | **Delegation Chain: monotonic narrowing**     | Complete the PARTIAL — authority that narrows across worker→worker hops with scope/expiry/evidence per hop (today a hop is re-evaluated against the emitter's own mandate, `SUMMON_DEPTH_CAP=1`, never inherited) | A1; `SummonChain` (`commands/context.ts`)     | Not started                                                                                              |
+| **A3** | **Receipts + hash chain + daily root (S2.3)** | Tamper-evident audit (invariant #8 general form) — the moat's missing cryptographic bar and the prerequisite for verified Work History + Experience Records                                                       | append-only `events` (exists, not chained)    | **SHIPPED** `24b7bc6` + `get_receipt` `1efaaa8`. Per-entry fabric signature + root email are follow-ups. |
 
 Acceptance: a non-Prince credential can hold signed, bounded, attributable authority — the precondition for every door below.
 
@@ -73,11 +77,11 @@ Acceptance: a non-Prince credential can hold signed, bounded, attributable autho
 
 ## Track B — the subscription wedge (the visible product win)
 
-| #      | Slice                        | Delivers                                                                                                                                                                                                                                                                             | Builds on                                                                 | State                        |
-| ------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ---------------------------- |
-| **B1** | **Remote MCP server (S4.2)** | "Make the infrastructure disappear" — drive a room from a Claude subscription. New `packages/hosts/` seam wrapping `executeCommand` as MCP tools (`list_rooms`, `read_room`, `post_message`, `respond_to_decision`, `get_receipt`); "adapter over commands, zero new business logic" | the SCC action door (proves every op) + A1 (safe with a non-Prince token) | Not started; groundwork done |
-| **B2** | **OAuth per-user (S4.1)**    | Turns a custodial `prm_` seat token into a subscription identity (auth-code + PKCE, principal binding, revocation)                                                                                                                                                                   | `credentials.ts` (`/redeem` today)                                        | Not started                  |
-| **B3** | **Pending-tag queue (S4.3)** | Connected members aren't summonable by tag — surface tags as pollable pending items (`list_pending_tags`); the notify half already ships (S-PUSH)                                                                                                                                    | S-PUSH                                                                    | Not started                  |
+| #      | Slice                        | Delivers                                                                                                                                                                                                                                                                             | Builds on                                                                 | State                                                                                                      |
+| ------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **B1** | **Remote MCP server (S4.2)** | "Make the infrastructure disappear" — drive a room from a Claude subscription. New `packages/hosts/` seam wrapping `executeCommand` as MCP tools (`list_rooms`, `read_room`, `post_message`, `respond_to_decision`, `get_receipt`); "adapter over commands, zero new business logic" | the SCC action door (proves every op) + A1 (safe with a non-Prince token) | **SHIPPED** `2a28642`. 8 governed tools; identity derived.                                                 |
+| **B2** | **OAuth per-user (S4.1)**    | Turns a custodial `prm_` seat token into a subscription identity (auth-code + PKCE, principal binding, revocation)                                                                                                                                                                   | `credentials.ts` (`/redeem` today)                                        | **SHIPPED** `99cb097`. Consent pages server-rendered in apps/api; family-lineage revoke + reuse detection. |
+| **B3** | **Pending-tag queue (S4.3)** | Connected members aren't summonable by tag — surface tags as pollable pending items (`list_pending_tags`); the notify half already ships (S-PUSH)                                                                                                                                    | S-PUSH                                                                    | **SHIPPED** `60436d9`.                                                                                     |
 
 Acceptance test: **Prince drives a room from his Claude subscription, closes the laptop, approves on his phone.** (The one-click-worker rail.)
 
@@ -128,7 +132,7 @@ The report is explicit (§18.12): **only after verification semantics are trustw
 
 - **Inbound screening L1 (provenance wrap) + L2 (rules + classifier)** — `services/screening/` is a one-line stub. Before untrusted external content flows to a model.
 - **Egress DLP + canary seeding** — absent. **Before the first non-Prince credential exists** (the red-team ledger's explicit trigger); two credential leaks were already found in prod by accident.
-- **A room Door (ADR-009)** — scoped Room admission (today creation blanket-enrols). The precondition for **cross-owner collaboration** — my worker + your worker in a Room without merging private context.
+- ~~**A room Door (ADR-009)**~~ — **SHIPPED** `3a6dfd4`. Scoped Room admission (creation enrols only the creator; an owner-only `admit` lets others in). The precondition for **cross-owner collaboration** — my worker + your worker in a Room without merging private context. Server-side; a web admit control + a `member.admitted` event are the remaining UI follow-ups (Codex's lane).
 
 ---
 
@@ -140,15 +144,24 @@ The report is explicit (§18.12): **only after verification semantics are trustw
 
 ---
 
-## The immediate next three (grounded, ordered)
+## Where it stands, and what's next (updated 19 Aug, after C2)
 
-1. ~~**A1 — sign the mandates.**~~ **DONE** `31b4c87`. The authority root everything external depends on.
-2. ~~**B1 — remote MCP server**~~ **DONE** `2a28642` (+ B3 `60436d9`, A3 `24b7bc6`, get_receipt `1efaaa8`).
-3. **C1 — Execution Gate.** Closes the one invariant the repo openly does not hold (#7). **Next up** — but a
-   larger, cross-component change (the gate sits in front of `claude-code`'s out-of-fabric host workspace),
-   so it wants a focused session, not the tail of an autonomous run.
+**Done:** the whole visible product loop. Track A (A1 signed mandates, A3 receipts/chain) bar A2; Track B
+complete (B1 MCP, B2 OAuth, B3 pending tags); Track C's safe-execution core (C1 gate, C2 lease) with invariant
+#7 closed in the sanctioned path; the Room Door; and the x-read grokbot seam. Nine slices, all reviewed.
 
-**Also queued, needing a decision or their own session:** B2 OAuth (auth-model decision + consent UI, Codex's
-lane — DEFERRED); the Room Door (ADR-009, scoped admission — a behaviour change with wide test blast radius);
-A2 delegation-chain narrowing; the fabric-completion track (screening L1 / egress DLP / Door) that gates
-opening to a non-Prince user. Related: [[playroom-roadmap-status-and-mcp]], [[playroom-s21a-tool-call-channel]], [[playroom-s21-mandate-signing-design]].
+**The remaining work, ordered by leverage:**
+
+1. **C3 — temporal facts object.** Small; completes Track C and makes the Drift rail's _"cannot open a PR until
+   tests pass"_ real. The evaluator gains a caller-computed facts object; builds on A3 (done).
+2. **The fabric-completion gates** — inbound screening (L1/L2) + egress DLP + canary. These are the real
+   precondition for letting anyone but Prince use Playroom (the red-team ledger's explicit trigger).
+3. **The grokbot governance slice** — wire the x-read seam into a governed cycle (mention → room → gated reply
+   - receipt). Where the moat over grokbot attaches.
+4. **A2** (delegation narrowing), then the downstream tracks the report sequences last: **Track D** (Harbor —
+   resumption, placement, presence-as-state) and **Track E** (verified Work History → Artifact → Experience
+   Record → Network).
+
+**Activation (Prince's step):** re-sign `claude-code.json` with a host policy to turn C1/C2 live in prod
+(needs the custodial key; the exact block is in `mandates/README.md`). Related:
+[[playroom-c1-execution-gate]], [[playroom-c2-local-node]], [[playroom-roadmap-status-and-mcp]].

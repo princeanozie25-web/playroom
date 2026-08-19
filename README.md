@@ -1,7 +1,7 @@
 # Playroom
 
 [![CI](https://github.com/princeanozie25-web/playroom/actions/workflows/ci.yml/badge.svg)](https://github.com/princeanozie25-web/playroom/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/badge/tests-302%20passing-brightgreen)](#the-seam-demonstrated)
+[![tests](https://img.shields.io/badge/tests-909%20passing-brightgreen)](#the-seam-demonstrated)
 [![licence](https://img.shields.io/badge/licence-AGPL--3.0%20core%20%2F%20Apache--2.0%20shared-blue)](#licence)
 
 **A room where humans and other people's AI agents work together, and where an agent's authority is
@@ -74,23 +74,74 @@ OPENAI_API_KEY=...      # sol
   rebuildable from an append-only event log. One that cannot be rebuilt is a bug, and a test folds
   the log and compares.
 
+## Capabilities
+
+What the fabric does today. Every item below is on `main`, CI-green, and asserted by tests — not a
+roadmap. Where a capability is real but not yet wired into production, it says so.
+
+**Governed collaboration**
+
+- Humans and provider-neutral AI agents share a room; every agent acts under a **signed mandate**
+  (Ed25519, verified before any other check), evaluated server-side by a pure function.
+- **Scoped room admission** (ADR-009): a new room enrols only its creator; everyone else is let in by a
+  deliberate, owner-only, human-only `admit`. Membership is the authority boundary, not an accident.
+- Context never crosses principals — a room shares only promoted common ground.
+
+**Drive a room from an AI subscription (no API key)**
+
+- A **remote MCP server** lets a Claude or ChatGPT subscription drive a room over the same command
+  layer every other surface uses — eight governed tools (read a room, post, request an action, respond
+  to a decision, raise a hand, get a receipt, list rooms, list pending @-mentions), zero new authority.
+- **OAuth 2.1 login** (authorization-code + PKCE) turns a `prm_` credential into a short-lived,
+  revocable, per-subscription token, with family-lineage revocation and reuse detection.
+
+**Safe host execution — invariant #7, the one the repo openly did not hold**
+
+- The **Execution Gate** (ADR-012): a host file/git/shell op passes a resource-scoped policy check
+  before it can run — writes confined to a workspace, protected refs (`main`) co-signed, shell
+  allowlisted or else co-signed. The gate _decides_ (ALLOW / CO_SIGN / BLOCK); it never executes.
+- The **Local Node lease** (ADR-013): a host op is authorised for execution only under a revocable,
+  heartbeat-bounded, capability-scoped lease — revoke it and the node's very next op is refused
+  mid-flight. Host access is now mediated in the sanctioned path; the executor stays off the fabric.
+
+**Evidence and human control**
+
+- A **tamper-evident audit chain** (`audit_chain`): commitment-shaped actions become hash-chained
+  entries with a daily root, and `get_receipt` returns one. (Per-entry fabric signature + the root's
+  out-of-band delivery to principals are the remaining pieces.)
+- **Co-signatures**: a protected action pauses for a named human signature and releases exactly once —
+  no ALLOW and no approval performs an external side effect; the fabric decides, it does not act.
+- **Priced interrupts** and a **web-push** notify path so a human is claimed on their phone, budgeted.
+
+**Provider-neutral reach**
+
+- Model adapters for Anthropic and OpenAI behind one `AgentAdapter` seam — a member's provider is a
+  config detail, never known to the room or the fabric.
+- An **X/Twitter read seam** (`@playroom/x-read`) — mentions, threads, search, a user's posts — behind
+  a swappable backend (a deterministic mock, or the twitterapi.io managed API), the X credential held
+  in exactly one place. The structure for governed, receipt-emitting reads; the governed cycle is next.
+
+**Not yet in production:** the host-op gate ships **inert for prod** until the shipped `claude-code`
+mandate is re-signed with a host policy — the capability and its tests are on `main`; activating it is a
+deliberate re-sign step, by design.
+
 ## The invariants
 
 Bible §10, numbered so they can be cited in a review.
 
-| #         | Invariant                                                                                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **PR-1**  | **Enforcement is server-side, never model-side.** The model is never the security boundary.                                          |
-| **PR-2**  | **No bypass path.** No route from a room to an adapter skips the fabric — a property of the layout, provable from the repository.    |
-| **PR-3**  | **Context never crosses principals.** Assembly reaches common ground and the summoned member's own store, and nothing else.          |
-| **PR-4**  | **Deny by default.** Anything not explicitly granted is blocked. Unknown action types are blocked. Engine unavailable means blocked. |
-| **PR-5**  | **Silence by default.** Agents never speak unprompted. Any feature of the form _agents could chat about…_ is rejected on sight.      |
-| **PR-6**  | **Receipts for anything commitment-shaped** — merges, acceptances, approvals, spends. Never prose.                                   |
-| **PR-7**  | **Provider-agnostic core.** Only adapters know provider names. The room, the fabric and the data model never do.                     |
-| **PR-8**  | **The room is authoritative; projections are derived.** A projection that cannot be rebuilt from the log is a bug.                   |
-| **PR-9**  | **Events are immutable.** Corrections append superseding events.                                                                     |
-| **PR-10** | **Spend is visible.** Per-summon cost and interrupt budget render in-thread; cost transparency doubles as babble suppression.        |
-| **PR-11** | **Append-only audit,** hash-chained, with the daily root mailed to principals. **Not yet built** — see Posture.                      |
+| #         | Invariant                                                                                                                                                                                                   |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **PR-1**  | **Enforcement is server-side, never model-side.** The model is never the security boundary.                                                                                                                 |
+| **PR-2**  | **No bypass path.** No route from a room to an adapter skips the fabric — a property of the layout, provable from the repository.                                                                           |
+| **PR-3**  | **Context never crosses principals.** Assembly reaches common ground and the summoned member's own store, and nothing else.                                                                                 |
+| **PR-4**  | **Deny by default.** Anything not explicitly granted is blocked. Unknown action types are blocked. Engine unavailable means blocked.                                                                        |
+| **PR-5**  | **Silence by default.** Agents never speak unprompted. Any feature of the form _agents could chat about…_ is rejected on sight.                                                                             |
+| **PR-6**  | **Receipts for anything commitment-shaped** — merges, acceptances, approvals, spends. Never prose.                                                                                                          |
+| **PR-7**  | **Provider-agnostic core.** Only adapters know provider names. The room, the fabric and the data model never do.                                                                                            |
+| **PR-8**  | **The room is authoritative; projections are derived.** A projection that cannot be rebuilt from the log is a bug.                                                                                          |
+| **PR-9**  | **Events are immutable.** Corrections append superseding events.                                                                                                                                            |
+| **PR-10** | **Spend is visible.** Per-summon cost and interrupt budget render in-thread; cost transparency doubles as babble suppression.                                                                               |
+| **PR-11** | **Append-only audit, hash-chained** (`audit_chain`, tamper-evident, daily root). **Built** (A3). The per-entry fabric signature and the root's out-of-band delivery to principals are the remaining pieces. |
 
 ## The seam, demonstrated
 
@@ -211,22 +262,28 @@ The current build's limits, not a to-do list dressed as caveats. These are the s
 - **Identity authenticates a process, not a person.** A credential proves its holder is a member.
   There is no login, no second factor and no per-human key — so _Sol speaks for Jerry_ is enforced at
   the connection, while _which human is this_ is not established at all.
-- **Mandates are unsigned.** The hash proves **which document** was evaluated, not that anyone
-  authorised it. Anyone who can commit to `mandates/` can widen a scope, and the room will render the
-  widened scope truthfully — because the room is truthful about the document, and it is the document
-  that is unproven.
-- **No receipts and no hash chain.** PR-11 is not built. The log is append-only Postgres with a
-  monotonic sequence, which is good and is not tamper-evident. Nothing here may be called _signed_,
-  _notarised_ or _provable afterwards_.
-- **A merge has no executor.** A co-signature can be completed now (S2.2) — the required human signs
-  and the paused action is released — but a `pr.merge` approval executes nothing: there is no GitHub
-  bridge until S2.6, so approving one records the sign-off and performs no merge. The release is real,
-  and it is proven on an internal action (a summon that fires on approval), not on a merge.
-- **No ALLOW, and no approval, causes an external side effect.** Nothing merges, deploys, posts or
-  sends. That is why several accepted findings are survivable today, and it is the one condition to
-  re-check before it changes (RT-005, whose slice is S2.6).
-- **A room is enforced, not private.** The front door refuses non-members; with no login, the web tier
-  mints a socket ticket for anyone who can reach it.
+- **Mandates are signed, by a custodial key.** A1 made authority attributable to an Ed25519 key rather
+  than to whoever can edit a git file — a tampered or unsigned mandate is refused at §0, before any
+  scope it claims is read. The residual is that the signing key is a single **custodial bootstrap key**
+  Prince holds, not a per-principal key; _which document_ is now cryptographic, _which human authorised
+  it_ still is not.
+- **The audit is hash-chained; the receipt is not yet fabric-signed.** A3 built the tamper-evident
+  `audit_chain` (a daily root, verify detects reordering/removal/edits) and `get_receipt` returns a
+  commitment's receipt. What is not yet built: a per-entry **fabric signature** (the column is present
+  and `NULL` in v1) and the root's out-of-band delivery to principals. So it may be called _chained_ and
+  _tamper-evident_, not yet _notarised_.
+- **Host access is mediated, but the fabric still executes nothing.** C1's gate now decides every host
+  file/git/shell op (confined, protected, allowlisted) and C2's lease binds execution to a live,
+  revocable grant — invariant #7 is closed in the sanctioned path. But the gate _decides_; a compliant
+  Local Node executes off the fabric, and the fabric itself runs no shell. It also cannot stop code
+  already running on a machine (ADR-013 states this limit plainly); the lease governs the trusted node.
+- **A merge still has no executor, and no ALLOW causes an external side effect.** A co-signature
+  completes (S2.2) and a host op runs on a leased node, but `pr.merge`/`deploy` have no bridge yet — an
+  approval records the sign-off and merges nothing. Nothing in the fabric merges, deploys, posts or
+  sends. That is still the one condition to re-check before it changes (RT-005).
+- **A room is admitted, and enforced, not private.** Creation now enrols only the creator, and members
+  are added by a deliberate owner-only `admit` (ADR-009) — but the front door still refuses non-members
+  by membership, and with no human login the web tier mints a socket ticket for anyone who can reach it.
 - **An agent's initiations are bounded, never free.** Since S1.8 an agent CAN emit a structured
   action — a summon — through the tool-call channel, but only within its mandate, depth-capped, and if
   the action is marked protected it pauses for a human co-signature (S2.2) rather than running. An
