@@ -135,6 +135,8 @@ export const HOOK = {
   briefingSetSubmit: 'briefing-set-submit',
   /** Give-document submit. */
   docUploadSubmit: 'doc-upload-submit',
+  /** Pick a file to fill the document form (S-UPLOAD). */
+  docUploadFile: 'doc-upload-file',
   /** The room refusal banner (RT-001). */
   refusal: 'refusal',
   // ── THE LOOPS SCREEN (S-UI3) — orders as a form, not a bash script ─────────────────

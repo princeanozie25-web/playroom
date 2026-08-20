@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState, type ChangeEvent, type FormEvent } from 'react';
 import type { ServerErrorFrame } from '@playroom/shared';
 import { HOOK, pr } from './hooks';
 
@@ -50,6 +50,24 @@ export function RoomTools({
       content: brief.content,
       purpose: brief.purpose,
     });
+  };
+
+  // PICK A FILE. Reads a text file from the device into the form — content, filename (provenance), and a
+  // title if one is not set yet — so "upload a document" is a real button, not a paste ritual. The bytes go
+  // no further than the same governed `document_upload` frame: the server still screens the CONTAINER (text
+  // only) and CLASSIFIES the content (ADR-017), so a binary is refused and a steer-shape is flagged, exactly
+  // as for pasted text. A file over the cap fills the field; the counter shows it and the server refuses it.
+  const pickFile = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setDoc((d) => ({
+      ...d,
+      content: text,
+      provenance: file.name,
+      title: d.title.trim() === '' ? file.name.replace(/\.[^./\\]+$/, '') : d.title,
+    }));
+    e.target.value = ''; // let the same file be re-picked after an edit
   };
 
   const submitDocument = (e: FormEvent): void => {
@@ -121,6 +139,20 @@ export function RoomTools({
             <p>Attach bounded text with an explicit purpose and provenance.</p>
           </div>
           <form className="room-tools-document" onSubmit={submitDocument}>
+            <label className="room-tool-upload">
+              <input
+                type="file"
+                accept=".md,.markdown,.txt,.text,.json,.csv,.log,text/*"
+                onChange={pickFile}
+                {...pr(HOOK.docUploadFile)}
+              />
+              <span className="room-tool-upload__button">
+                <span aria-hidden="true">↑</span> Upload a file
+              </span>
+              <span className="room-tool-upload__hint">
+                or fill the fields below · text or Markdown
+              </span>
+            </label>
             <div className="room-tool-field-row">
               <div>
                 <label htmlFor="room-document-title">Title</label>

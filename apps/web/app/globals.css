@@ -4048,6 +4048,49 @@ html[data-landing-theme='dark'] .composer button {
   display: grid;
   gap: 7px;
 }
+/* The file picker: a real "upload" button whose native input is hidden but still clickable via the label. */
+.room-tools label.room-tool-upload {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 8px;
+  flex-wrap: wrap;
+  cursor: pointer;
+}
+.room-tool-upload input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  border: 0;
+}
+.room-tool-upload__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid var(--indigo-line);
+  border-radius: var(--radius);
+  background: var(--indigo-soft);
+  color: var(--indigo);
+  font-size: var(--t-sm);
+  font-weight: 650;
+}
+.room-tool-upload:hover .room-tool-upload__button {
+  border-color: var(--indigo);
+}
+.room-tool-upload input[type='file']:focus-visible + .room-tool-upload__button {
+  outline: 2px solid var(--indigo);
+  outline-offset: 2px;
+}
+.room-tool-upload__hint {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
 .room-tools label {
   margin-top: 5px;
   color: var(--ink-2);
