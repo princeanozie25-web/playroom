@@ -33,12 +33,16 @@ describe('Front Door product experience', () => {
     expect(component).not.toContain('Join the pilot');
   });
 
-  it('labels local simulations and keeps roadmap work explicit', () => {
+  it('labels local simulations and keeps roadmap work honest', () => {
     expect(component).toContain('no request leaves this page');
     expect(component).toMatch(/No backend request or\s+production action is made/);
-    expect(component).toContain('Planned, not claimed');
-    // Roadmap names real planned work (now in visitor-facing outcome language, not changelog entries).
-    expect(component).toContain('GitHub, email');
+    // The roadmap is now BUILT, and still labelled honestly — the external parts run against a mock until
+    // a credential or a second host is wired, and the section says so rather than claiming "available".
+    // Flatten whitespace so a Prettier line-wrap inside the JSX prose does not break these phrase checks.
+    const flat = component.replace(/\s+/g, ' ');
+    expect(flat).toContain('Built, not overclaimed');
+    expect(flat).toContain('run against a mock until you wire the real credential or host');
+    expect(flat).toContain('GitHub, email');
   });
 
   it('ships interactive trust stages, mandate verdicts, and theme persistence', () => {

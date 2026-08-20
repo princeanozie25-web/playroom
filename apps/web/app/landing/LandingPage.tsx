@@ -820,19 +820,21 @@ export function LandingPage() {
           data-landing-reveal
         >
           <div className="landing-shell">
-            <p className="landing-eyebrow">06 · Planned, not claimed</p>
+            <p className="landing-eyebrow">06 · Built, not overclaimed</p>
             <div className="landing-section-heading">
-              <h2 id="roadmap-title">Planned work, labelled as planned.</h2>
+              <h2 id="roadmap-title">The roadmap, built — and still labelled honestly.</h2>
               <p>
-                These are things we&rsquo;re building, not things you can use yet — and the page
-                won&rsquo;t pretend otherwise.
+                Each of these is now built and governed on main, with tests and a decision record.
+                The ones that reach outside a room — posting to GitHub or email, driving a hosted
+                model, reconciling a second host — run against a mock until you wire the real
+                credential or host. The page won&rsquo;t pretend they do more than that.
               </p>
             </div>
             <ul className="landing-roadmap-list">
               {roadmapItems.map((item) => (
                 <li key={item}>
                   {item}
-                  <span>Planned</span>
+                  <span>Built</span>
                 </li>
               ))}
             </ul>
