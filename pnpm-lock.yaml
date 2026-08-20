@@ -53,6 +53,9 @@ importers:
       '@playroom/hosts':
         specifier: workspace:*
         version: link:../../packages/hosts
+      '@playroom/receipt':
+        specifier: workspace:*
+        version: link:../../packages/receipt
       '@playroom/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -136,6 +139,12 @@ importers:
       zod:
         specifier: ^3.23.0
         version: 3.25.76
+
+  packages/receipt:
+    dependencies:
+      '@playroom/fabric':
+        specifier: workspace:*
+        version: link:../fabric
 
   packages/shared:
     dependencies:

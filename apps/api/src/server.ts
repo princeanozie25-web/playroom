@@ -49,7 +49,7 @@ import {
 import { executeCommand, type CommandDeps } from './commands/index.js';
 import { BackgroundWork } from './background.js';
 import { handleMcpRequest } from './mcp.js';
-import { chainCommitmentEvents } from './audit.js';
+import { chainCommitmentEvents, detachedReceiptForDecision } from './audit.js';
 import {
   registerClient,
   getClient,
@@ -1018,6 +1018,33 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
         signed_by: resolved ? resolved.signed_by : null,
         poll_after_ms: stillOpen ? DECISION_POLL_HINT_MS : null,
       };
+    });
+
+    // GET /rooms/:id/decisions/:decisionId/receipt → a DETACHED receipt: everything a third party needs to
+    // verify a co-signed commitment WITHOUT trusting this server (A3 / @playroom/receipt). Gated by
+    // MEMBERSHIP (detachedReceiptForDecision returns null for a non-member, exactly as the receipt lookup does
+    // — a receipt is not a probe for which decisions exist). Only a CHAINED decision has one; a resolution not
+    // yet anchored 404s here and the caller polls the decision above. The body is the receipt JSON: save it and
+    // run `pnpm tsx scripts/verify-receipt.ts <file>` to re-derive every hash yourself, offline.
+    fastify.get('/rooms/:id/decisions/:decisionId/receipt', async (req, reply) => {
+      const { id: roomId, decisionId } = req.params as { id: string; decisionId: string };
+      const auth = await authenticate(db(), bearerToken(req));
+      if (!auth.ok) {
+        reply.code(401).send(credentialRefusal(auth.failure, roomId));
+        return;
+      }
+      const receipt = await detachedReceiptForDecision(db(), decisionId, auth.auth.member_id);
+      if (!receipt) {
+        reply.code(404);
+        return {
+          type: 'error',
+          code: 'receipt_unavailable',
+          message:
+            'no verifiable receipt for this decision — it may be unknown, outside your rooms, or not yet anchored',
+        };
+      }
+      reply.code(200);
+      return receipt;
     });
 
     // ── C2: THE LOCAL NODE LEASE (ADR-013) ───────────────────────────────────────────────────────

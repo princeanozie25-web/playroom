@@ -132,7 +132,12 @@ async function fireTrigger(roomId: string, member: string, seq: number): Promise
   );
 }
 
-async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean, ms = 15000): Promise<T> {
+// 30s, not 15s: these wait for an ASYNC cycle's turn to commit (S-CYCLE), and under a full-suite run the
+// one shared test DB is contended — a turn that lands in under a second in isolation can take many seconds
+// here. The old 15s ceiling was occasionally beaten by that contention, so the count assertion below read a
+// not-yet-committed value and failed intermittently. Doubling the headroom removes the timing flake without
+// weakening any assertion (a genuinely stuck turn still fails, just later).
+async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean, ms = 30000): Promise<T> {
   const deadline = Date.now() + ms;
   for (;;) {
     const v = await fn();

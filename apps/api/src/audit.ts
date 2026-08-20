@@ -1,6 +1,12 @@
 import type { Pool, PoolClient } from 'pg';
-import { createHash } from 'node:crypto';
-import { canonicalise } from '@playroom/fabric';
+import {
+  GENESIS,
+  bodyHash,
+  entryHash,
+  type EntryMeta,
+  type ChainLink,
+  type DetachedReceipt,
+} from '@playroom/receipt';
 import { isRoomMember } from './members.js';
 
 // The tamper-evident audit chain (S2.3 / A3, Bible §17). A batch that reads the COMMITMENT events the room
@@ -8,36 +14,17 @@ import { isRoomMember } from './members.js';
 // last by a hash. It runs OFF the live write path — the co-sign flow is untouched — so a bug here cannot
 // break a decision; it can only fail to anchor, which the next run repairs. The property it buys: an edit to
 // a chained event, or to a chain row, or a wholesale rewrite, is all detectable (see verifyAuditChain).
+//
+// The hash primitives (GENESIS, bodyHash, entryHash) now live in @playroom/receipt so the chain and the
+// STANDALONE verifier share ONE algorithm: a third party re-derives these exact hashes without the server
+// (detachedReceiptForDecision, below, hands them everything to do it). This module builds and checks the
+// chain server-side; that package proves a detached receipt anywhere.
 
 /** The event types that are commitments — a receipt is owed. Extended by decision, not by a name prefix. */
 export const COMMITMENT_EVENTS = ['decision', 'decision.resolved'] as const;
 
-/** The first row's prev_hash. A named marker, so a chain with one row still has a well-defined link. */
-const GENESIS = 'sha256:genesis';
-
 /** A fixed key for the advisory lock that serialises anchoring — two anchors must not fork the chain. */
 const ANCHOR_LOCK_KEY = 20260819;
-
-function sha256(input: string): string {
-  return `sha256:${createHash('sha256').update(input).digest('hex')}`;
-}
-
-/** The hash of a source event's body — over the canonical payload, so JSONB key order cannot change it. */
-function bodyHash(payload: unknown): string {
-  return sha256(canonicalise(payload));
-}
-
-interface EntryMeta {
-  room_id: string;
-  actor_id: string;
-  event: string;
-  source_seq: number;
-}
-
-/** The link: H(prev_hash || body_hash || meta). Recomputable at verify time from the stored columns alone. */
-function entryHash(prevHash: string, body: string, meta: EntryMeta): string {
-  return sha256(`${prevHash}\n${body}\n${canonicalise(meta)}`);
-}
 
 export interface AnchorResult {
   /** How many new commitment events were chained this run. */
@@ -317,5 +304,81 @@ export async function receiptForDecision(
     body_hash: c.body_hash,
     chained_at: toIsoString(c.ts),
     verified: bodyHash(row.payload) === c.body_hash,
+  };
+}
+
+/**
+ * A DETACHED receipt for a co-signed decision — everything a third party needs to verify it WITHOUT the
+ * server (verifyDetachedReceipt, @playroom/receipt). Gated exactly like receiptForDecision (a member of the
+ * decision's room, else null), because it discloses the decision's payload; but what it discloses can then
+ * be checked by anyone with no trust in us. Only a CHAINED decision has one — a resolution still awaiting the
+ * anchor has no entry to include yet, and returns null (the caller polls receiptForDecision for the status).
+ *
+ * The `path` is every chain entry from this receipt's own entry to the current head, so the verifier walks
+ * the links forward to the root and confirms the entry belongs to the chain that produced it.
+ */
+export async function detachedReceiptForDecision(
+  pool: Pool,
+  decisionId: string,
+  memberId: string,
+): Promise<DetachedReceipt | null> {
+  const resolved = await pool.query<{ seq: string; room_id: string; payload: unknown }>(
+    `SELECT seq, room_id, payload FROM events
+      WHERE event_type = 'decision.resolved' AND payload ->> 'decision_id' = $1
+      ORDER BY seq DESC LIMIT 1`,
+    [decisionId],
+  );
+  if (resolved.rows.length === 0) return null;
+  const row = resolved.rows[0];
+  if (!(await isRoomMember(pool, row.room_id, memberId))) return null;
+
+  const self = await pool.query<{ seq: string; ts: Date | string }>(
+    'SELECT seq, ts FROM audit_chain WHERE source_seq = $1',
+    [Number(row.seq)],
+  );
+  if (self.rows.length === 0) return null; // pending_anchor — nothing to include yet
+
+  // The inclusion path: this entry (inclusive) through the head, in seq order — the chain's append order,
+  // which is exactly what verify walks. The receipt's own fields are the FIRST link; the root is the LAST.
+  const path = await pool.query<{
+    room_id: string;
+    actor_id: string;
+    event: string;
+    source_seq: string;
+    body_hash: string;
+    prev_hash: string;
+    entry_hash: string;
+  }>(
+    `SELECT room_id, actor_id, event, source_seq, body_hash, prev_hash, entry_hash
+       FROM audit_chain WHERE seq >= $1 ORDER BY seq ASC`,
+    [Number(self.rows[0].seq)],
+  );
+
+  const links: ChainLink[] = path.rows.map((r) => ({
+    prev_hash: r.prev_hash,
+    body_hash: r.body_hash,
+    entry_hash: r.entry_hash,
+    meta: {
+      room_id: r.room_id,
+      actor_id: r.actor_id,
+      event: r.event,
+      source_seq: Number(r.source_seq),
+    },
+  }));
+  const head = links[0];
+  const payload = row.payload as { resolution?: 'APPROVED' | 'DENIED'; signed_by?: string };
+
+  return {
+    decision_id: decisionId,
+    resolution: payload.resolution,
+    signed_by: payload.signed_by,
+    source_payload: row.payload,
+    meta: head.meta,
+    body_hash: head.body_hash,
+    prev_hash: head.prev_hash,
+    entry_hash: head.entry_hash,
+    chained_at: toIsoString(self.rows[0].ts),
+    root: links[links.length - 1].entry_hash,
+    path: links,
   };
 }

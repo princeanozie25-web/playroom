@@ -19,6 +19,9 @@
       "path": "../../packages/hosts"
     },
     {
+      "path": "../../packages/receipt"
+    },
+    {
       "path": "../../packages/x-read"
     }
   ]

@@ -127,15 +127,14 @@ async function decisionEventCount(roomId: string): Promise<number> {
   );
   return Number(rows[0].n);
 }
-// The interrupt budget is GLOBAL per member per UTC day; clear today's raises so a limit-binding test is
-// deterministic regardless of what else spent from claude-code's budget today.
+// The interrupt budget is GLOBAL per member per UTC day. Clear ALL of this member's raises/downgrades, not
+// just "today's": a date-scoped reset was fragile at the UTC day boundary — a suite run near midnight could
+// delete one day's bucket while the loop below counted against the next, so a limit-binding assertion saw
+// more land than the budget allows. An unconditional clear gives a truly empty slate whatever the clock, or
+// whatever another test spent from this member's budget, so the count starts at zero every time.
 async function resetInterruptBudget(memberId: string): Promise<void> {
   await pool.query(
-    "DELETE FROM events WHERE event_type = 'interrupt.raised' AND payload ->> 'raised_by' = $1 AND ts >= date_trunc('day', now() AT TIME ZONE 'UTC')",
-    [memberId],
-  );
-  await pool.query(
-    "DELETE FROM events WHERE event_type = 'interrupt.downgraded' AND payload ->> 'raised_by' = $1 AND ts >= date_trunc('day', now() AT TIME ZONE 'UTC')",
+    "DELETE FROM events WHERE event_type IN ('interrupt.raised', 'interrupt.downgraded') AND payload ->> 'raised_by' = $1",
     [memberId],
   );
 }
