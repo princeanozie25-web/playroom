@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Mandate, signMandate } from '@playroom/fabric';
@@ -365,6 +365,38 @@ describe('grokbot governance — a mention becomes a co-signed, receipted reply,
     expect(seen?.egress?.risk).toBe('critical');
     expect(cycle.proposed[0].screening).toEqual(seen?.inbound);
     expect(cycle.proposed[0].egress).toEqual(seen?.egress);
+  });
+
+  it('ADR-020: forwards the executable reply (pendingWrite) so an approval performs exactly it', async () => {
+    // The reply becomes an EXECUTABLE governed action: grokbot hands the exact draft + target + hash to the
+    // decision, so an approval fires the write executor on precisely this content. Grokbot still never posts.
+    const draft = 'thanks for the mention — noted!';
+    const mention: XPost = {
+      id: 'exec1',
+      author: { id: 'u1', handle: 'curious_dev', displayName: 'Dev' },
+      text: 'hey @playroom_ai nice work',
+      createdAt: '2026-08-20T00:00:00.000Z',
+      conversationId: 'exec1',
+      inReplyToId: null,
+      url: 'https://x.com/curious_dev/status/exec1',
+      backend: 'mock',
+    };
+
+    let seen: { medium: string; target: string; body: string; body_hash: string } | undefined;
+    await runGrokbotCycle({
+      source: new MockXSource([mention]),
+      watchedHandle: WATCHED,
+      draftReply: async () => draft,
+      propose: async (input) => {
+        seen = input.pendingWrite;
+        return { decision: 'CO_SIGN', reasonCode: 'PROTECTED_ACTION', decisionId: 'dec_exec' };
+      },
+    });
+
+    expect(seen?.medium).toBe(GROKBOT_REPLY_ACTION);
+    expect(seen?.target).toBe('https://x.com/curious_dev/status/exec1');
+    expect(seen?.body).toBe(draft);
+    expect(seen?.body_hash).toBe(createHash('sha256').update(draft).digest('hex'));
   });
 
   it('a mid-cycle failure preserves progress — a succeeded mention is not re-proposed on retry', async () => {

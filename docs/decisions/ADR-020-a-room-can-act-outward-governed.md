@@ -55,9 +55,13 @@ already anticipated (_"a discriminated union is how a second executable kind lan
 
 ## Honest limits
 
-- **No producer yet — this is the machinery.** Nothing constructs a `write.perform` decision in this slice;
-  `requestActionCommand` merely CAN carry one. Grokbot attaching it to its co-signed reply (so an approved
-  reply actually mock-posts, closing the `posted: false` gap) is the next slice (5b).
+- **The first producer is grokbot (5b, landed).** Grokbot now hands its drafted reply + target + hash to the
+  decision through its `propose` seam, so an APPROVED reply fires the write executor on exactly that content —
+  closing the `posted: false` gap. It rides the same IN-PROCESS-only trust boundary as inspections: a propose
+  crossing the untrusted HTTP door drops the `pendingWrite` (bivariance), so only a server-side cycle binds it.
+  Grokbot itself still has no scheduler/production caller (`runGrokbotCycle` runs in tests + the demo); wiring
+  it into a live loop is separate. Beyond grokbot, `requestActionCommand` can carry a write for any in-process
+  producer (a bridge, to come).
 - **Only the Mock backend exists.** Real posters — an X writer, a GitHub commenter, an email sender — are each
   a distinct credential holder and a separately-reviewed slice, gated behind `WRITE_BACKEND` and their own key.
   The factory names them and fails loudly until they are built; the first real one needs an explicit go and a

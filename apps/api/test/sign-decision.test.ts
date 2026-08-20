@@ -329,6 +329,46 @@ describe('the right human signs', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].payload.inspections).toEqual(SAMPLE_INSPECTIONS);
   });
+
+  it('ADR-020 end-to-end: a write attached via requestActionCommand fires the executor on approval', async () => {
+    // The full governed-write chain through the command layer: requestAction holds the write on the decision
+    // (in-process), a human APPROVES, and the executor performs exactly it through the mock. (Grokbot supplies
+    // 'x.reply'; here the medium is the claude-main action that CO_SIGNs, which is what exercises the path.)
+    const roomId = uniqueRoomId('ra-write-e2e');
+    rooms.push(roomId);
+    await createRoom(pool, roomId, roomId, 'prince');
+    await admitMember(pool, roomId, 'claude-main');
+    const body = 'the governed, co-signed reply';
+    const res = await requestActionCommand(
+      deps,
+      { actorId: 'claude-main', mode: 'hosted' },
+      {
+        roomId,
+        clientMsgId: 'ra-w-e2e',
+        subject: 'claude-main',
+        action: 'pr.merge',
+        resource: 'repo:playroom/playroom#pr-9',
+        pendingAction: {
+          kind: 'write.perform',
+          medium: 'pr.merge',
+          target: 'repo:playroom/playroom#pr-9',
+          body,
+          body_hash: createHash('sha256').update(body).digest('hex'),
+        },
+      },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('unreachable');
+    expect(res.decisionId).not.toBeNull();
+
+    // Approve → the executor performs the co-signed write through the mock, and records it.
+    await sign(roomId, 'prince', res.decisionId as string, 'APPROVED');
+    expect(writeBackend.performed()).toHaveLength(1);
+    expect(writeBackend.performed()[0].body).toBe(body);
+    const writes = await writesPerformedOf(roomId, res.decisionId as string);
+    expect(writes[0].ok).toBe(true);
+    expect(writes[0].backend).toBe('mock');
+  });
 });
 
 describe('an agent may never sign', () => {

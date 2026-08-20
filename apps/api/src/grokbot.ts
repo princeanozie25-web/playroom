@@ -79,15 +79,19 @@ export interface GrokbotCycleDeps {
     screenedText: string;
   }) => Promise<string>;
   /** Submit the drafted reply as a GOVERNED action and return the fabric's verdict. This is the only path
-   *  a reply takes toward being posted, and it does not post — it reaches a decision + receipt. `inspections`
-   *  is what this cycle screened (inbound) and scanned (egress); an IN-PROCESS propose binds it onto the
-   *  decision (ADR-019), while a propose that crosses the untrusted HTTP door drops it (the door never
-   *  accepts a caller's own screening verdict). */
+   *  a reply takes toward being posted, and IT still does not post — it reaches a decision + receipt. What
+   *  changes with `pendingWrite` (ADR-020) is that the decision now HOLDS the executable reply, so an APPROVAL
+   *  fires the write executor; grokbot never posts, a human's co-signature does. `inspections` is what this
+   *  cycle screened/scanned; both `pendingWrite` and `inspections` are bound only by an IN-PROCESS propose —
+   *  a propose that crosses the untrusted HTTP door drops them (the door accepts neither). */
   propose: (input: {
     clientMsgId: string;
     action: string;
     resource: string;
     inspections: DecisionInspections;
+    /** The executable outbound write to hold on the decision (ADR-020): the exact drafted reply + its target
+     *  + hash, so an approval performs precisely this. */
+    pendingWrite: { medium: string; target: string; body: string; body_hash: string };
   }) => Promise<GrokbotVerdict>;
   /** Screen untrusted external text before a model sees it. Defaults to {@link screenExternalText}. */
   screen?: (text: string) => string;
@@ -196,6 +200,14 @@ export async function runGrokbotCycle(
         // What this cycle inspected, to bind onto the decision (ADR-019): the inbound summary over the
         // mention + thread, and the egress summary over the draft. Same objects surfaced on ProposedReply.
         inspections: { inbound: screening, egress },
+        // The executable reply to hold on the decision (ADR-020): an APPROVAL performs exactly this draft to
+        // exactly this post. body_hash is the FULL commitment fireWrite re-checks before sending.
+        pendingWrite: {
+          medium: GROKBOT_REPLY_ACTION,
+          target: mention.url,
+          body: draft,
+          body_hash: createHash('sha256').update(draft).digest('hex'),
+        },
       });
 
       proposed.push({
