@@ -16,6 +16,7 @@
     "@playroom/receipt": "workspace:*",
     "@playroom/screen": "workspace:*",
     "@playroom/shared": "workspace:*",
+    "@playroom/write": "workspace:*",
     "@playroom/x-read": "workspace:*",
     "fastify": "^5.2.0",
     "pg": "^8.13.0",

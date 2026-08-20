@@ -30,6 +30,7 @@ import {
   type ServerEvent,
 } from '@playroom/shared';
 import { createAdapter } from '@playroom/adapters';
+import { createWriteBackend, type WriteBackend } from '@playroom/write';
 import { countFor, deleteSubscription, upsertSubscription } from './push.js';
 import type { Pool } from 'pg';
 import { makePool } from './db.js';
@@ -90,6 +91,9 @@ export interface BuildOptions {
   databaseUrl?: string;
   // Injectable so tests drive turns with a fake adapter — no live provider calls.
   adapterFactory?: (id: string) => AgentAdapter;
+  // ADR-020: injectable so tests drive the write executor with a MockWriteBackend — no real posts. Server
+  // boot defaults it to createWriteBackend(env), which is the Mock unless a real backend was configured.
+  writeBackend?: WriteBackend;
   // Injectable so a test can assert that a log line was actually emitted. Logging
   // that nobody has ever observed is indistinguishable from no logging at all —
   // which is how A4-F1 stayed invisible.
@@ -365,6 +369,7 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
   const pool: Pool | null = databaseUrl ? makePool(databaseUrl) : null;
   const bus = new RoomBus();
   const adapterFactory = opts.adapterFactory ?? createAdapter;
+  const writeBackend = opts.writeBackend ?? createWriteBackend(process.env);
   const background = new BackgroundWork((label, error) => {
     app.log.error({ err: error, background_work: label }, `${label} failed`);
   });
@@ -387,6 +392,7 @@ export function buildServer(opts: BuildOptions = {}): FastifyInstance {
     // destination the server does, so an evaluation is observable wherever requests are.
     log: app.log,
     adapterFactory,
+    writeBackend,
     execute: (ctx, command) => executeCommand(ctx, command, deps),
     defer: (label, task) => background.run(label, task),
   };

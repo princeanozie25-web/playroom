@@ -476,6 +476,28 @@ export interface PendingSummonAction {
   depth: number;
 }
 
+/**
+ * The executable action for an OUTBOUND WRITE (ADR-020) — the second `pending_action` kind. Present when a
+ * co-signed decision, once APPROVED, should perform a real write (an X reply, a GitHub comment, an email)
+ * through the write seam. It carries the EXACT body a human signs — not just the `resource` hash commitment —
+ * because the executor needs the content to send, and `body_hash` lets the fire step confirm the body still
+ * matches what was ruled on. The co-signature is the authorisation; nothing here is performed without it.
+ */
+export interface PendingWriteAction {
+  kind: 'write.perform';
+  /** The medium == the co-signed action, e.g. 'x.reply'. The backend performs exactly what was ruled on. */
+  medium: string;
+  /** Where it goes — a post URL, a repo issue/PR, an email recipient. */
+  target: string;
+  /** The exact content co-signed. Egress-screened before co-sign; capped so the log does not carry an essay. */
+  body: string;
+  /** sha256 of `body` — the commitment the co-signature is over, re-checkable at fire time. */
+  body_hash: string;
+}
+
+/** The executable action a CO_SIGN decision holds. A discriminated union — a summon or an outbound write. */
+export type PendingAction = PendingSummonAction | PendingWriteAction;
+
 // The decision payload, as the fabric produced it. Structurally this can only be
 // built from a Verdict (see commands/requestAction.ts) — there is no other constructor
 // and no default, so a decision row cannot exist without an evaluation behind it.
@@ -494,7 +516,7 @@ export interface DecisionPayload {
   effective_mandate_hash: string | null;
   policy_version: string | null;
   /** S2.2: the executable action a CO_SIGN holds. Absent for a ruling with no executor (pr.merge). */
-  pending_action?: PendingSummonAction;
+  pending_action?: PendingAction;
   /** ADR-019: what the fabric inspected (inbound screening / egress DLP). Bound by a trusted in-process
    *  constructor, hashed into the audit chain with the rest of the payload. Absent for a plain decision. */
   inspections?: DecisionInspections;
@@ -545,6 +567,39 @@ export async function appendDecisionResolved(
   const { rows } = await pool.query<EventRow>(
     `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
      VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'decision.resolved', $3)
+     RETURNING ${EVENT_COLS}`,
+    [roomId, actorId, JSON.stringify(payload)],
+  );
+  return rowToServerEvent(rows[0]);
+}
+
+// ── THE OUTBOUND WRITE, PERFORMED (ADR-020) ────────────────────────────────────────────────
+//
+// A `write.performed` event records the OUTCOME of firing a co-signed, APPROVED write: which medium, where,
+// which backend did it, and the ref it returned (or a coded failure). It is the write executor's analogue of
+// the `summon` event — the room's record that the held action actually ran. It carries NO body: the content
+// is in the decision (already, and egress-screened); the log keeps only what happened, not the essay again.
+export interface WritePerformedPayload {
+  decision_id: string;
+  medium: string;
+  target: string;
+  backend: string;
+  /** The id/URL of what was written, or null on failure. */
+  ref: string | null;
+  ok: boolean;
+  /** A coded failure (WriteFailure) when !ok, else null. Never a credential or a raw upstream error. */
+  error: string | null;
+}
+
+export async function appendWritePerformed(
+  pool: Pool,
+  roomId: string,
+  actorId: string,
+  payload: WritePerformedPayload,
+): Promise<ServerEvent> {
+  const { rows } = await pool.query<EventRow>(
+    `INSERT INTO events (room_id, actor_id, actor_member_id, event_type, payload)
+     VALUES ($1, $2, ${ACTOR_MEMBER(2)}, 'write.performed', $3)
      RETURNING ${EVENT_COLS}`,
     [roomId, actorId, JSON.stringify(payload)],
   );

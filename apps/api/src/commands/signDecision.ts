@@ -17,6 +17,7 @@ import { humanMembersOfPrincipal, memberRecord } from '../members.js';
 import { mandateFor } from '../mandates.js';
 import { decisionExpiryMs, isExpired } from '../decisions.js';
 import { fireSummon } from './summon.js';
+import { fireWrite } from './write.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // ============================================================================
@@ -209,6 +210,16 @@ export async function signDecisionCommand(
       depth: pa.depth,
       causeSeq: pa.cause_seq,
       intent: pa.intent,
+    });
+  } else if (d.pending_action?.kind === 'write.perform') {
+    // APPROVED, and the decision holds an executable OUTBOUND WRITE (ADR-020). The co-signature IS the
+    // authorisation — fireWrite performs the exact co-signed content through the write backend (the Mock
+    // by default, so nothing real is sent unless a credentialed backend was deliberately wired) and records
+    // a write.performed event. It never throws into this flow: a failed post is recorded, not unwound.
+    await fireWrite(deps, {
+      roomId: input.roomId,
+      decisionId: input.decisionId,
+      action: d.pending_action,
     });
   } else {
     // APPROVED, but there is NO EXECUTOR — a pr.merge, whose bridge is S2.6 (RT-005). The room must

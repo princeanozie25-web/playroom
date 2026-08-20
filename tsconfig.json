@@ -23,6 +23,9 @@
       "path": "./packages/screen"
     },
     {
+      "path": "./packages/write"
+    },
+    {
       "path": "./packages/x-read"
     },
     {

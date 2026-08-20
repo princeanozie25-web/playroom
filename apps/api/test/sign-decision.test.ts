@@ -9,6 +9,8 @@ import {
   ERROR_SIGNER_NOT_HUMAN,
   ERROR_WRONG_SIGNER,
 } from '@playroom/shared';
+import { createHash } from 'node:crypto';
+import { MockWriteBackend } from '@playroom/write';
 import { testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
 import { admitMember, appendDecision, createRoom, type DecisionPayload } from '../src/events.js';
@@ -40,12 +42,15 @@ function stubAdapter(id: string): AgentAdapter {
 }
 
 let deps: CommandDeps;
+let writeBackend: MockWriteBackend;
 beforeEach(() => {
+  writeBackend = new MockWriteBackend();
   deps = {
     pool,
     bus: new RoomBus(),
     log: { info() {}, warn() {}, error() {} },
     adapterFactory: (id) => stubAdapter(id),
+    writeBackend,
     execute: (ctx, command) => executeCommand(ctx, command, deps),
   };
 });
@@ -131,6 +136,58 @@ async function sign(
   );
 }
 
+/** A CO_SIGN decision holding an executable OUTBOUND WRITE (ADR-020), under claude-main's mandate. */
+function writeDecision(
+  decisionId: string,
+  body: string,
+  over?: { bodyHash?: string },
+): DecisionPayload {
+  const body_hash = over?.bodyHash ?? createHash('sha256').update(body).digest('hex');
+  return {
+    ...coSign(decisionId),
+    action: 'x.reply',
+    resource: 'https://x.com/someone/status/9#reply',
+    pending_action: {
+      kind: 'write.perform',
+      medium: 'x.reply',
+      target: 'https://x.com/someone/status/9',
+      body,
+      body_hash,
+    },
+  };
+}
+
+async function newRoomWithWriteDecision(
+  prefix: string,
+  decisionId: string,
+  body: string,
+  over?: { bodyHash?: string },
+): Promise<string> {
+  const roomId = uniqueRoomId(prefix);
+  rooms.push(roomId);
+  await createRoom(pool, roomId, roomId, 'prince');
+  await appendDecision(pool, roomId, 'prince', writeDecision(decisionId, body, over));
+  return roomId;
+}
+
+async function writesPerformedOf(roomId: string, decisionId: string) {
+  const { rows } = await pool.query<{
+    payload: {
+      medium: string;
+      target: string;
+      backend: string;
+      ref: string | null;
+      ok: boolean;
+      error: string | null;
+    };
+  }>(
+    `SELECT payload FROM events
+      WHERE room_id = $1 AND event_type = 'write.performed' AND payload ->> 'decision_id' = $2`,
+    [roomId, decisionId],
+  );
+  return rows.map((r) => r.payload);
+}
+
 async function resolutionsOf(roomId: string, decisionId: string) {
   const { rows } = await pool.query<{
     payload: {
@@ -186,6 +243,60 @@ describe('the right human signs', () => {
     await sign(roomId, 'prince', 'dec_plain_1', 'APPROVED');
     const res = await resolutionsOf(roomId, 'dec_plain_1');
     expect(res[0].inspections).toBeUndefined();
+  });
+
+  it('ADR-020: an APPROVED write is performed through the backend and recorded as write.performed', async () => {
+    const roomId = await newRoomWithWriteDecision('w-ok', 'dec_w_ok', 'noted, thanks for the tag!');
+    const result = await sign(roomId, 'prince', 'dec_w_ok', 'APPROVED');
+    expect(result).toEqual({ ok: true });
+
+    // The Mock backend performed exactly one write — the co-signed body, never a real post.
+    expect(writeBackend.performed()).toHaveLength(1);
+    expect(writeBackend.performed()[0].body).toBe('noted, thanks for the tag!');
+    expect(writeBackend.performed()[0].idempotencyKey).toBe('dec_w_ok');
+
+    // And the room records the outcome — medium, target, backend, ref — as a write.performed event.
+    const writes = await writesPerformedOf(roomId, 'dec_w_ok');
+    expect(writes).toHaveLength(1);
+    expect(writes[0].ok).toBe(true);
+    expect(writes[0].backend).toBe('mock');
+    expect(writes[0].medium).toBe('x.reply');
+    expect(writes[0].ref).toMatch(/^mock:\/\//);
+  });
+
+  it('ADR-020: a DENIED write performs nothing and writes no write.performed event', async () => {
+    const roomId = await newRoomWithWriteDecision('w-deny', 'dec_w_deny', 'this will not be sent');
+    await sign(roomId, 'prince', 'dec_w_deny', 'DENIED');
+    expect(writeBackend.performed()).toHaveLength(0);
+    expect(await writesPerformedOf(roomId, 'dec_w_deny')).toHaveLength(0);
+  });
+
+  it('ADR-020: a body that no longer matches its hash is REFUSED — the backend is never called', async () => {
+    // The co-signature was over body_hash; a body edited between co-sign and fire must not be sent.
+    const roomId = await newRoomWithWriteDecision(
+      'w-tamper',
+      'dec_w_tamper',
+      'the REAL co-signed body',
+      {
+        bodyHash: createHash('sha256').update('a different body entirely').digest('hex'),
+      },
+    );
+    const result = await sign(roomId, 'prince', 'dec_w_tamper', 'APPROVED');
+    expect(result).toEqual({ ok: true }); // the approval stands; the SEND is what is refused
+    expect(writeBackend.performed()).toHaveLength(0); // backend never reached
+    const writes = await writesPerformedOf(roomId, 'dec_w_tamper');
+    expect(writes).toHaveLength(1);
+    expect(writes[0].ok).toBe(false);
+    expect(writes[0].error).toBe('rejected');
+  });
+
+  it('ADR-020: no backend wired — the write is recorded as not_configured, nothing is sent', async () => {
+    const roomId = await newRoomWithWriteDecision('w-nobackend', 'dec_w_nb', 'body');
+    deps.writeBackend = undefined; // a deployment that never configured a writer
+    await sign(roomId, 'prince', 'dec_w_nb', 'APPROVED');
+    const writes = await writesPerformedOf(roomId, 'dec_w_nb');
+    expect(writes[0].ok).toBe(false);
+    expect(writes[0].error).toBe('not_configured');
   });
 
   it('ADR-019: requestActionCommand records inspections on the decision (the in-process trusted path)', async () => {

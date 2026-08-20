@@ -13,6 +13,7 @@ import { subjectBasis } from '../tasks.js';
 // The shared co-sign machinery (S2.2): the one decision constructor and the DECISION interrupt, so a
 // pr.merge co-sign here and a protected-summon co-sign in commands/summon.ts are written one way.
 import { raiseDecisionInterrupts, writeCoSignDecision } from './coSign.js';
+import type { PendingAction } from '../events.js';
 import type { CommandContext, CommandDeps } from './context.js';
 
 // ============================================================================
@@ -65,6 +66,9 @@ export async function requestActionCommand(
     // decision. NEVER populated from the HTTP actions door body — a caller cannot assert its own screening
     // verdict; only server-side code that actually ran the scan passes this.
     inspections?: DecisionInspections;
+    // ADR-020: the executable OUTBOUND WRITE to hold on the decision, so an approval can fire it. Same trust
+    // boundary as inspections — IN-PROCESS only (a governed cycle that drafted the content), never the wire.
+    pendingAction?: PendingAction;
   },
 ): Promise<RequestActionResult> {
   // ── THE SUBJECT MUST BE JUSTIFIED, NOT ASSERTED (S12-N2, closed) ──────────────────────
@@ -163,6 +167,7 @@ export async function requestActionCommand(
     resource: input.resource,
     verdict,
     inspections: input.inspections,
+    pendingAction: input.pendingAction,
   });
 
   // The decision event's id, so an out-of-process caller (the S2.1b door) can poll this decision later.

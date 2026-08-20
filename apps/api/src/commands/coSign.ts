@@ -5,7 +5,7 @@ import {
   type DecisionInspections,
 } from '@playroom/shared';
 import type { Verdict } from '@playroom/fabric';
-import { appendDecision, type PendingSummonAction } from '../events.js';
+import { appendDecision, type PendingAction } from '../events.js';
 import { mandateFor } from '../mandates.js';
 import { humanMembersOfPrincipal } from '../members.js';
 import { raiseInterrupt } from '../interrupts.js';
@@ -39,7 +39,7 @@ export async function writeCoSignDecision(
     action: string;
     resource: string;
     verdict: Verdict;
-    pendingAction?: PendingSummonAction;
+    pendingAction?: PendingAction;
     /** ADR-019: what a trusted in-process cycle inspected (inbound screening / egress DLP). Recorded on the
      *  decision so a co-signer sees it and it rides into the tamper-evident chain. Absent for a plain action. */
     inspections?: DecisionInspections;

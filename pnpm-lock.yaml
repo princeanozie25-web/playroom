@@ -65,6 +65,9 @@ importers:
       '@playroom/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@playroom/write':
+        specifier: workspace:*
+        version: link:../../packages/write
       '@playroom/x-read':
         specifier: workspace:*
         version: link:../../packages/x-read
@@ -161,6 +164,8 @@ importers:
       zod:
         specifier: ^3.23.0
         version: 3.25.76
+
+  packages/write: {}
 
   packages/x-read: {}
 

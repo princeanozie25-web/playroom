@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import type { AgentAdapter } from '@playroom/shared';
+import type { WriteBackend } from '@playroom/write';
 import type { RoomBus } from '../bus.js';
 
 // ADR-004: which membership mode originated a command. 'connected' and 'bridged'
@@ -216,6 +217,12 @@ export interface CommandDeps {
    * fallback, but production request paths never discard a promise.
    */
   defer?: (label: string, task: () => Promise<unknown>) => boolean;
+  /**
+   * ADR-020: the OUTBOUND WRITE backend the write executor (fireWrite) performs through, on an APPROVED
+   * `write.perform` decision. Optional — a deployment or a test without it records the write as
+   * `not_configured` and performs nothing (never an accidental post). Server boot defaults it to the Mock.
+   */
+  writeBackend?: WriteBackend;
 }
 
 /** Schedule background work through its server owner, with a safe fallback for isolated commands. */

@@ -367,6 +367,34 @@ export const DecisionInspections = z.object({
 });
 export type DecisionInspections = z.infer<typeof DecisionInspections>;
 
+/** A held summon (S1.8) — the first executable kind an APPROVED co-sign can fire. */
+export const PendingSummonAction = z.object({
+  kind: z.literal('summon.initiate'),
+  member: z.string(), // the RESOLVED target — a room agent id, not a raw token
+  cause_seq: z.number(), // the emitting turn's event, so the fired summon answers what asked
+  intent: z.string(), // the sentence the summon's task records (tasks.intent is NOT NULL)
+  root_actor: z.string(), // the human at the head of the chain, preserved across the pause
+  root_is_human: z.boolean(),
+  depth: z.number(), // the summon's own depth, already incremented and cap-checked
+});
+
+/** A held OUTBOUND WRITE (ADR-020) — the second executable kind. An APPROVED co-sign fires it through the
+ *  write seam (an X reply, a GitHub comment, an email). Carries the exact co-signed body + its hash. */
+export const PendingWriteAction = z.object({
+  kind: z.literal('write.perform'),
+  medium: z.string(), // == the co-signed action, e.g. 'x.reply'
+  target: z.string(), // where it goes — a post URL, a repo issue/PR, an email recipient
+  body: z.string(), // the exact content co-signed (egress-screened before co-sign)
+  body_hash: z.string(), // sha256 of body — the commitment the co-signature is over
+});
+
+/** The executable action a CO_SIGN decision holds — a discriminated union, summon or outbound write. */
+export const PendingAction = z.discriminatedUnion('kind', [
+  PendingSummonAction,
+  PendingWriteAction,
+]);
+export type PendingAction = z.infer<typeof PendingAction>;
+
 export const DecisionEvent = z.object({
   ...eventBase,
   event_type: z.literal('decision'),
@@ -407,19 +435,9 @@ export const DecisionEvent = z.object({
      * S2.6, and approving one records the sign-off and runs nothing (RT-005 holds: no external effect).
      *
      * Optional, so every decision written before S2.2 — and every `pr.merge` since — parses unchanged.
-     * The one `kind` is `summon.initiate`; a discriminated union is how a second executable kind lands.
+     * `summon.initiate` was the first kind; `write.perform` (ADR-020) is the second — the union lands here.
      */
-    pending_action: z
-      .object({
-        kind: z.literal('summon.initiate'),
-        member: z.string(), // the RESOLVED target — a room agent id, not a raw token
-        cause_seq: z.number(), // the emitting turn's event, so the fired summon answers what asked
-        intent: z.string(), // the sentence the summon's task records (tasks.intent is NOT NULL)
-        root_actor: z.string(), // the human at the head of the chain, preserved across the pause
-        root_is_human: z.boolean(),
-        depth: z.number(), // the summon's own depth, already incremented and cap-checked
-      })
-      .optional(),
+    pending_action: PendingAction.optional(),
     /**
      * WHAT WAS INSPECTED (ADR-019). The inbound-screening / egress-DLP summaries a governed cycle attached
      * when it constructed this decision — so a co-signer sees what the input tried and whether the output
@@ -774,6 +792,27 @@ export const DecisionResolvedEvent = z.object({
 export type DecisionResolvedEvent = z.infer<typeof DecisionResolvedEvent>;
 
 /**
+ * AN OUTBOUND WRITE WAS PERFORMED (ADR-020) — the record that an APPROVED co-signed `write.perform` action
+ * actually ran through the write seam. The executor's analogue of the `summon` event: it records WHAT happened
+ * (medium, target, backend, ref or coded failure), never the body again (that is on the decision, egress-
+ * screened). `actor_id` on the event is 'system' — the executor, not a member, performed it.
+ */
+export const WritePerformedEvent = z.object({
+  ...eventBase,
+  event_type: z.literal('write.performed'),
+  payload: z.object({
+    decision_id: z.string(), // the co-signed decision whose approval fired this
+    medium: z.string(), // e.g. 'x.reply'
+    target: z.string(), // where it went
+    backend: z.string(), // which backend performed it — 'mock' | 'x' | 'github' | …
+    ref: z.string().nullable(), // the id/URL of what was written, or null on failure
+    ok: z.boolean(),
+    error: z.string().nullable(), // a coded WriteFailure when !ok, never a credential
+  }),
+});
+export type WritePerformedEvent = z.infer<typeof WritePerformedEvent>;
+
+/**
  * A STANDING ORDER WAS CREATED (S-LOOP) — a human authorised recurring work.
  *
  * The order confers no authority; this event records what recurs and who authorised it. `creator` is
@@ -970,6 +1009,7 @@ export const DocumentRemovedEvent = z.object({
 export type DocumentRemovedEvent = z.infer<typeof DocumentRemovedEvent>;
 
 export const ServerEvent = z.discriminatedUnion('event_type', [
+  WritePerformedEvent,
   DocumentAddedEvent,
   DocumentRemovedEvent,
   SummonEvent,
