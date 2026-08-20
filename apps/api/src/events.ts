@@ -901,6 +901,8 @@ export async function appendDocumentAdded(
     size_chars: number;
     declared_type: string;
     uploaded_by: string;
+    /** What inbound screening (ADR-017) saw in the content. Optional — a summary, never a gate. */
+    screening?: { risk: 'none' | 'low' | 'elevated'; signals: string[]; findings: number };
   },
 ): Promise<ServerEvent> {
   const { rows } = await pool.query<EventRow>(

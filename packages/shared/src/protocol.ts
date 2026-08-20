@@ -871,6 +871,20 @@ export type BriefingClearedEvent = z.infer<typeof BriefingClearedEvent>;
  * In the union for the same reason the briefing is: `rowToServerEvent` parses every replayed row
  * through the strict union, so a room holding one would not open at all if the type were unknown.
  */
+/**
+ * A COMPACT SCREENING ROLL-UP (S2.4 / ADR-017). What inbound screening SAW in a piece of untrusted text —
+ * the aggregate risk, the distinct steer shapes present, and how many findings in total. Small enough to
+ * ride in an event. It INFORMS a reader; it never blocked anything (governance is the guard).
+ */
+export const ScreeningSummary = z.object({
+  risk: z.enum(['none', 'low', 'elevated']),
+  /** Distinct signal kinds (e.g. 'instruction_override', 'exfiltration_lure'), deduped. */
+  signals: z.array(z.string()),
+  /** Total findings — a single text may trip one signal several times. */
+  findings: z.number(),
+});
+export type ScreeningSummary = z.infer<typeof ScreeningSummary>;
+
 export const DocumentAddedEvent = z.object({
   ...eventBase,
   event_type: z.literal('document.added'),
@@ -885,10 +899,13 @@ export const DocumentAddedEvent = z.object({
     /** SHA-256 of the text stored, so what was read can be checked against what was given. */
     content_hash: z.string(),
     size_chars: z.number(),
-    /** What the uploader SAID it is; the screen that checked it is mechanical, not a classifier. */
+    /** What the uploader SAID it is; the mechanical screen checks the CONTAINER (is it text?), not intent. */
     declared_type: z.string(),
     /** The human who gave it. A document an agent uploaded does not exist — the command refuses it. */
     uploaded_by: z.string(),
+    /** What inbound screening (ADR-017) saw in the content. OPTIONAL: absent on events written before
+     *  screening existed, so a room that predates it still replays. Present = it was screened. */
+    screening: ScreeningSummary.optional(),
   }),
 });
 export type DocumentAddedEvent = z.infer<typeof DocumentAddedEvent>;

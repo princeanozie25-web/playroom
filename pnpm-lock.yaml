@@ -56,6 +56,9 @@ importers:
       '@playroom/receipt':
         specifier: workspace:*
         version: link:../../packages/receipt
+      '@playroom/screen':
+        specifier: workspace:*
+        version: link:../../packages/screen
       '@playroom/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -145,6 +148,8 @@ importers:
       '@playroom/fabric':
         specifier: workspace:*
         version: link:../fabric
+
+  packages/screen: {}
 
   packages/shared:
     dependencies:

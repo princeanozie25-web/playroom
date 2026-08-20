@@ -13,6 +13,7 @@
     "@playroom/fabric": "workspace:*",
     "@playroom/hosts": "workspace:*",
     "@playroom/receipt": "workspace:*",
+    "@playroom/screen": "workspace:*",
     "@playroom/shared": "workspace:*",
     "@playroom/x-read": "workspace:*",
     "fastify": "^5.2.0",

@@ -22,6 +22,9 @@
       "path": "../../packages/receipt"
     },
     {
+      "path": "../../packages/screen"
+    },
+    {
       "path": "../../packages/x-read"
     }
   ]

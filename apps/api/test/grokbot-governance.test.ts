@@ -276,6 +276,10 @@ describe('grokbot governance — a mention becomes a co-signed, receipted reply,
         expect(cycle.proposed[0].decision).toBe('CO_SIGN');
         expect(cycle.proposed[0].posted).toBe(false);
         expect(GROKBOT_REPLY_ACTION).toBe('x.reply');
+        // Inbound screening (ADR-017) classified what the text tried to do and carried it to the co-signer —
+        // it informed, it did not gate (the CO_SIGN above is the guard).
+        expect(cycle.proposed[0].screening.risk).toBe('elevated');
+        expect(cycle.proposed[0].screening.signals).toContain('exfiltration_lure');
       } finally {
         await server.close();
       }

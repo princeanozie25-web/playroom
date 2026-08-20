@@ -6,6 +6,7 @@ import {
   ERROR_DOCUMENT_TOO_LARGE,
   ERROR_DOCUMENT_UNKNOWN,
 } from '@playroom/shared';
+import { screen as classifyText, summarize } from '@playroom/screen';
 import { appendDocumentAdded, appendDocumentRemoved } from '../events.js';
 import { memberRecord } from '../members.js';
 import {
@@ -115,6 +116,20 @@ export async function uploadDocumentCommand(
     return refuse(ERROR_DOCUMENT_NOT_TEXT, screen.reason!);
   }
 
+  // 4b. THE CONTENT SCREEN (ADR-017). The mechanical screen above checks the CONTAINER — is this text?
+  //     This one classifies the CONTENT: does it try to steer a reader (override instructions, claim
+  //     authority, lure a secret)? It NEVER refuses — a document is isolated, inert, and confers no
+  //     authority (SU-3), so a steer shape inside it cannot route around the mandate. The summary is
+  //     recorded on the room-visible event so the human who gave it, and anyone reading it, sees what it
+  //     tried to do. Recall over precision: a false flag costs a second glance, never an upload.
+  const screening = summarize([classifyText(input.content)]);
+  if (screening.risk !== 'none') {
+    deps.log.info(
+      { ...base, screening_risk: screening.risk, screening_signals: screening.signals },
+      'document screened: content carries steer shapes (recorded, not refused)',
+    );
+  }
+
   // 5. THE ROOM TOTAL. A per-document cap that allows ten documents recreates the problem it
   //    prevents, so the room is capped too — and it is refused at upload, where a person can act on
   //    it, rather than at assembly, where a member would silently get less than the room holds.
@@ -151,6 +166,7 @@ export async function uploadDocumentCommand(
     size_chars: doc.size_chars,
     declared_type: doc.declared_type,
     uploaded_by: doc.uploaded_by,
+    screening,
   });
   deps.bus.publish(input.roomId, event);
   deps.log.info(

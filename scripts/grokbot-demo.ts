@@ -64,6 +64,13 @@ async function main(): Promise<void> {
     console.log(`    verdict   : ${p.decision} (${p.reasonCode})`);
     console.log(`    receipt   : ${p.decisionId}`);
     console.log(`    resource  : ${p.resource}`);
+    const s = p.screening;
+    console.log(
+      `    screening : risk=${s.risk}` +
+        (s.signals.length
+          ? ` (${s.signals.join(', ')})  ← what the input tried; it informed, did not gate`
+          : ''),
+    );
     console.log(
       `    posted    : ${p.posted}  ← never auto-posted; a human signs the draft first\n`,
     );
