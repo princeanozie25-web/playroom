@@ -59,6 +59,9 @@ importers:
       '@playroom/receipt':
         specifier: workspace:*
         version: link:../../packages/receipt
+      '@playroom/reconcile':
+        specifier: workspace:*
+        version: link:../../packages/reconcile
       '@playroom/screen':
         specifier: workspace:*
         version: link:../../packages/screen
@@ -156,6 +159,8 @@ importers:
       '@playroom/fabric':
         specifier: workspace:*
         version: link:../fabric
+
+  packages/reconcile: {}
 
   packages/screen: {}
 

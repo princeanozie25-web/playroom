@@ -7,6 +7,7 @@ import {
   type ChainLink,
   type DetachedReceipt,
 } from '@playroom/receipt';
+import { reconcile, type ChainLinkView, type ReconcileResult } from '@playroom/reconcile';
 import { isRoomMember } from './members.js';
 
 // The tamper-evident audit chain (S2.3 / A3, Bible §17). A batch that reads the COMMITMENT events the room
@@ -211,6 +212,30 @@ export async function verifyAuditChain(pool: Pool): Promise<VerifyResult> {
   }
 
   return { ok: true, entries: rows.length, root: rows.length ? prev : null };
+}
+
+// ── KEEP THE SAME ROOM CONSISTENT ACROSS MACHINES (ADR-021) ────────────────────────────────────────
+//
+// Another host can verify whether its view of the committed history agrees with ours by comparing chain
+// LINK VIEWS — the minimum (position + linked hashes) the pure reconciler needs. `chainView` exports ours;
+// `reconcileWith` compares ours to a remote's and returns in_sync / one-ahead (fast-forward) / forked, with
+// the divergence point. It ships no payloads, only the hashes A3 already anchored.
+
+/** This machine's chain as reconcilable link views, ordered ascending (ADR-021). */
+export async function chainView(pool: Pool): Promise<ChainLinkView[]> {
+  const { rows } = await pool.query<{ seq: string; entry_hash: string; prev_hash: string }>(
+    'SELECT seq, entry_hash, prev_hash FROM audit_chain ORDER BY seq ASC',
+  );
+  return rows.map((r) => ({
+    seq: Number(r.seq),
+    entry_hash: r.entry_hash,
+    prev_hash: r.prev_hash,
+  }));
+}
+
+/** Reconcile this machine's chain against another host's exported view (ADR-021). */
+export async function reconcileWith(pool: Pool, remote: ChainLinkView[]): Promise<ReconcileResult> {
+  return reconcile(await chainView(pool), remote);
 }
 
 /** The current root — the newest entry_hash, the value to anchor externally. Null for an empty chain. */

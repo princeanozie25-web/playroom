@@ -20,6 +20,9 @@
       "path": "./packages/receipt"
     },
     {
+      "path": "./packages/reconcile"
+    },
+    {
       "path": "./packages/screen"
     },
     {

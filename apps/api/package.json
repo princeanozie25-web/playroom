@@ -14,6 +14,7 @@
     "@playroom/fabric": "workspace:*",
     "@playroom/hosts": "workspace:*",
     "@playroom/receipt": "workspace:*",
+    "@playroom/reconcile": "workspace:*",
     "@playroom/screen": "workspace:*",
     "@playroom/shared": "workspace:*",
     "@playroom/write": "workspace:*",
