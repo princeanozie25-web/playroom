@@ -68,8 +68,15 @@ async function main(): Promise<void> {
     console.log(
       `    screening : risk=${s.risk}` +
         (s.signals.length
-          ? ` (${s.signals.join(', ')})  ← what the input tried; it informed, did not gate`
+          ? ` (${s.signals.join(', ')})  ← what the INPUT tried; it informed, did not gate`
           : ''),
+    );
+    const e = p.egress;
+    console.log(
+      `    egress    : risk=${e.risk}` +
+        (e.labels.length
+          ? ` (${e.labels.join(', ')})  ← a secret in the OUTPUT; redacted, surfaced to the co-signer`
+          : '  ← the draft leaks nothing'),
     );
     console.log(
       `    posted    : ${p.posted}  ← never auto-posted; a human signs the draft first\n`,

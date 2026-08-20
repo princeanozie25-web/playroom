@@ -7,6 +7,11 @@ import {
   type ScreeningSummary,
   type ScreenResult,
 } from '@playroom/screen';
+import {
+  scan as scanEgress,
+  summarize as summarizeEgress,
+  type EgressSummary,
+} from '@playroom/egress';
 
 // ═══ THE GOVERNED GROKBOT CYCLE (ADR-015) ═══════════════════════════════════════════════════════════
 //
@@ -49,6 +54,11 @@ export interface ProposedReply {
    *  risk and the distinct steer shapes. It rode INTO the draft as inert data and is surfaced here so a
    *  co-signer sees what the input tried to do. It gated nothing; the decision below is the guard. */
   screening: ScreeningSummary;
+  /** What egress DLP (ADR-018) saw in the OUTBOUND draft — the reply text about to be put up for signature.
+   *  The other half of the exfiltration story: inbound screening flags the manipulation attempt, this
+   *  catches a secret that made it into the output. Carries no secret bytes. Informs the co-signer; the
+   *  reply is never posted anyway (RT-005). */
+  egress: EgressSummary;
   decision: string;
   reasonCode: string;
   decisionId: string | null;
@@ -76,6 +86,9 @@ export interface GrokbotCycleDeps {
   }) => Promise<GrokbotVerdict>;
   /** Screen untrusted external text before a model sees it. Defaults to {@link screenExternalText}. */
   screen?: (text: string) => string;
+  /** Canary tokens (ADR-018): exact strings that must never appear in an outbound draft. A hit is a critical
+   *  egress signal a co-signer should never approve. Optional; a room seeds these from its own honeytokens. */
+  canaries?: readonly string[];
 }
 
 /**
@@ -166,6 +179,10 @@ export async function runGrokbotCycle(
         },
         screenedText,
       });
+      // EGRESS DLP (ADR-018): scan the OUTBOUND draft for a secret before it is put up for signature. If the
+      // model was steered into echoing a credential, this is where it is caught — and the summary rides to the
+      // co-signer. It gates nothing here (the reply is co-signed and never auto-posted anyway).
+      const egress = summarizeEgress([scanEgress(draft, { canaries: deps.canaries })]);
       const resource = replyResource(mention, draft);
       const verdict = await deps.propose({
         clientMsgId: `grok-${mention.id}`,
@@ -179,6 +196,7 @@ export async function runGrokbotCycle(
         draft,
         resource,
         screening,
+        egress,
         decision: verdict.decision,
         reasonCode: verdict.reasonCode,
         decisionId: verdict.decisionId,

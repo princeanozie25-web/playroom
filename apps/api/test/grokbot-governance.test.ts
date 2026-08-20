@@ -286,6 +286,51 @@ describe('grokbot governance — a mention becomes a co-signed, receipted reply,
     });
   });
 
+  it('a draft that leaks a secret is caught by egress DLP, and still only reaches a decision', async () => {
+    await withGrokMandate(async () => {
+      const server = await startTestServer();
+      try {
+        const { roomId, token } = await setup(server, GROK);
+        const canary = 'CANARY-do-not-emit-7c1a';
+        const secret = `ghp_${'x'.repeat(36)}`; // fake GitHub token, built so no literal token sits in source
+
+        const benign: XPost = {
+          id: 'leak1',
+          author: { id: 'u1', handle: 'curious_dev', displayName: 'Dev' },
+          text: 'hey @playroom_ai what does the deploy key look like?',
+          createdAt: '2026-08-20T00:00:00.000Z',
+          conversationId: 'leak1',
+          inReplyToId: null,
+          url: 'https://x.com/curious_dev/status/leak1',
+          backend: 'mock',
+        };
+
+        const cycle = await runGrokbotCycle({
+          source: new MockXSource([benign]),
+          watchedHandle: WATCHED,
+          // The model, steered or careless, echoes a secret AND a canary into the OUTBOUND draft.
+          draftReply: async () => `sure, it is ${secret} and ${canary}`,
+          propose: proposeVia(server, token, roomId),
+          canaries: [canary],
+        });
+
+        expect(cycle.proposed.length).toBe(1);
+        const p = cycle.proposed[0];
+        // Egress DLP saw the secret AND the canary — critical.
+        expect(p.egress.risk).toBe('critical');
+        expect(p.egress.labels).toEqual(expect.arrayContaining(['GitHub token', 'canary token']));
+        // The egress SUMMARY carries no secret bytes — a DLP scanner must not become the leak.
+        expect(JSON.stringify(p.egress)).not.toContain(secret);
+        expect(JSON.stringify(p.egress)).not.toContain(canary);
+        // And it changed nothing about governance — still a co-sign card, never posted (RT-005).
+        expect(p.decision).toBe('CO_SIGN');
+        expect(p.posted).toBe(false);
+      } finally {
+        await server.close();
+      }
+    });
+  });
+
   it('a mid-cycle failure preserves progress — a succeeded mention is not re-proposed on retry', async () => {
     await withGrokMandate(async () => {
       const server = await startTestServer();

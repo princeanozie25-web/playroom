@@ -13,6 +13,9 @@
       "path": "../../packages/adapters"
     },
     {
+      "path": "../../packages/egress"
+    },
+    {
       "path": "../../packages/fabric"
     },
     {

@@ -10,6 +10,7 @@
     "@fastify/websocket": "^11.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@playroom/adapters": "workspace:*",
+    "@playroom/egress": "workspace:*",
     "@playroom/fabric": "workspace:*",
     "@playroom/hosts": "workspace:*",
     "@playroom/receipt": "workspace:*",
