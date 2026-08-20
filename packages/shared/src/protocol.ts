@@ -327,6 +327,46 @@ export const AgentTurnCompleted = z.object({
 // wins and the card yields to it: `subject` is the member, and the human sentence is
 // derived from `reason_code` in the UI, because the code is data and the sentence is
 // presentation.
+/**
+ * A COMPACT SCREENING ROLL-UP (S2.4 / ADR-017). What inbound screening SAW in a piece of untrusted text —
+ * the aggregate risk, the distinct steer shapes present, and how many findings in total. Small enough to
+ * ride in an event. It INFORMS a reader; it never blocked anything (governance is the guard).
+ */
+export const ScreeningSummary = z.object({
+  risk: z.enum(['none', 'low', 'elevated']),
+  /** Distinct signal kinds (e.g. 'instruction_override', 'exfiltration_lure'), deduped. */
+  signals: z.array(z.string()),
+  /** Total findings — a single text may trip one signal several times. */
+  findings: z.number(),
+});
+export type ScreeningSummary = z.infer<typeof ScreeningSummary>;
+
+/**
+ * A COMPACT EGRESS ROLL-UP (ADR-018). What egress DLP saw in OUTBOUND content — the aggregate risk, the
+ * distinct secret kinds, and how many. Carries NO secret bytes (labels are kind-names). Mirror of the
+ * inbound {@link ScreeningSummary}.
+ */
+export const EgressSummary = z.object({
+  risk: z.enum(['none', 'elevated', 'critical']),
+  /** Distinct secret-kind labels (e.g. 'GitHub token', 'canary token'), deduped. Never a secret byte. */
+  labels: z.array(z.string()),
+  findings: z.number(),
+});
+export type EgressSummary = z.infer<typeof EgressSummary>;
+
+/**
+ * WHAT THE FABRIC INSPECTED FOR A DECISION (ADR-019). The inbound-screening and egress-DLP summaries a
+ * governed cycle computed, bound onto the decision (and carried to its resolution) so they ride into the
+ * tamper-evident audit chain and the detached receipt — a co-signer sees what the input tried and whether
+ * the output leaked, and a third party can verify the same record afterwards. Both halves optional: a
+ * decision with neither (a plain pr.merge) omits the field entirely, and every decision predating this parses.
+ */
+export const DecisionInspections = z.object({
+  inbound: ScreeningSummary.optional(),
+  egress: EgressSummary.optional(),
+});
+export type DecisionInspections = z.infer<typeof DecisionInspections>;
+
 export const DecisionEvent = z.object({
   ...eventBase,
   event_type: z.literal('decision'),
@@ -380,6 +420,14 @@ export const DecisionEvent = z.object({
         depth: z.number(), // the summon's own depth, already incremented and cap-checked
       })
       .optional(),
+    /**
+     * WHAT WAS INSPECTED (ADR-019). The inbound-screening / egress-DLP summaries a governed cycle attached
+     * when it constructed this decision — so a co-signer sees what the input tried and whether the output
+     * leaked, tamper-evidently (this payload is hashed into the audit chain). Optional: a plain decision
+     * omits it, and every decision written before ADR-019 parses. Attached only by a TRUSTED in-process
+     * constructor, never accepted from the wire (a caller cannot assert its own clean screening verdict).
+     */
+    inspections: DecisionInspections.optional(),
   }),
 });
 
@@ -715,6 +763,12 @@ export const DecisionResolvedEvent = z.object({
     resolution: z.string(), // APPROVED | DENIED — open string on the wire, dispatched-on in the engine
     signed_by: z.string(), // the HUMAN member who signed; an agent can never appear here (S2.2)
     signer_principal: z.string(), // the required_signer principal they signed as
+    /**
+     * CARRIED FORWARD FROM THE DECISION (ADR-019). The resolution copies the decision's inspections so the
+     * DETACHED RECEIPT — built from this event — carries them too, and a third party verifying the receipt
+     * sees the same screening/egress summary the co-signer saw. Optional (mirrors the decision's field).
+     */
+    inspections: DecisionInspections.optional(),
   }),
 });
 export type DecisionResolvedEvent = z.infer<typeof DecisionResolvedEvent>;
@@ -871,20 +925,6 @@ export type BriefingClearedEvent = z.infer<typeof BriefingClearedEvent>;
  * In the union for the same reason the briefing is: `rowToServerEvent` parses every replayed row
  * through the strict union, so a room holding one would not open at all if the type were unknown.
  */
-/**
- * A COMPACT SCREENING ROLL-UP (S2.4 / ADR-017). What inbound screening SAW in a piece of untrusted text —
- * the aggregate risk, the distinct steer shapes present, and how many findings in total. Small enough to
- * ride in an event. It INFORMS a reader; it never blocked anything (governance is the guard).
- */
-export const ScreeningSummary = z.object({
-  risk: z.enum(['none', 'low', 'elevated']),
-  /** Distinct signal kinds (e.g. 'instruction_override', 'exfiltration_lure'), deduped. */
-  signals: z.array(z.string()),
-  /** Total findings — a single text may trip one signal several times. */
-  findings: z.number(),
-});
-export type ScreeningSummary = z.infer<typeof ScreeningSummary>;
-
 export const DocumentAddedEvent = z.object({
   ...eventBase,
   event_type: z.literal('document.added'),

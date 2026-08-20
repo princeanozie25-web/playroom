@@ -24,7 +24,10 @@ const pool = testPool();
 const rooms: string[] = [];
 const creds: string[] = [];
 
-async function commitmentRoom(creator = 'prince'): Promise<{ roomId: string; decisionId: string }> {
+async function commitmentRoom(
+  creator = 'prince',
+  inspections?: DecisionPayload['inspections'],
+): Promise<{ roomId: string; decisionId: string }> {
   const roomId = uniqueRoomId('receipt');
   rooms.push(roomId);
   await createRoom(pool, roomId, roomId, creator);
@@ -43,6 +46,7 @@ async function commitmentRoom(creator = 'prince'): Promise<{ roomId: string; dec
     required_signer: 'principal:prince',
     effective_mandate_hash: 'sha256:mandate',
     policy_version: 'playroom-policy/1.0',
+    inspections,
   };
   await appendDecision(pool, roomId, creator, decision);
   await appendDecisionResolved(pool, roomId, creator, {
@@ -50,6 +54,7 @@ async function commitmentRoom(creator = 'prince'): Promise<{ roomId: string; dec
     resolution: 'APPROVED',
     signed_by: creator,
     signer_principal: 'principal:prince',
+    inspections, // ADR-019: carried forward, as signDecision does, so the detached receipt exposes it
   });
   return { roomId, decisionId };
 }
@@ -91,6 +96,42 @@ describe('independent receipt verification (ADR-016)', () => {
     expect(receipt!.decision_id).toBe(decisionId);
     expect(receipt!.resolution).toBe('APPROVED');
     expect(receipt!.meta.room_id).toBe(roomId);
+  });
+
+  it('ADR-019: the detached receipt exposes what was inspected, tamper-evidently and verifiably', async () => {
+    const inspections = {
+      inbound: { risk: 'elevated' as const, signals: ['instruction_override'], findings: 2 },
+      egress: { risk: 'critical' as const, labels: ['canary token'], findings: 1 },
+    };
+    const { decisionId } = await commitmentRoom('prince', inspections);
+    await chainCommitmentEvents(pool);
+
+    const receipt = (await detachedReceiptForDecision(
+      pool,
+      decisionId,
+      'prince',
+    )) as DetachedReceipt;
+    // The inspections ride in the receipt's source_payload — inside the hashed body, so the open verifier's
+    // body check already covers them: a third party sees what the input tried and whether the output leaked.
+    expect((receipt.source_payload as { inspections?: unknown }).inspections).toEqual(inspections);
+    expect(verifyDetachedReceipt(receipt).ok).toBe(true);
+
+    // Tamper the recorded inspection AFTER anchoring — flip the egress risk to hide a leak. The body no
+    // longer hashes to the chain entry, and the open verifier refuses without asking us.
+    await pool.query(
+      `UPDATE events
+          SET payload = jsonb_set(payload, '{inspections,egress,risk}', '"none"')
+        WHERE event_type = 'decision.resolved' AND payload ->> 'decision_id' = $1`,
+      [decisionId],
+    );
+    const tampered = (await detachedReceiptForDecision(
+      pool,
+      decisionId,
+      'prince',
+    )) as DetachedReceipt;
+    const v = verifyDetachedReceipt(tampered);
+    expect(v.ok).toBe(false);
+    expect(v.checks.body).toBe(false);
   });
 
   it('a non-member exports nothing — a receipt is not a probe for which decisions exist', async () => {

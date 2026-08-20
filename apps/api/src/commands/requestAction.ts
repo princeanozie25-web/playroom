@@ -1,6 +1,10 @@
 import { performance } from 'node:perf_hooks';
 import { evaluate, type Verdict } from '@playroom/fabric';
-import { ERROR_INTERRUPT_BUDGET, ERROR_SUBJECT_NOT_JUSTIFIED } from '@playroom/shared';
+import {
+  ERROR_INTERRUPT_BUDGET,
+  ERROR_SUBJECT_NOT_JUSTIFIED,
+  type DecisionInspections,
+} from '@playroom/shared';
 // The process-wide mandate cache, shared with the handoff and the turn stamp (S1.3). It used to
 // live here as a module-local `let`, which meant every new reader grew its own.
 import { mandateFor } from '../mandates.js';
@@ -57,6 +61,10 @@ export async function requestActionCommand(
     // evaluator so a host grant's `requires` can be met. Absent means no fact holds — a conditional grant
     // then BLOCKs, which is deny-by-default for a condition nobody established.
     facts?: readonly string[];
+    // ADR-019: what a TRUSTED IN-PROCESS cycle inspected (inbound screening / egress DLP), to bind onto the
+    // decision. NEVER populated from the HTTP actions door body — a caller cannot assert its own screening
+    // verdict; only server-side code that actually ran the scan passes this.
+    inspections?: DecisionInspections;
   },
 ): Promise<RequestActionResult> {
   // ── THE SUBJECT MUST BE JUSTIFIED, NOT ASSERTED (S12-N2, closed) ──────────────────────
@@ -154,6 +162,7 @@ export async function requestActionCommand(
     action: input.action,
     resource: input.resource,
     verdict,
+    inspections: input.inspections,
   });
 
   // The decision event's id, so an out-of-process caller (the S2.1b door) can poll this decision later.

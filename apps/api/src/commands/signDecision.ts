@@ -154,6 +154,9 @@ export async function signDecisionCommand(
       resolution: input.resolution,
       signed_by: ctx.actorId,
       signer_principal: d.required_signer,
+      // ADR-019: carry the decision's inspections forward, so the detached receipt (built from THIS event)
+      // exposes what was inspected to a third-party verifier — the same summary the co-signer saw.
+      inspections: d.inspections,
     });
   } catch (err) {
     // A resolution raced past step 4 and lost the unique index (migration 020). That is single-use

@@ -11,8 +11,9 @@ import {
 } from '@playroom/shared';
 import { testPool, uniqueRoomId } from './support.js';
 import { RoomBus } from '../src/bus.js';
-import { appendDecision, createRoom, type DecisionPayload } from '../src/events.js';
+import { admitMember, appendDecision, createRoom, type DecisionPayload } from '../src/events.js';
 import { executeCommand, type CommandDeps } from '../src/commands/index.js';
+import { requestActionCommand } from '../src/commands/requestAction.js';
 import { mandateFor } from '../src/mandates.js';
 
 /**
@@ -70,10 +71,16 @@ const currentClaudeHash = (): string => {
   return m.hash;
 };
 
+/** A screening + egress roll-up a governed cycle would have attached (ADR-019). */
+const SAMPLE_INSPECTIONS = {
+  inbound: { risk: 'elevated' as const, signals: ['instruction_override'], findings: 2 },
+  egress: { risk: 'critical' as const, labels: ['canary token'], findings: 1 },
+};
+
 /** A pr.merge CO_SIGN decision under claude-main's mandate, signer = principal:prince. */
 function coSign(
   decisionId: string,
-  opts?: { mandateHash?: string; decision?: string },
+  opts?: { mandateHash?: string; decision?: string; inspections?: DecisionPayload['inspections'] },
 ): DecisionPayload {
   return {
     decision_id: decisionId,
@@ -89,13 +96,14 @@ function coSign(
     required_signer: 'principal:prince',
     effective_mandate_hash: opts?.mandateHash ?? currentClaudeHash(),
     policy_version: 'playroom-policy/1.0',
+    inspections: opts?.inspections,
   };
 }
 
 async function newRoomWithDecision(
   prefix: string,
   decisionId: string,
-  opts?: { mandateHash?: string; decision?: string },
+  opts?: { mandateHash?: string; decision?: string; inspections?: DecisionPayload['inspections'] },
 ): Promise<string> {
   const roomId = uniqueRoomId(prefix);
   rooms.push(roomId);
@@ -125,7 +133,12 @@ async function sign(
 
 async function resolutionsOf(roomId: string, decisionId: string) {
   const { rows } = await pool.query<{
-    payload: { resolution: string; signed_by: string; signer_principal: string };
+    payload: {
+      resolution: string;
+      signed_by: string;
+      signer_principal: string;
+      inspections?: DecisionPayload['inspections'];
+    };
   }>(
     `SELECT payload FROM events
       WHERE room_id = $1 AND event_type = 'decision.resolved' AND payload ->> 'decision_id' = $2`,
@@ -154,6 +167,56 @@ describe('the right human signs', () => {
     const res = await resolutionsOf(roomId, 'dec_deny_1');
     expect(res).toHaveLength(1);
     expect(res[0].resolution).toBe('DENIED');
+  });
+
+  it('ADR-019: carries the decision’s inspections forward onto the resolution', async () => {
+    // A governed cycle attached screening + egress summaries to the decision. Signing must copy them to the
+    // resolution, so the detached receipt (built from the resolution) exposes what was inspected.
+    const roomId = await newRoomWithDecision('sign-inspect', 'dec_inspect_1', {
+      inspections: SAMPLE_INSPECTIONS,
+    });
+    const result = await sign(roomId, 'prince', 'dec_inspect_1', 'APPROVED');
+    expect(result).toEqual({ ok: true });
+    const res = await resolutionsOf(roomId, 'dec_inspect_1');
+    expect(res[0].inspections).toEqual(SAMPLE_INSPECTIONS);
+  });
+
+  it('ADR-019: a decision with no inspections resolves without the field (a plain pr.merge)', async () => {
+    const roomId = await newRoomWithDecision('sign-plain', 'dec_plain_1');
+    await sign(roomId, 'prince', 'dec_plain_1', 'APPROVED');
+    const res = await resolutionsOf(roomId, 'dec_plain_1');
+    expect(res[0].inspections).toBeUndefined();
+  });
+
+  it('ADR-019: requestActionCommand records inspections on the decision (the in-process trusted path)', async () => {
+    // Inspections is an IN-PROCESS parameter: a trusted cycle that actually ran the scans passes it to the
+    // decision constructor directly. (The HTTP actions door never carries it — the command union omits it.)
+    const roomId = uniqueRoomId('ra-inspect');
+    rooms.push(roomId);
+    await createRoom(pool, roomId, roomId, 'prince');
+    await admitMember(pool, roomId, 'claude-main');
+
+    const res = await requestActionCommand(
+      deps,
+      { actorId: 'claude-main', mode: 'hosted' },
+      {
+        roomId,
+        clientMsgId: 'ra-inspect-1',
+        subject: 'claude-main',
+        action: 'pr.merge',
+        resource: 'repo:playroom/playroom#pr-9',
+        inspections: SAMPLE_INSPECTIONS,
+      },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('unreachable');
+    expect(res.decisionId).not.toBeNull(); // a protected pr.merge writes a decision (CO_SIGN)
+
+    const { rows } = await pool.query<{
+      payload: { inspections?: DecisionPayload['inspections'] };
+    }>(`SELECT payload FROM events WHERE room_id = $1 AND event_type = 'decision'`, [roomId]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload.inspections).toEqual(SAMPLE_INSPECTIONS);
   });
 });
 

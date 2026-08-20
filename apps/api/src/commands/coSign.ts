@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { ERROR_INTERRUPT_BUDGET, type ServerEvent } from '@playroom/shared';
+import {
+  ERROR_INTERRUPT_BUDGET,
+  type ServerEvent,
+  type DecisionInspections,
+} from '@playroom/shared';
 import type { Verdict } from '@playroom/fabric';
 import { appendDecision, type PendingSummonAction } from '../events.js';
 import { mandateFor } from '../mandates.js';
@@ -36,6 +40,9 @@ export async function writeCoSignDecision(
     resource: string;
     verdict: Verdict;
     pendingAction?: PendingSummonAction;
+    /** ADR-019: what a trusted in-process cycle inspected (inbound screening / egress DLP). Recorded on the
+     *  decision so a co-signer sees it and it rides into the tamper-evident chain. Absent for a plain action. */
+    inspections?: DecisionInspections;
   },
 ): Promise<ServerEvent> {
   const decisionId = `dec_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
@@ -55,6 +62,7 @@ export async function writeCoSignDecision(
     effective_mandate_hash: input.verdict.effective_mandate_hash,
     policy_version: input.verdict.policy_version,
     pending_action: input.pendingAction,
+    inspections: input.inspections,
   });
   deps.bus.publish(input.roomId, event); // §12 ordering law: persisted before it fans out.
   return event;

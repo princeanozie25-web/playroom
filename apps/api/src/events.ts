@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
-import { ServerEvent, type AgentMessage } from '@playroom/shared';
+import { ServerEvent, type AgentMessage, type DecisionInspections } from '@playroom/shared';
 
 export interface RoomRow {
   id: string;
@@ -495,6 +495,9 @@ export interface DecisionPayload {
   policy_version: string | null;
   /** S2.2: the executable action a CO_SIGN holds. Absent for a ruling with no executor (pr.merge). */
   pending_action?: PendingSummonAction;
+  /** ADR-019: what the fabric inspected (inbound screening / egress DLP). Bound by a trusted in-process
+   *  constructor, hashed into the audit chain with the rest of the payload. Absent for a plain decision. */
+  inspections?: DecisionInspections;
 }
 
 // Append a decision event. No migration was needed: `payload` is JSONB and
@@ -528,6 +531,9 @@ export interface DecisionResolvedPayload {
   resolution: 'APPROVED' | 'DENIED';
   signed_by: string; // the human member who signed
   signer_principal: string; // the required_signer principal they signed as
+  /** ADR-019: carried forward from the decision so the detached receipt (built from this event) exposes
+   *  what was inspected. Optional; absent when the decision carried none. */
+  inspections?: DecisionInspections;
 }
 
 export async function appendDecisionResolved(

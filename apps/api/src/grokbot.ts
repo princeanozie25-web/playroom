@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { XMention, XReadCursor, XReadSource, XThread } from '@playroom/x-read';
+import type { DecisionInspections } from '@playroom/shared';
 import {
   screen as classifyText,
   neutralize,
@@ -78,11 +79,15 @@ export interface GrokbotCycleDeps {
     screenedText: string;
   }) => Promise<string>;
   /** Submit the drafted reply as a GOVERNED action and return the fabric's verdict. This is the only path
-   *  a reply takes toward being posted, and it does not post — it reaches a decision + receipt. */
+   *  a reply takes toward being posted, and it does not post — it reaches a decision + receipt. `inspections`
+   *  is what this cycle screened (inbound) and scanned (egress); an IN-PROCESS propose binds it onto the
+   *  decision (ADR-019), while a propose that crosses the untrusted HTTP door drops it (the door never
+   *  accepts a caller's own screening verdict). */
   propose: (input: {
     clientMsgId: string;
     action: string;
     resource: string;
+    inspections: DecisionInspections;
   }) => Promise<GrokbotVerdict>;
   /** Screen untrusted external text before a model sees it. Defaults to {@link screenExternalText}. */
   screen?: (text: string) => string;
@@ -188,6 +193,9 @@ export async function runGrokbotCycle(
         clientMsgId: `grok-${mention.id}`,
         action: GROKBOT_REPLY_ACTION,
         resource,
+        // What this cycle inspected, to bind onto the decision (ADR-019): the inbound summary over the
+        // mention + thread, and the egress summary over the draft. Same objects surfaced on ProposedReply.
+        inspections: { inbound: screening, egress },
       });
 
       proposed.push({
